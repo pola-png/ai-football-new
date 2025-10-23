@@ -1,11 +1,7 @@
 {
-  "github": {
-    "silent": true
-  },
-  "buildCommand": "flutter build web --release",
+  "buildCommand": "bash build.sh",
   "outputDirectory": "build/web",
-  "installCommand": "flutter pub get",
-  "framework": null,
+  "installCommand": "echo 'Installing Flutter...'",
   "rewrites": [
     {
       "source": "/(.*)",
