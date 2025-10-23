@@ -8,7 +8,7 @@ import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:intl/intl.dart';
 
 import 'package:flutter/services.dart';
-
+import 'config.dart';
 
 import 'dart:async';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -28,8 +28,8 @@ void main() async {
 void _initializeServices() async {
   try {
     await Supabase.initialize(
-      url: 'https://wlrukpxzyqrjepovabei.supabase.co',
-      anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndscnVrcHh6eXFyamVwb3ZhYmVpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkwNzM0MjgsImV4cCI6MjA3NDY0OTQyOH0.nuwcFPs2sXDCpjuIetFO1l__ZVdMD5PuJfm81s_JSCw',
+      url: AppConfig.supabaseUrl,
+      anonKey: AppConfig.supabaseAnonKey,
     );
     
     NotificationService.initialize();
