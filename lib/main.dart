@@ -11,8 +11,6 @@ import 'package:flutter/services.dart';
 
 
 import 'dart:async';
-import 'package:google_mobile_ads/google_mobile_ads.dart';
-import 'dart:ui';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -29,9 +27,6 @@ void main() async {
 
 void _initializeServices() async {
   try {
-    MobileAds.instance.initialize();
-    RewardedAdManager.loadAd();
-    
     await Supabase.initialize(
       url: 'https://wlrukpxzyqrjepovabei.supabase.co',
       anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndscnVrcHh6eXFyamVwb3ZhYmVpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkwNzM0MjgsImV4cCI6MjA3NDY0OTQyOH0.nuwcFPs2sXDCpjuIetFO1l__ZVdMD5PuJfm81s_JSCw',
@@ -559,15 +554,10 @@ class _CommunityScreenState extends State<CommunityScreen> {
               return ListView.builder(
                 controller: _scrollController,
                 padding: const EdgeInsets.only(bottom: 8, top: 8),
-                itemCount: messages.length + (messages.length ~/ 2),
+                itemCount: messages.length,
                 reverse: false,
                 itemBuilder: (context, index) {
-                  if ((index + 1) % 3 == 0) {
-                    return const AdBannerWidget();
-                  }
-                  final messageIndex = index - (index ~/ 3);
-                  if (messageIndex >= messages.length) return const SizedBox.shrink();
-                  final message = messages[messageIndex];
+                  final message = messages[index];
                   return ChatBubble(message: message, messageId: message['id'].toString());
                 },
               );
@@ -708,121 +698,7 @@ class ChatBubble extends StatelessWidget {
   }
 }
 
-class AdBannerWidget extends StatefulWidget {
-  const AdBannerWidget({super.key});
-  @override
-  State<AdBannerWidget> createState() => _AdBannerWidgetState();
-}
 
-class _AdBannerWidgetState extends State<AdBannerWidget> {
-  BannerAd? _bannerAd;
-  bool _isLoaded = false;
-  bool _isDisposed = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadAd();
-  }
-
-  void _loadAd() {
-    if (_isDisposed) return;
-    _bannerAd = BannerAd(
-      adUnitId: 'ca-app-pub-3088816615654692/8974343280',
-      size: AdSize.banner,
-      request: const AdRequest(),
-      listener: BannerAdListener(
-        onAdLoaded: (_) {
-          if (!_isDisposed && mounted) {
-            setState(() => _isLoaded = true);
-          }
-        },
-        onAdFailedToLoad: (ad, error) {
-          ad.dispose();
-          if (!_isDisposed && mounted) {
-            setState(() => _isLoaded = false);
-          }
-        },
-      ),
-    )..load();
-  }
-
-  @override
-  void dispose() {
-    _isDisposed = true;
-    _bannerAd?.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_bannerAd != null && _isLoaded && !_isDisposed) {
-      return Container(
-        margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: Theme.of(context).cardColor.withValues(alpha: 0.3),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        width: _bannerAd!.size.width.toDouble(),
-        height: _bannerAd!.size.height.toDouble(),
-        child: AdWidget(ad: _bannerAd!),
-      );
-    }
-    return const SizedBox(height: 60); // Placeholder height to prevent layout shifts
-  }
-}
-
-class NativeAdWidget extends StatefulWidget {
-  const NativeAdWidget({super.key});
-  @override
-  State<NativeAdWidget> createState() => _NativeAdWidgetState();
-}
-
-class _NativeAdWidgetState extends State<NativeAdWidget> {
-  NativeAd? _nativeAd;
-  bool _isLoaded = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadAd();
-  }
-
-  void _loadAd() {
-    _nativeAd = NativeAd(
-      adUnitId: 'ca-app-pub-3088816615654692/5052884920',
-      request: const AdRequest(),
-      listener: NativeAdListener(
-        onAdLoaded: (_) => setState(() => _isLoaded = true),
-        onAdFailedToLoad: (ad, error) => ad.dispose(),
-      ),
-      nativeTemplateStyle: NativeTemplateStyle(
-        templateType: TemplateType.medium,
-        mainBackgroundColor: const Color(0xFF172A46),
-        cornerRadius: 10.0,
-      ),
-    )..load();
-  }
-
-  @override
-  void dispose() {
-    _nativeAd?.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_nativeAd != null && _isLoaded) {
-      return Container(
-        margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-        height: 300,
-        child: AdWidget(ad: _nativeAd!),
-      );
-    }
-    return const SizedBox.shrink();
-  }
-}
 
 class AnalyticsService {
   // Track events in Supabase
@@ -901,45 +777,7 @@ class NotificationService {
   }
 }
 
-class RewardedAdManager {
-  static RewardedAd? _rewardedAd;
-  static bool _isLoaded = false;
 
-  static void loadAd() {
-    RewardedAd.load(
-      adUnitId: 'ca-app-pub-3088816615654692/7661261618',
-      request: const AdRequest(),
-      rewardedAdLoadCallback: RewardedAdLoadCallback(
-        onAdLoaded: (ad) {
-          _rewardedAd = ad;
-          _isLoaded = true;
-        },
-        onAdFailedToLoad: (error) {
-          _isLoaded = false;
-        },
-      ),
-    );
-  }
-
-  static void showAd(Function onRewarded) {
-    if (_rewardedAd != null && _isLoaded) {
-      _rewardedAd!.show(
-        onUserEarnedReward: (ad, reward) {
-          onRewarded();
-        },
-      );
-      _rewardedAd!.fullScreenContentCallback = FullScreenContentCallback(
-        onAdDismissedFullScreenContent: (ad) {
-          ad.dispose();
-          _isLoaded = false;
-          loadAd();
-        },
-      );
-    }
-  }
-
-  static bool get isLoaded => _isLoaded;
-}
 
 class FreePredictionsWidget extends StatefulWidget {
   const FreePredictionsWidget({super.key});
@@ -948,7 +786,6 @@ class FreePredictionsWidget extends StatefulWidget {
 }
 
 class _FreePredictionsWidgetState extends State<FreePredictionsWidget> {
-  final Set<String> _unlockedPredictions = {};
   late Stream<List<Map<String, dynamic>>> _predictionsStream;
   bool _isRefreshing = false;
 
@@ -976,11 +813,7 @@ class _FreePredictionsWidgetState extends State<FreePredictionsWidget> {
     }
   }
 
-  void _unlockPrediction(String predictionId) {
-    setState(() {
-      _unlockedPredictions.add(predictionId);
-    });
-  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -1065,19 +898,14 @@ class _FreePredictionsWidgetState extends State<FreePredictionsWidget> {
             final posts = snapshot.data!;
             return ListView.builder(
               physics: const AlwaysScrollableScrollPhysics(),
-              itemCount: posts.length + posts.length,
+              itemCount: posts.length,
               itemBuilder: (context, index) {
-                if (index.isOdd) {
-                  return const AdBannerWidget();
-                }
-                final entry = posts[index ~/ 2];
+                final entry = posts[index];
                 return PredictionCard(
                   p: entry, 
                   entry: entry, 
                   isAdmin: isAdmin, 
                   tier: 'free',
-                  isUnlocked: _unlockedPredictions.contains(entry['id'].toString()),
-                  onUnlock: () => _unlockPrediction(entry['id'].toString()),
                 );
               },
             );
@@ -1578,12 +1406,9 @@ class VIPTierPredictionsList extends StatelessWidget {
           }
           final predictions = snapshot.data!;
           return ListView.builder(
-            itemCount: predictions.length + predictions.length,
+            itemCount: predictions.length,
             itemBuilder: (context, index) {
-              if (index.isOdd) {
-                return const AdBannerWidget();
-              }
-              final entry = predictions[index ~/ 2];
+              final entry = predictions[index];
               return PredictionCard(p: entry, entry: entry, isAdmin: isAdmin, tier: tier);
             },
           );
@@ -1600,16 +1425,12 @@ class PredictionCard extends StatefulWidget {
     required this.entry,
     required this.isAdmin,
     required this.tier,
-    this.isUnlocked = true,
-    this.onUnlock,
   });
 
   final Map<dynamic, dynamic> p;
   final Map<String, dynamic> entry;
   final bool isAdmin;
   final String tier;
-  final bool isUnlocked;
-  final VoidCallback? onUnlock;
 
   @override
   State<PredictionCard> createState() => _PredictionCardState();
@@ -1769,39 +1590,6 @@ class _PredictionCardState extends State<PredictionCard> {
                         ),
                       ],
                     ),
-                    if (widget.tier == 'free' && !widget.isUnlocked)
-                      Positioned.fill(
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: BackdropFilter(
-                            filter: ImageFilter.blur(sigmaX: 15.0, sigmaY: 15.0),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.8),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Center(
-                                child: ElevatedButton.icon(
-                                  icon: const Icon(Icons.play_arrow),
-                                  label: const Text('Watch Ads to Unlock Prediction'),
-                                  onPressed: () {
-                                    AnalyticsService.logEvent('rewarded_ad_requested', parameters: {
-                                      'prediction_id': widget.entry['id'].toString(),
-                                      'tier': 'free',
-                                    });
-                                    RewardedAdManager.showAd(() {
-                                      AnalyticsService.logEvent('rewarded_ad_completed', parameters: {
-                                        'prediction_id': widget.entry['id'].toString(),
-                                      });
-                                      widget.onUnlock?.call();
-                                    });
-                                  },
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
                   ],
                 ),
               ],
@@ -1884,14 +1672,9 @@ class _PredictionChatScreenState extends State<PredictionChatScreen> {
                 
                 return ListView.builder(
                   controller: _scrollController,
-                  itemCount: messages.length + (messages.length ~/ 2),
+                  itemCount: messages.length,
                   itemBuilder: (context, index) {
-                    if ((index + 1) % 3 == 0) {
-                      return const AdBannerWidget();
-                    }
-                    final messageIndex = index - (index ~/ 3);
-                    if (messageIndex >= messages.length) return const SizedBox.shrink();
-                    final msg = messages[messageIndex];
+                    final msg = messages[index];
                     final currentUser = Supabase.instance.client.auth.currentUser;
                     final isMe = msg['user_id'] == currentUser?.id;
                     
