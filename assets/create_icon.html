@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Create App Icon</title>
+</head>
+<body>
+    <canvas id="canvas" width="1024" height="1024"></canvas>
+    <br>
+    <button onclick="downloadIcon()">Download Icon</button>
+    
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Background
+        ctx.fillStyle = '#0A192F';
+        ctx.fillRect(0, 0, 1024, 1024);
+        
+        // Football circle
+        ctx.fillStyle = '#64FFDA';
+        ctx.beginPath();
+        ctx.arc(512, 512, 300, 0, 2 * Math.PI);
+        ctx.fill();
+        
+        // Football pattern
+        ctx.strokeStyle = '#0A192F';
+        ctx.lineWidth = 20;
+        ctx.beginPath();
+        ctx.arc(512, 512, 300, 0, 2 * Math.PI);
+        ctx.stroke();
+        
+        // Pentagon pattern
+        for(let i = 0; i < 5; i++) {
+            ctx.beginPath();
+            ctx.moveTo(512, 212);
+            ctx.lineTo(512 + 150 * Math.cos(i * 2 * Math.PI / 5), 512 + 150 * Math.sin(i * 2 * Math.PI / 5));
+            ctx.stroke();
+        }
+        
+        function downloadIcon() {
+            const link = document.createElement('a');
+            link.download = 'icon.png';
+            link.href = canvas.toDataURL();
+            link.click();
+        }
+    </script>
+</body>
+</html>

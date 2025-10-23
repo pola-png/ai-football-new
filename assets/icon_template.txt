@@ -1,0 +1,15 @@
+Create a 1024x1024 PNG image with:
+- Background: Dark blue (#0A192F)
+- Football icon in center (white or #64FFDA)
+- Text "FP" or football symbol
+- Save as "icon.png" in this assets folder
+
+You can:
+1. Use Canva, Figma, or any design tool
+2. Search "football icon PNG" online
+3. Use AI image generators
+4. Hire a designer on Fiverr
+
+Once you have icon.png, run:
+flutter pub get
+flutter pub run flutter_launcher_icons:main

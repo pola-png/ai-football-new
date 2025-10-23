@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 2025 Play Store Theme Colors -->
+    <color name="primary_color">#64FFDA</color>
+    <color name="background_color">#0A192F</color>
+    <color name="surface_color">#172A46</color>
+    
+    <!-- Adaptive Icon Colors -->
+    <color name="ic_launcher_background">#0A192F</color>
+</resources>
