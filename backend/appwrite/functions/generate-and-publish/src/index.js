@@ -224,8 +224,8 @@ async function publishDuePredictions({ tablesdb, messaging, databaseId, predicti
   }
 
   return {
-    items_seen: rows.length,
-    items_saved: published,
+    items_seen: String(rows.length),
+    items_saved: String(published),
   };
 }
 
@@ -380,8 +380,8 @@ export default async function main({ res, error: reportError }) {
       status: 'success',
       started_at: startedAt,
       finished_at: isoNow(),
-      items_seen: fixtures.length,
-      items_saved: generated,
+      items_seen: String(fixtures.length),
+      items_saved: String(generated),
       message: `Generated ${generated} predictions from batch ${syncRunId}.`,
       created_at: isoNow(),
       updated_at: isoNow(),
@@ -400,8 +400,8 @@ export default async function main({ res, error: reportError }) {
       status: 'success',
       started_at: startedAt,
       finished_at: isoNow(),
-      items_seen: publishResult.items_seen,
-      items_saved: publishResult.items_saved,
+      items_seen: String(publishResult.items_seen),
+      items_saved: String(publishResult.items_saved),
       message: `Published ${publishResult.items_saved} predictions and sent notifications.`,
       created_at: isoNow(),
       updated_at: isoNow(),
@@ -410,8 +410,8 @@ export default async function main({ res, error: reportError }) {
     return res.json({
       ok: true,
       sync_run_id: syncRunId,
-      items_seen: fixtures.length,
-      items_saved: generated,
+      items_seen: String(fixtures.length),
+      items_saved: String(generated),
       published: publishResult.items_saved,
     });
   } catch (error) {
@@ -420,8 +420,8 @@ export default async function main({ res, error: reportError }) {
       status: 'failed',
       started_at: startedAt,
       finished_at: isoNow(),
-      items_seen: 0,
-      items_saved: generated,
+      items_seen: '0',
+      items_saved: String(generated),
       message: error instanceof Error ? error.message : String(error),
       created_at: isoNow(),
       updated_at: isoNow(),
