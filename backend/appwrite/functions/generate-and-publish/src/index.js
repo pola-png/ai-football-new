@@ -431,12 +431,4 @@ async function main() {
   }
 }
 
-main().then(
-  (result) => {
-    console.log(JSON.stringify(result));
-  },
-  (error) => {
-    console.error(error);
-    process.exit(1);
-  }
-);
+exports.main = main;
