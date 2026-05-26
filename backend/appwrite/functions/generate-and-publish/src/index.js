@@ -1,4 +1,4 @@
-const { Client, TablesDB, ID, Query, Messaging } = require('node-appwrite');
+import { Client, TablesDB, ID, Query, Messaging } from 'node-appwrite';
 
 function required(name) {
   const value = process.env[name];
@@ -334,7 +334,7 @@ async function generatePredictionsForBatch({
   return saved;
 }
 
-async function main() {
+export default async function main({ res, error: reportError }) {
   const client = buildClient();
   const tablesdb = new TablesDB(client);
   const messaging = new Messaging(client);
@@ -407,13 +407,13 @@ async function main() {
       updated_at: isoNow(),
     });
 
-    return {
+    return res.json({
       ok: true,
       sync_run_id: syncRunId,
       items_seen: fixtures.length,
       items_saved: generated,
       published: publishResult.items_saved,
-    };
+    });
   } catch (error) {
     await createRun(tablesdb, databaseId, syncRunsTable, {
       job_name: 'generate-predictions',
@@ -427,8 +427,7 @@ async function main() {
       updated_at: isoNow(),
     });
 
+    reportError(error instanceof Error ? error.message : String(error));
     throw error;
   }
 }
-
-exports.main = main;

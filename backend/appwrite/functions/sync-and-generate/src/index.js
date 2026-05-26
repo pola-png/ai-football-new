@@ -1,4 +1,4 @@
-const { Client, TablesDB, ID } = require('node-appwrite');
+import { Client, TablesDB, ID } from 'node-appwrite';
 
 function required(name) {
   const value = process.env[name];
@@ -115,7 +115,7 @@ function pickFixture(fixture, league, homeTeam, awayTeam) {
   };
 }
 
-async function main() {
+export default async function main({ res, error: reportError }) {
   const client = buildClient();
   const tablesdb = new TablesDB(client);
 
@@ -223,7 +223,7 @@ async function main() {
     });
     syncCompleted = true;
 
-    return {
+    return res.json({
       ok: true,
       cleaned: {
         fixtures: fixturesDelete?.total ?? null,
@@ -233,7 +233,7 @@ async function main() {
       items_seen: fixtures.length,
       items_saved: itemsSaved,
       sync_run_id: syncRunId,
-    };
+    });
   } catch (error) {
     await createRun(tablesdb, databaseId, syncRunsTable, {
       job_name: cleanupCompleted ? 'sync-fixtures' : 'cleanup-raw-fetch',
@@ -248,8 +248,7 @@ async function main() {
       updated_at: isoNow(),
     });
 
+    reportError(error instanceof Error ? error.message : String(error));
     throw error;
   }
 }
-
-exports.main = main;
