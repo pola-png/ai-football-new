@@ -298,7 +298,6 @@ async function generatePredictionsForBatch({
       fixture_api_id: fixture.api_fixture_id,
       model_name: aiResponse?.model || (process.env.DEEPSEEK_MODEL || 'deepseek-chat'),
       prediction_text: predictionText,
-      prediction_json: JSON.stringify(parsed),
       predicted_winner: parsed.predicted_winner || null,
       confidence: typeof parsed.confidence === 'number' ? parsed.confidence : null,
       market: parsed.market || null,
