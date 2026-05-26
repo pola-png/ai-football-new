@@ -28,6 +28,17 @@ function isoNow() {
   return new Date().toISOString();
 }
 
+function lagosDate() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Lagos',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${map.year}-${map.month}-${map.day}`;
+}
+
 async function createRun(tablesdb, databaseId, tableId, data) {
   return tablesdb.createRow({
     databaseId,
@@ -127,12 +138,11 @@ export default async function main({ res, error: reportError }) {
   const h2hTable = required('APPWRITE_TABLE_FIXTURE_H2H_HISTORY');
   const syncRunsTable = required('APPWRITE_TABLE_SYNC_RUNS');
 
-  const season = Number(process.env.API_FOOTBALL_SEASON || new Date().getFullYear());
   const league = process.env.API_FOOTBALL_LEAGUE ? Number(process.env.API_FOOTBALL_LEAGUE) : null;
+  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate();
 
   const url = new URL(`${required('API_FOOTBALL_BASE_URL').replace(/\/$/, '')}/fixtures`);
-  url.searchParams.set('next', '100');
-  url.searchParams.set('season', String(season));
+  url.searchParams.set('date', fetchDate);
   if (league) {
     url.searchParams.set('league', String(league));
   }

@@ -207,7 +207,7 @@ Suggested values for `status`:
 ## Recommended Flow
 
 1. `cleanup-raw-fetch` deletes old raw fetch rows around `2:00 pm`.
-2. `sync-fixtures` fetches tomorrow's fixtures at `7:00 pm`.
+2. `sync-fixtures` fetches the fixtures for the current date at `7:00 pm`.
 3. It saves the raw fixture rows, odds, and h2h history.
 4. `generate-predictions` reads only the latest `sync_run_id`.
 5. It saves only prediction rows to `predictions`.

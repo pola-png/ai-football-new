@@ -14,7 +14,7 @@ Project values:
 
 ## What this backend does
 
-1. Fetches the next 100 fixtures from API-Football.
+1. Fetches the daily fixtures for the current date from API-Football.
 2. Saves teams, leagues, and fixtures into Appwrite tables.
 3. Stores team logos with each team row.
 4. Saves odds snapshots and h2h history into separate backend tables.
@@ -63,7 +63,7 @@ Flutter app config:
 
 Optional:
 
-- `API_FOOTBALL_SEASON`
+- `API_FOOTBALL_DATE`
 - `API_FOOTBALL_LEAGUE`
 
 ## Tables
