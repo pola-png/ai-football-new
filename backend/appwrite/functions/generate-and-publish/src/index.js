@@ -114,7 +114,7 @@ function pickAt(picks, index) {
 
 async function deepSeekChat(messages) {
   const baseUrl = (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '');
-  const response = await fetch(`${baseUrl}/v2/chat/completions`, {
+  const response = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${required('DEEPSEEK_API_KEY')}`,
