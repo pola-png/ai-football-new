@@ -78,7 +78,7 @@ async function deleteAllRows(tablesdb, databaseId, tableId) {
 
 function pickTeam(team) {
   return {
-    api_team_id: team.id,
+    api_team_id: String(team.id),
     name: team.name,
     code: team.code || null,
     country: team.country || null,
@@ -92,13 +92,13 @@ function pickTeam(team) {
 
 function pickLeague(league, season) {
   return {
-    api_league_id: league.id,
+    api_league_id: String(league.id),
     name: league.name,
     country: league.country || null,
     type: league.type || null,
     logo_url: league.logo || null,
     flag_url: league.flag || null,
-    season,
+    season: String(season),
     created_at: isoNow(),
     updated_at: isoNow(),
   };
@@ -106,15 +106,15 @@ function pickLeague(league, season) {
 
 function pickFixture(fixture, league, homeTeam, awayTeam) {
   return {
-    api_fixture_id: fixture.id,
-    league_api_id: league.id,
-    season: league.season,
+    api_fixture_id: String(fixture.id),
+    league_api_id: String(league.id),
+    season: String(league.season),
     round: fixture.league?.round || null,
     kickoff_at: fixture.fixture?.date || null,
     status_short: fixture.fixture?.status?.short || 'NS',
     status_long: fixture.fixture?.status?.long || null,
-    home_team_api_id: homeTeam.id,
-    away_team_api_id: awayTeam.id,
+    home_team_api_id: String(homeTeam.id),
+    away_team_api_id: String(awayTeam.id),
     home_team_name: homeTeam.name,
     away_team_name: awayTeam.name,
     home_team_logo_url: homeTeam.logo || null,
