@@ -302,6 +302,14 @@ async function generatePredictionsForBatch({
       confidence: typeof parsed.confidence === 'number' ? parsed.confidence : null,
       market: parsed.market || null,
       confidence_label: parsed.confidence_label || null,
+      home_team_name:
+        fixture.home_team_name ?? fixture.homeTeamName ?? fixture.home_team?.name ?? null,
+      away_team_name:
+        fixture.away_team_name ?? fixture.awayTeamName ?? fixture.away_team?.name ?? null,
+      home_team_logo_url:
+        fixture.home_team_logo_url ?? fixture.homeTeamLogoUrl ?? fixture.home_team?.logo_url ?? null,
+      away_team_logo_url:
+        fixture.away_team_logo_url ?? fixture.awayTeamLogoUrl ?? fixture.away_team?.logo_url ?? null,
       kickoff_at: fixture.kickoff_at || null,
       match_status_short: fixture.status_short || null,
       match_status_long: fixture.status_long || null,
