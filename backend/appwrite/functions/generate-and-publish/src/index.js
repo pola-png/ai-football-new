@@ -164,6 +164,31 @@ async function fetchRows(tablesdb, databaseId, tableId, queries) {
   return result.rows || [];
 }
 
+async function fetchAllRows(tablesdb, databaseId, tableId, baseQueries, pageSize = 100) {
+  const rows = [];
+  let offset = 0;
+
+  while (true) {
+    const result = await tablesdb.listRows({
+      databaseId,
+      tableId,
+      queries: [...baseQueries, Query.limit(pageSize), Query.offset(offset)],
+      total: false,
+    });
+
+    const pageRows = result.rows || [];
+    rows.push(...pageRows);
+
+    if (pageRows.length < pageSize) {
+      break;
+    }
+
+    offset += pageSize;
+  }
+
+  return rows;
+}
+
 async function fetchExistingPrediction(tablesdb, databaseId, predictionsTable, fixtureApiId) {
   const rows = await fetchRows(tablesdb, databaseId, predictionsTable, [
     Query.equal('fixture_api_id', fixtureApiId),
@@ -174,53 +199,55 @@ async function fetchExistingPrediction(tablesdb, databaseId, predictionsTable, f
 
 async function publishDuePredictions({ tablesdb, messaging, databaseId, predictionsTable, topicId }) {
   const now = isoNow();
-  const result = await tablesdb.listRows({
-    databaseId,
-    tableId: predictionsTable,
-    queries: [
-      Query.equal('release_status', 'draft'),
-      Query.lessThanEqual('release_at', now),
-      Query.limit(100),
-      Query.orderAsc('release_at'),
-    ],
-    total: false,
-  });
+  const rows = await fetchAllRows(tablesdb, databaseId, predictionsTable, [
+    Query.equal('release_status', 'draft'),
+    Query.lessThanEqual('release_at', now),
+    Query.orderAsc('release_at'),
+  ]);
 
-  const rows = result.rows || [];
   let published = 0;
 
   for (const row of rows) {
     const publishedAt = isoNow();
-    await upsertRow(tablesdb, databaseId, predictionsTable, row.$id, {
-      ...row,
-      release_status: 'published',
-      published_at: publishedAt,
-      updated_at: publishedAt,
-    });
-
-    await messaging.createPush({
-      messageId: ID.unique(),
-      title: 'New prediction is live',
-      body: row.prediction_text || 'Your football prediction is ready.',
-      topics: [topicId],
-      data: {
-        fixture_api_id: String(row.fixture_api_id),
-        prediction_id: row.$id,
+    try {
+      await upsertRow(tablesdb, databaseId, predictionsTable, row.$id, {
         release_status: 'published',
-      },
-      draft: false,
-    });
+        published_at: publishedAt,
+        updated_at: publishedAt,
+      });
 
-    await upsertRow(tablesdb, databaseId, predictionsTable, row.$id, {
-      ...row,
-      release_status: 'published',
-      published_at: publishedAt,
-      notification_sent: true,
-      notification_sent_at: publishedAt,
-      updated_at: publishedAt,
-    });
+      await messaging.createPush({
+        messageId: ID.unique(),
+        title: 'New prediction is live',
+        body: row.prediction_text || 'Your football prediction is ready.',
+        topics: [topicId],
+        data: {
+          fixture_api_id: String(row.fixture_api_id),
+          prediction_id: row.$id,
+          release_status: 'published',
+        },
+        draft: false,
+      });
 
-    published += 1;
+      await upsertRow(tablesdb, databaseId, predictionsTable, row.$id, {
+        release_status: 'published',
+        published_at: publishedAt,
+        notification_sent: true,
+        notification_sent_at: publishedAt,
+        updated_at: publishedAt,
+      });
+
+      published += 1;
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          job: 'publish-due-predictions',
+          fixture_api_id: row.fixture_api_id,
+          prediction_id: row.$id,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
   }
 
   return {
@@ -239,106 +266,118 @@ async function generatePredictionsForBatch({
   startedAt,
 }) {
   let saved = 0;
+  let failed = 0;
 
   for (const fixture of fixtures) {
-    const existingPrediction = await fetchExistingPrediction(
-      tablesdb,
-      databaseId,
-      predictionsTable,
-      fixture.api_fixture_id,
-    );
-
-    if (existingPrediction) {
-      continue;
-    }
-
-    const oddsRows = await fetchRows(tablesdb, databaseId, oddsTable, [
-      Query.equal('fixture_api_id', fixture.api_fixture_id),
-      Query.orderAsc('$createdAt'),
-    ]);
-
-    const h2hRows = await fetchRows(tablesdb, databaseId, h2hTable, [
-      Query.equal('current_fixture_api_id', fixture.api_fixture_id),
-      Query.orderAsc('$createdAt'),
-    ]);
-
-    const prompt = buildPrompt(fixture, oddsRows, h2hRows);
-    const aiResponse = await deepSeekChat([
-      {
-        role: 'system',
-        content: 'Return only valid JSON. Include prediction_text, predicted_winner, confidence, and market.',
-      },
-      {
-        role: 'user',
-        content: prompt,
-      },
-    ]);
-
-    const content = aiResponse?.choices?.[0]?.message?.content || '{}';
-    let parsed;
     try {
-      parsed = JSON.parse(content);
-    } catch {
-      parsed = {
-        prediction_text: content,
-        predicted_winner: null,
-        confidence: null,
-        confidence_label: null,
-        picks: [],
-        market: null,
-      };
+      const existingPrediction = await fetchExistingPrediction(
+        tablesdb,
+        databaseId,
+        predictionsTable,
+        fixture.api_fixture_id,
+      );
+
+      if (existingPrediction) {
+        continue;
+      }
+
+      const oddsRows = await fetchRows(tablesdb, databaseId, oddsTable, [
+        Query.equal('fixture_api_id', fixture.api_fixture_id),
+        Query.orderAsc('$createdAt'),
+      ]);
+
+      const h2hRows = await fetchRows(tablesdb, databaseId, h2hTable, [
+        Query.equal('current_fixture_api_id', fixture.api_fixture_id),
+        Query.orderAsc('$createdAt'),
+      ]);
+
+      const prompt = buildPrompt(fixture, oddsRows, h2hRows);
+      const aiResponse = await deepSeekChat([
+        {
+          role: 'system',
+          content: 'Return only valid JSON. Include prediction_text, predicted_winner, confidence, and market.',
+        },
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ]);
+
+      const content = aiResponse?.choices?.[0]?.message?.content || '{}';
+      let parsed;
+      try {
+        parsed = JSON.parse(content);
+      } catch {
+        parsed = {
+          prediction_text: content,
+          predicted_winner: null,
+          confidence: null,
+          confidence_label: null,
+          picks: [],
+          market: null,
+        };
+      }
+
+      const primaryPick = pickAt(parsed.picks, 0);
+      const secondaryPick = pickAt(parsed.picks, 1);
+      const tertiaryPick = pickAt(parsed.picks, 2);
+      const predictionText = typeof parsed.prediction_text === 'string' ? parsed.prediction_text : content;
+
+      await upsertRow(tablesdb, databaseId, predictionsTable, `prediction_${fixture.api_fixture_id}`, {
+        fixture_api_id: fixture.api_fixture_id,
+        model_name: aiResponse?.model || (process.env.DEEPSEEK_MODEL || 'deepseek-chat'),
+        prediction_text: predictionText,
+        predicted_winner: parsed.predicted_winner || null,
+        confidence: typeof parsed.confidence === 'number' ? parsed.confidence : null,
+        market: parsed.market || null,
+        confidence_label: parsed.confidence_label || null,
+        home_team_name:
+          fixture.home_team_name ?? fixture.homeTeamName ?? fixture.home_team?.name ?? null,
+        away_team_name:
+          fixture.away_team_name ?? fixture.awayTeamName ?? fixture.away_team?.name ?? null,
+        home_team_logo_url:
+          fixture.home_team_logo_url ?? fixture.homeTeamLogoUrl ?? fixture.home_team?.logo_url ?? null,
+        away_team_logo_url:
+          fixture.away_team_logo_url ?? fixture.awayTeamLogoUrl ?? fixture.away_team?.logo_url ?? null,
+        kickoff_at: fixture.kickoff_at || null,
+        match_status_short: fixture.status_short || null,
+        match_status_long: fixture.status_long || null,
+        primary_market: primaryPick?.market,
+        primary_selection: primaryPick?.selection,
+        primary_confidence: primaryPick?.confidence,
+        primary_reason: primaryPick?.reason,
+        secondary_market: secondaryPick?.market,
+        secondary_selection: secondaryPick?.selection,
+        secondary_confidence: secondaryPick?.confidence,
+        secondary_reason: secondaryPick?.reason,
+        tertiary_market: tertiaryPick?.market,
+        tertiary_selection: tertiaryPick?.selection,
+        tertiary_confidence: tertiaryPick?.confidence,
+        tertiary_reason: tertiaryPick?.reason,
+        release_status: 'draft',
+        release_at: fixture.kickoff_at || startedAt,
+        generated_at: startedAt,
+        published_at: null,
+        notification_sent: false,
+        notification_sent_at: null,
+        created_at: startedAt,
+        updated_at: isoNow(),
+      });
+
+      saved += 1;
+    } catch (error) {
+      failed += 1;
+      console.error(
+        JSON.stringify({
+          job: 'generate-predictions',
+          fixture_api_id: fixture.api_fixture_id,
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
     }
-
-    const primaryPick = pickAt(parsed.picks, 0);
-    const secondaryPick = pickAt(parsed.picks, 1);
-    const tertiaryPick = pickAt(parsed.picks, 2);
-    const predictionText = typeof parsed.prediction_text === 'string' ? parsed.prediction_text : content;
-
-    await upsertRow(tablesdb, databaseId, predictionsTable, `prediction_${fixture.api_fixture_id}`, {
-      fixture_api_id: fixture.api_fixture_id,
-      model_name: aiResponse?.model || (process.env.DEEPSEEK_MODEL || 'deepseek-chat'),
-      prediction_text: predictionText,
-      predicted_winner: parsed.predicted_winner || null,
-      confidence: typeof parsed.confidence === 'number' ? parsed.confidence : null,
-      market: parsed.market || null,
-      confidence_label: parsed.confidence_label || null,
-      home_team_name:
-        fixture.home_team_name ?? fixture.homeTeamName ?? fixture.home_team?.name ?? null,
-      away_team_name:
-        fixture.away_team_name ?? fixture.awayTeamName ?? fixture.away_team?.name ?? null,
-      home_team_logo_url:
-        fixture.home_team_logo_url ?? fixture.homeTeamLogoUrl ?? fixture.home_team?.logo_url ?? null,
-      away_team_logo_url:
-        fixture.away_team_logo_url ?? fixture.awayTeamLogoUrl ?? fixture.away_team?.logo_url ?? null,
-      kickoff_at: fixture.kickoff_at || null,
-      match_status_short: fixture.status_short || null,
-      match_status_long: fixture.status_long || null,
-      primary_market: primaryPick?.market,
-      primary_selection: primaryPick?.selection,
-      primary_confidence: primaryPick?.confidence,
-      primary_reason: primaryPick?.reason,
-      secondary_market: secondaryPick?.market,
-      secondary_selection: secondaryPick?.selection,
-      secondary_confidence: secondaryPick?.confidence,
-      secondary_reason: secondaryPick?.reason,
-      tertiary_market: tertiaryPick?.market,
-      tertiary_selection: tertiaryPick?.selection,
-      tertiary_confidence: tertiaryPick?.confidence,
-      tertiary_reason: tertiaryPick?.reason,
-      release_status: 'draft',
-      release_at: fixture.kickoff_at || startedAt,
-      generated_at: startedAt,
-      published_at: null,
-      notification_sent: false,
-      notification_sent_at: null,
-      created_at: startedAt,
-      updated_at: isoNow(),
-    });
-
-    saved += 1;
   }
 
-  return saved;
+  return { saved, failed };
 }
 
 export default async function main({ res, error: reportError }) {
@@ -365,13 +404,12 @@ export default async function main({ res, error: reportError }) {
       throw new Error('No successful sync_run_id found to generate predictions from.');
     }
 
-    const fixtures = await fetchRows(tablesdb, databaseId, fixturesTable, [
+    const fixtures = await fetchAllRows(tablesdb, databaseId, fixturesTable, [
       Query.equal('sync_run_id', syncRunId),
       Query.orderAsc('$createdAt'),
-      Query.limit(100),
     ]);
 
-    generated = await generatePredictionsForBatch({
+    const generationResult = await generatePredictionsForBatch({
       tablesdb,
       databaseId,
       fixtures,
@@ -380,6 +418,7 @@ export default async function main({ res, error: reportError }) {
       predictionsTable,
       startedAt,
     });
+    generated = generationResult.saved;
 
     await createRun(tablesdb, databaseId, syncRunsTable, {
       job_name: 'generate-predictions',
@@ -419,6 +458,7 @@ export default async function main({ res, error: reportError }) {
       sync_run_id: syncRunId,
       items_seen: String(fixtures.length),
       items_saved: String(generated),
+      items_failed: String(generationResult.failed),
       published: publishResult.items_saved,
     });
   } catch (error) {
