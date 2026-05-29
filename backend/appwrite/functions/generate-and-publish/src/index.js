@@ -57,11 +57,12 @@ function buildPrompt(fixture, oddsRows, h2hRows) {
     'Use the fixture, odds, and h2h history to produce a single JSON object.',
     'Return valid JSON only.',
     'Required JSON keys: prediction_text, predicted_winner, confidence, confidence_label, picks.',
-    'The picks array must contain 2 to 3 entries.',
+    'The picks array must contain exactly 1 entry.',
+    'Only provide one best prediction for this match.',
     'Each pick must include: market, selection, confidence, reason.',
     'Focus on low-odds markets such as over, under, gg/btts, corners, double chance 12, and throw-ins if the data exists.',
     'If throw-in data is not available, skip it.',
-    'Confidence should be a decimal between 0 and 1.',
+    'Confidence should be a percentage between 80% and 99%.',
     'Use confidence_label values like high, medium, or low.',
     '',
     `FIXTURE: ${JSON.stringify(fixture)}`,
@@ -72,26 +73,14 @@ function buildPrompt(fixture, oddsRows, h2hRows) {
     '{',
     '  "prediction_text": "Team A have the stronger profile for a low-risk over/gg style card.",',
     '  "predicted_winner": "Team A",',
-    '  "confidence": 0.86,',
+    '  "confidence": 86,',
     '  "confidence_label": "high",',
     '  "picks": [',
     '    {',
     '      "market": "over_1.5",',
     '      "selection": "Over 1.5",',
-    '      "confidence": 0.91,',
+    '      "confidence": 91,',
     '      "reason": "Both teams create enough chances for at least two goals."',
-    '    },',
-    '    {',
-    '      "market": "gg",',
-    '      "selection": "Yes",',
-    '      "confidence": 0.78,',
-    '      "reason": "Both sides concede regularly."',
-    '    },',
-    '    {',
-    '      "market": "double_chance_12",',
-    '      "selection": "12",',
-    '      "confidence": 0.69,',
-    '      "reason": "A draw is less likely than one side winning."',
     '    }',
     '  ]',
     '}',
@@ -110,6 +99,45 @@ function pickAt(picks, index) {
     confidence: typeof pick.confidence === 'number' ? pick.confidence : null,
     reason: typeof pick.reason === 'string' ? pick.reason : null,
   };
+}
+
+function normalizeConfidence(value) {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return 0.8;
+  }
+
+  const decimalValue = value > 1 ? value / 100 : value;
+  return Math.max(0.8, Math.min(0.99, decimalValue));
+}
+
+function parseConcurrency(value) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return 1;
+  }
+  return Math.min(parsed, 10);
+}
+
+async function runWithConcurrency(items, concurrency, handler) {
+  const results = [];
+  let nextIndex = 0;
+
+  async function worker() {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+
+      if (index >= items.length) {
+        return;
+      }
+
+      results[index] = await handler(items[index], index);
+    }
+  }
+
+  const workerCount = Math.min(concurrency, items.length || 1);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
 }
 
 async function deepSeekChat(messages) {
@@ -206,8 +234,9 @@ async function publishDuePredictions({ tablesdb, messaging, databaseId, predicti
   ]);
 
   let published = 0;
+  const concurrency = parseConcurrency(process.env.APPWRITE_PREDICTION_CONCURRENCY || 1);
 
-  for (const row of rows) {
+  await runWithConcurrency(rows, concurrency, async (row) => {
     const publishedAt = isoNow();
     try {
       await upsertRow(tablesdb, databaseId, predictionsTable, row.$id, {
@@ -248,7 +277,7 @@ async function publishDuePredictions({ tablesdb, messaging, databaseId, predicti
         }),
       );
     }
-  }
+  });
 
   return {
     items_seen: String(rows.length),
@@ -267,8 +296,9 @@ async function generatePredictionsForBatch({
 }) {
   let saved = 0;
   let failed = 0;
+  const concurrency = parseConcurrency(process.env.APPWRITE_PREDICTION_CONCURRENCY || 1);
 
-  for (const fixture of fixtures) {
+  await runWithConcurrency(fixtures, concurrency, async (fixture) => {
     try {
       const existingPrediction = await fetchExistingPrediction(
         tablesdb,
@@ -278,7 +308,7 @@ async function generatePredictionsForBatch({
       );
 
       if (existingPrediction) {
-        continue;
+        return;
       }
 
       const oddsRows = await fetchRows(tablesdb, databaseId, oddsTable, [
@@ -319,16 +349,16 @@ async function generatePredictionsForBatch({
       }
 
       const primaryPick = pickAt(parsed.picks, 0);
-      const secondaryPick = pickAt(parsed.picks, 1);
-      const tertiaryPick = pickAt(parsed.picks, 2);
       const predictionText = typeof parsed.prediction_text === 'string' ? parsed.prediction_text : content;
+      const normalizedConfidence = normalizeConfidence(parsed.confidence);
+      const normalizedPrimaryConfidence = normalizeConfidence(primaryPick?.confidence);
 
       await upsertRow(tablesdb, databaseId, predictionsTable, `prediction_${fixture.api_fixture_id}`, {
         fixture_api_id: fixture.api_fixture_id,
         model_name: aiResponse?.model || (process.env.DEEPSEEK_MODEL || 'deepseek-chat'),
         prediction_text: predictionText,
         predicted_winner: parsed.predicted_winner || null,
-        confidence: typeof parsed.confidence === 'number' ? parsed.confidence : null,
+        confidence: normalizedConfidence,
         market: parsed.market || null,
         confidence_label: parsed.confidence_label || null,
         home_team_name:
@@ -344,16 +374,16 @@ async function generatePredictionsForBatch({
         match_status_long: fixture.status_long || null,
         primary_market: primaryPick?.market,
         primary_selection: primaryPick?.selection,
-        primary_confidence: primaryPick?.confidence,
+        primary_confidence: normalizedPrimaryConfidence,
         primary_reason: primaryPick?.reason,
-        secondary_market: secondaryPick?.market,
-        secondary_selection: secondaryPick?.selection,
-        secondary_confidence: secondaryPick?.confidence,
-        secondary_reason: secondaryPick?.reason,
-        tertiary_market: tertiaryPick?.market,
-        tertiary_selection: tertiaryPick?.selection,
-        tertiary_confidence: tertiaryPick?.confidence,
-        tertiary_reason: tertiaryPick?.reason,
+        secondary_market: null,
+        secondary_selection: null,
+        secondary_confidence: null,
+        secondary_reason: null,
+        tertiary_market: null,
+        tertiary_selection: null,
+        tertiary_confidence: null,
+        tertiary_reason: null,
         release_status: 'draft',
         release_at: fixture.kickoff_at || startedAt,
         generated_at: startedAt,
@@ -375,7 +405,7 @@ async function generatePredictionsForBatch({
         }),
       );
     }
-  }
+  });
 
   return { saved, failed };
 }
