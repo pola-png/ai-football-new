@@ -189,7 +189,7 @@ async function fetchRows(tablesdb, databaseId, tableId, queries) {
     queries,
     total: false,
   });
-  return result.rows || [];
+  return (result.rows || []).map(normalizeRow);
 }
 
 async function fetchAllRows(tablesdb, databaseId, tableId, baseQueries, pageSize = 100) {
@@ -204,7 +204,7 @@ async function fetchAllRows(tablesdb, databaseId, tableId, baseQueries, pageSize
       total: false,
     });
 
-    const pageRows = result.rows || [];
+    const pageRows = (result.rows || []).map(normalizeRow);
     rows.push(...pageRows);
 
     if (pageRows.length < pageSize) {
@@ -215,6 +215,23 @@ async function fetchAllRows(tablesdb, databaseId, tableId, baseQueries, pageSize
   }
 
   return rows;
+}
+
+function normalizeRow(row) {
+  if (!row || typeof row !== 'object') {
+    return row;
+  }
+
+  if (row.data && typeof row.data === 'object') {
+    return {
+      ...row.data,
+      $id: row.$id ?? row.data.$id ?? null,
+      $createdAt: row.$createdAt ?? row.data.$createdAt ?? null,
+      $updatedAt: row.$updatedAt ?? row.data.$updatedAt ?? null,
+    };
+  }
+
+  return row;
 }
 
 async function publishDuePredictions({ tablesdb, messaging, databaseId, predictionsTable, topicId }) {
