@@ -217,6 +217,22 @@ async function fetchAllRows(tablesdb, databaseId, tableId, baseQueries, pageSize
   return rows;
 }
 
+function getFixtureApiId(fixture) {
+  const rawId =
+    fixture?.api_fixture_id ??
+    fixture?.apiFixtureId ??
+    fixture?.fixture_api_id ??
+    fixture?.$id?.replace(/^fixture_/, '') ??
+    null;
+
+  if (rawId == null) {
+    return null;
+  }
+
+  const text = String(rawId).trim();
+  return text.length > 0 ? text : null;
+}
+
 function normalizeRow(row) {
   if (!row || typeof row !== 'object') {
     return row;
@@ -309,13 +325,26 @@ async function generatePredictionsForBatch({
 
   await runWithConcurrency(fixtures, concurrency, async (fixture) => {
     try {
+      const fixtureApiId = getFixtureApiId(fixture);
+      if (!fixtureApiId) {
+        console.error(
+          JSON.stringify({
+            job: 'generate-predictions',
+            message: 'Skipping fixture with missing api_fixture_id',
+            fixture_snapshot: fixture,
+          }),
+        );
+        failed += 1;
+        return;
+      }
+
       const oddsRows = await fetchRows(tablesdb, databaseId, oddsTable, [
-        Query.equal('fixture_api_id', fixture.api_fixture_id),
+        Query.equal('fixture_api_id', fixtureApiId),
         Query.orderAsc('$createdAt'),
       ]);
 
       const h2hRows = await fetchRows(tablesdb, databaseId, h2hTable, [
-        Query.equal('current_fixture_api_id', fixture.api_fixture_id),
+        Query.equal('current_fixture_api_id', fixtureApiId),
         Query.orderAsc('$createdAt'),
       ]);
 
@@ -323,7 +352,7 @@ async function generatePredictionsForBatch({
       console.log(
         JSON.stringify({
           job: 'generate-predictions',
-          fixture_api_id: fixture.api_fixture_id,
+          fixture_api_id: fixtureApiId,
           odds_rows: oddsRows.length,
           h2h_rows: h2hRows.length,
           stage: 'before-deepseek',
@@ -360,8 +389,8 @@ async function generatePredictionsForBatch({
       const normalizedConfidence = normalizeConfidence(parsed.confidence);
       const normalizedPrimaryConfidence = normalizeConfidence(primaryPick?.confidence);
 
-      await upsertRow(tablesdb, databaseId, predictionsTable, `prediction_${fixture.api_fixture_id}`, {
-        fixture_api_id: fixture.api_fixture_id,
+      await upsertRow(tablesdb, databaseId, predictionsTable, `prediction_${fixtureApiId}`, {
+        fixture_api_id: fixtureApiId,
         model_name: aiResponse?.model || (process.env.DEEPSEEK_MODEL || 'deepseek-chat'),
         prediction_text: predictionText,
         predicted_winner: parsed.predicted_winner || null,
@@ -407,7 +436,7 @@ async function generatePredictionsForBatch({
       console.error(
         JSON.stringify({
           job: 'generate-predictions',
-          fixture_api_id: fixture.api_fixture_id,
+          fixture_api_id: fixtureApiId,
           message: error instanceof Error ? error.message : String(error),
         }),
       );

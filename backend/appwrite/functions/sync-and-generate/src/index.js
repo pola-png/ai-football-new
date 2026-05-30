@@ -105,8 +105,10 @@ function pickLeague(league, season) {
 }
 
 function pickFixture(fixture, league, homeTeam, awayTeam) {
+  const apiFixtureId = fixture.fixture?.id ?? fixture.id ?? null;
+
   return {
-    api_fixture_id: String(fixture.id),
+    api_fixture_id: apiFixtureId != null ? String(apiFixtureId) : null,
     league_api_id: String(league.id),
     season: String(league.season),
     round: fixture.league?.round || null,
