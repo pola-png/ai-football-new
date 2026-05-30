@@ -428,16 +428,19 @@ export default async function main({ res, error: reportError }) {
 
   try {
     const syncRun = await fetchLatestSyncRun(tablesdb, databaseId, syncRunsTable);
-    const syncRunId = syncRun?.sync_run_id;
-
-    if (!syncRunId) {
-      throw new Error('No successful sync_run_id found to generate predictions from.');
-    }
+    const syncRunId = syncRun?.sync_run_id || null;
 
     const fixtures = await fetchAllRows(tablesdb, databaseId, fixturesTable, [
-      Query.equal('sync_run_id', syncRunId),
       Query.orderAsc('$createdAt'),
     ]);
+
+    console.log(
+      JSON.stringify({
+        job: 'generate-predictions',
+        sync_run_id: syncRunId,
+        fixtures_seen: fixtures.length,
+      }),
+    );
 
     const generationResult = await generatePredictionsForBatch({
       tablesdb,
