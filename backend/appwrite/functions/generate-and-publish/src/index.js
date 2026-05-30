@@ -217,14 +217,6 @@ async function fetchAllRows(tablesdb, databaseId, tableId, baseQueries, pageSize
   return rows;
 }
 
-async function fetchExistingPrediction(tablesdb, databaseId, predictionsTable, fixtureApiId) {
-  const rows = await fetchRows(tablesdb, databaseId, predictionsTable, [
-    Query.equal('fixture_api_id', fixtureApiId),
-    Query.limit(1),
-  ]);
-  return rows[0] || null;
-}
-
 async function publishDuePredictions({ tablesdb, messaging, databaseId, predictionsTable, topicId }) {
   const now = isoNow();
   const rows = await fetchAllRows(tablesdb, databaseId, predictionsTable, [
@@ -300,17 +292,6 @@ async function generatePredictionsForBatch({
 
   await runWithConcurrency(fixtures, concurrency, async (fixture) => {
     try {
-      const existingPrediction = await fetchExistingPrediction(
-        tablesdb,
-        databaseId,
-        predictionsTable,
-        fixture.api_fixture_id,
-      );
-
-      if (existingPrediction) {
-        return;
-      }
-
       const oddsRows = await fetchRows(tablesdb, databaseId, oddsTable, [
         Query.equal('fixture_api_id', fixture.api_fixture_id),
         Query.orderAsc('$createdAt'),
@@ -322,6 +303,15 @@ async function generatePredictionsForBatch({
       ]);
 
       const prompt = buildPrompt(fixture, oddsRows, h2hRows);
+      console.log(
+        JSON.stringify({
+          job: 'generate-predictions',
+          fixture_api_id: fixture.api_fixture_id,
+          odds_rows: oddsRows.length,
+          h2h_rows: h2hRows.length,
+          stage: 'before-deepseek',
+        }),
+      );
       const aiResponse = await deepSeekChat([
         {
           role: 'system',
