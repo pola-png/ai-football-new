@@ -168,6 +168,32 @@ function safeIdPart(value) {
     .slice(0, 80) || 'item';
 }
 
+function shouldKeepOddsRow(marketName, selectionName) {
+  const market = String(marketName || '').toLowerCase();
+  const selection = String(selectionName || '').toLowerCase();
+  const allowedMarkets = [
+    'match winner',
+    'home team',
+    'away team',
+    'goals',
+    'over',
+    'under',
+    'both teams',
+    'btts',
+    'double chance',
+    'corners',
+    'cards',
+    'handicap',
+    'throw',
+  ];
+
+  if (allowedMarkets.some((term) => market.includes(term) || selection.includes(term))) {
+    return true;
+  }
+
+  return market.includes('goals') || market.includes('corner') || market.includes('btts') || market.includes('double chance');
+}
+
 function determineWinnerLabel(historicalFixture) {
   const homeWinner = historicalFixture?.teams?.home?.winner;
   const awayWinner = historicalFixture?.teams?.away?.winner;
@@ -210,6 +236,7 @@ async function saveFixtureOdds({
   const oddSnapshots = Array.isArray(payload?.response) ? payload.response : [];
   let saved = 0;
   const now = isoNow();
+  const maxRowsPerFixture = Number.parseInt(process.env.ODDS_MAX_ROWS_PER_FIXTURE || '120', 10);
 
   for (const snapshot of oddSnapshots) {
     const bookmakers = Array.isArray(snapshot?.bookmakers) ? snapshot.bookmakers : [];
@@ -237,6 +264,14 @@ async function saveFixtureOdds({
             : value?.line != null
               ? String(value.line)
               : null;
+
+          if (!shouldKeepOddsRow(marketName, selectionName)) {
+            continue;
+          }
+
+          if (saved >= maxRowsPerFixture) {
+            return saved;
+          }
 
           await upsertRow(
             tablesdb,
@@ -278,10 +313,10 @@ async function saveFixtureH2HHistory({
     return 0;
   }
 
-  const payload = await fetchApiFootballJson('/fixtures/headtohead', {
-    h2h: `${homeTeamId}-${awayTeamId}`,
-    last: 10,
-  });
+    const payload = await fetchApiFootballJson('/fixtures/headtohead', {
+      h2h: `${homeTeamId}-${awayTeamId}`,
+      last: 5,
+    });
 
   const historicalFixtures = Array.isArray(payload?.response) ? payload.response : [];
   let saved = 0;
@@ -758,7 +793,8 @@ async function generatePredictionsForBatch({
   return { saved, failed, published, notified };
 }
 
-export default async function main({ res, error: reportError }) {
+export default async function main(context) {
+  const { res, error: reportError } = context;
   const client = buildClient();
   const tablesdb = new TablesDB(client);
   const messaging = new Messaging(client);
@@ -825,7 +861,8 @@ export default async function main({ res, error: reportError }) {
       const awayTeam = fixture.teams.away;
       const fixtureApiId = fixture?.fixture?.id != null ? String(fixture.fixture.id) : null;
 
-      console.log(
+      (context.log || console.log).call(
+        context,
         JSON.stringify({
           job: 'daily-sync-generate',
           fixture_api_id: fixtureApiId,
@@ -899,7 +936,8 @@ export default async function main({ res, error: reportError }) {
         );
       }
 
-      console.log(
+      (context.log || console.log).call(
+        context,
         JSON.stringify({
           job: 'daily-sync-generate',
           fixture_api_id: fixtureApiId,
