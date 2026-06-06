@@ -76,12 +76,12 @@ For the app to read data directly from Appwrite, give `teams`, `leagues`, `fixtu
 
 Deploy only these two functions on Appwrite Free:
 
-- `sync-and-generate`
-- `generate-and-publish`
+- `daily-sync-generate`
+- `publish-and-maintain`
 
 Do not deploy `sync-fixtures`, `generate-predictions`, `publish-predictions`, or `cleanup-raw-fetch` separately on the Free plan.
 
-`sync-and-generate` is responsible for:
+`daily-sync-generate` is responsible for:
 
 - deleting old raw rows first
 - fetching upcoming matches
@@ -90,26 +90,35 @@ Do not deploy `sync-fixtures`, `generate-predictions`, `publish-predictions`, or
 - saving or updating fixtures
 - keeping team logos in the backend
 
-`generate-and-publish` is responsible for:
+`publish-and-maintain` is responsible for:
 
 - reading the latest successful `sync_run_id`
-- loading only the fixtures in that batch
+- loading all fixtures from the `fixtures` table
+- paging through the full fixtures table, not just the first page
 - loading odds and h2h rows for each fixture
 - calling DeepSeek
 - saving only prediction rows into `predictions`
-- storing 2 to 3 structured picks per fixture
+- storing one best structured pick per fixture
+- keeping confidence at 80% or higher
+- never deleting existing prediction rows during generation
 - focusing the picks on low-odds markets like over, under, gg, corners, double chance, and throw-ins when available
 - publishing draft predictions whose `release_at` is due
 - marking them as `published`
 - setting `published_at`
 - sending a push notification through Appwrite Messaging
 
+Optional batch setting:
+
+- `APPWRITE_PREDICTION_CONCURRENCY`
+- Default is `1`, which processes fixtures one after the other.
+- Set it higher if you want multiple fixtures handled at the same time.
+
 ## Fetch schedule
 
 - Run the cleanup step at `2:00 pm`.
 - Run the sync step at `7:00 pm`.
 - The sync step should fetch the fresh batch and store it in Appwrite with one `sync_run_id`.
-- `generate-and-publish` should run after sync, not at the same time.
+- `publish-and-maintain` should run after sync, not at the same time.
 
 ## Cleanup schedule
 
@@ -119,7 +128,7 @@ Do not deploy `sync-fixtures`, `generate-predictions`, `publish-predictions`, or
 
 ## Publish schedule
 
-- Run `generate-and-publish` after sync finishes.
+- Run `publish-and-maintain` after sync finishes.
 - Publish only draft predictions whose `release_at` is due.
 - On each run it will:
   1. Check the latest sync batch.
