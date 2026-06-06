@@ -28,13 +28,15 @@ function isoNow() {
   return new Date().toISOString();
 }
 
-function lagosDate() {
+function lagosDate(offsetDays = 0) {
+  const current = new Date();
+  current.setUTCDate(current.getUTCDate() + offsetDays);
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Africa/Lagos',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).formatToParts(new Date());
+  }).formatToParts(current);
   const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return `${map.year}-${map.month}-${map.day}`;
 }
@@ -736,7 +738,7 @@ export default async function main({ res, error: reportError }) {
   const topicId = required('APPWRITE_TOPIC_PREDICTIONS');
 
   const league = process.env.API_FOOTBALL_LEAGUE ? Number(process.env.API_FOOTBALL_LEAGUE) : null;
-  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate();
+  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(1);
   const syncRunId = `sync_${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}`;
   const startedAt = isoNow();
 
