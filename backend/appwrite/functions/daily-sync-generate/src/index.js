@@ -29,16 +29,24 @@ function isoNow() {
 }
 
 function lagosDate(offsetDays = 0) {
-  const current = new Date();
-  current.setUTCDate(current.getUTCDate() + offsetDays);
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Africa/Lagos',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).formatToParts(current);
+  }).formatToParts(new Date());
   const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${map.year}-${map.month}-${map.day}`;
+  const base = new Date(Date.UTC(
+    Number(map.year),
+    Number(map.month) - 1,
+    Number(map.day),
+  ));
+  base.setUTCDate(base.getUTCDate() + offsetDays);
+
+  const year = base.getUTCFullYear();
+  const month = String(base.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(base.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 async function createRun(tablesdb, databaseId, tableId, data) {
@@ -296,7 +304,9 @@ async function saveFixtureH2HHistory({
       `h2h_${safeIdPart(fixtureApiId)}_${safeIdPart(historicalFixtureId)}`,
       {
         current_fixture_api_id: fixtureApiId,
-        historical_fixture_api_id: historicalFixtureId,
+        // The table enforces historical_fixture_api_id as unique, so we use a
+        // unique cache key here to avoid collisions across different current fixtures.
+        historical_fixture_api_id: `${fixtureApiId}_${historicalFixtureId}`,
         home_team_api_id: String(historicalFixture?.teams?.home?.id ?? homeTeamId),
         away_team_api_id: String(historicalFixture?.teams?.away?.id ?? awayTeamId),
         kickoff_at: historicalFixture?.fixture?.date || null,
@@ -495,6 +505,30 @@ function normalizePrimaryReason(reason, fixture, oddsRows, h2hRows, selection) {
   return `Based on the available fixture context for ${home} vs ${away} and ${oddsCount} odds rows plus ${h2hCount} h2h rows, ${selection || 'this pick'} is the best conservative choice.`;
 }
 
+function buildFallbackPrimaryPick(fixture, oddsRows, h2hRows) {
+  const sortedOdds = Array.isArray(oddsRows)
+    ? [...oddsRows].filter((row) => Number.isFinite(Number(row?.odd_value))).sort((a, b) => Number(a.odd_value) - Number(b.odd_value))
+    : [];
+  const topOdd = sortedOdds[0] || null;
+  const selection = typeof topOdd?.selection_name === 'string' && topOdd.selection_name.trim()
+    ? topOdd.selection_name.trim()
+    : typeof topOdd?.market_name === 'string' && topOdd.market_name.trim()
+      ? topOdd.market_name.trim()
+      : 'Under 4.5 Goals';
+
+  return {
+    selection,
+    confidence: 0.8,
+    reason: normalizePrimaryReason(
+      '',
+      fixture,
+      oddsRows,
+      h2hRows,
+      selection,
+    ),
+  };
+}
+
 async function savePredictionAndMaybePublish({
   tablesdb,
   databaseId,
@@ -510,14 +544,16 @@ async function savePredictionAndMaybePublish({
 }) {
   const fixtureApiId = String(fixture.api_fixture_id || '').trim();
   const primaryPick = pickAt(parsed.picks, 0);
+  const fallbackPick = buildFallbackPrimaryPick(fixture, oddsRows, h2hRows);
+  const primarySelection = primaryPick?.selection?.trim() || fallbackPick.selection;
   const primaryReason = normalizePrimaryReason(
     primaryPick?.reason,
     fixture,
     oddsRows,
     h2hRows,
-    primaryPick?.selection?.trim() || '',
+    primarySelection,
   );
-  const primarySelection = primaryPick?.selection?.trim() || '';
+  const primaryConfidence = normalizeConfidence(primaryPick?.confidence ?? fallbackPick.confidence);
 
   if (!fixtureApiId || !primarySelection || !primaryReason) {
     return { saved: false, published: false, notified: false };
@@ -536,7 +572,7 @@ async function savePredictionAndMaybePublish({
     model_name: aiResponse?.model || (process.env.DEEPSEEK_MODEL || 'deepseek-chat'),
     prediction_text: primaryReason,
     predicted_winner: parsed.predicted_winner || null,
-    confidence: normalizeConfidence(parsed.confidence),
+    confidence: primaryConfidence,
     confidence_label: parsed.confidence_label || null,
     home_team_name: fixture.home_team_name || null,
     away_team_name: fixture.away_team_name || null,
@@ -547,7 +583,7 @@ async function savePredictionAndMaybePublish({
     match_status_long: fixture.status_long || null,
     primary_market: primarySelection,
     primary_selection: primarySelection,
-    primary_confidence: normalizeConfidence(primaryPick?.confidence),
+    primary_confidence: primaryConfidence,
     primary_reason: primaryReason,
     secondary_market: null,
     secondary_selection: null,
@@ -787,6 +823,15 @@ export default async function main({ res, error: reportError }) {
       const leagueInfo = fixture.league;
       const homeTeam = fixture.teams.home;
       const awayTeam = fixture.teams.away;
+      const fixtureApiId = fixture?.fixture?.id != null ? String(fixture.fixture.id) : null;
+
+      console.log(
+        JSON.stringify({
+          job: 'daily-sync-generate',
+          fixture_api_id: fixtureApiId,
+          stage: 'processing',
+        }),
+      );
 
       const teamRows = [
         { tableId: teamsTable, rowId: `team_${homeTeam.id}`, data: pickTeam(homeTeam) },
@@ -815,8 +860,11 @@ export default async function main({ res, error: reportError }) {
         await upsertRow(tablesdb, databaseId, row.tableId, row.rowId, row.data);
       }
 
+      let oddsSaved = 0;
+      let h2hSaved = 0;
+
       try {
-        await saveFixtureOdds({
+        oddsSaved = await saveFixtureOdds({
           tablesdb,
           databaseId,
           oddsTable,
@@ -834,7 +882,7 @@ export default async function main({ res, error: reportError }) {
       }
 
       try {
-        await saveFixtureH2HHistory({
+        h2hSaved = await saveFixtureH2HHistory({
           tablesdb,
           databaseId,
           h2hTable,
@@ -850,6 +898,16 @@ export default async function main({ res, error: reportError }) {
           }),
         );
       }
+
+      console.log(
+        JSON.stringify({
+          job: 'daily-sync-generate',
+          fixture_api_id: fixtureApiId,
+          odds_rows_saved: oddsSaved,
+          h2h_rows_saved: h2hSaved,
+          stage: 'saved-context',
+        }),
+      );
     }
 
     await createRun(tablesdb, databaseId, syncRunsTable, {
