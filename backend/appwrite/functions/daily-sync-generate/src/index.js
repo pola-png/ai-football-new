@@ -128,6 +128,192 @@ function pickFixture(fixture, league, homeTeam, awayTeam) {
   };
 }
 
+function buildApiFootballUrl(path, query = {}) {
+  const url = new URL(`${required('API_FOOTBALL_BASE_URL').replace(/\/$/, '')}${path}`);
+  for (const [key, value] of Object.entries(query)) {
+    if (value != null && String(value).trim() !== '') {
+      url.searchParams.set(key, String(value));
+    }
+  }
+  return url;
+}
+
+async function fetchApiFootballJson(path, query = {}) {
+  const response = await fetch(buildApiFootballUrl(path, query).toString(), {
+    headers: buildApiFootballHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(`API-Football request failed with status ${response.status}`);
+  }
+
+  return response.json();
+}
+
+function safeIdPart(value) {
+  return String(value ?? '')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80) || 'item';
+}
+
+function determineWinnerLabel(historicalFixture) {
+  const homeWinner = historicalFixture?.teams?.home?.winner;
+  const awayWinner = historicalFixture?.teams?.away?.winner;
+
+  if (homeWinner === true) {
+    return 'home';
+  }
+
+  if (awayWinner === true) {
+    return 'away';
+  }
+
+  const homeGoals = historicalFixture?.goals?.home;
+  const awayGoals = historicalFixture?.goals?.away;
+  if (typeof homeGoals === 'number' && typeof awayGoals === 'number') {
+    if (homeGoals > awayGoals) {
+      return 'home';
+    }
+    if (awayGoals > homeGoals) {
+      return 'away';
+    }
+    return 'draw';
+  }
+
+  return null;
+}
+
+async function saveFixtureOdds({
+  tablesdb,
+  databaseId,
+  oddsTable,
+  fixture,
+}) {
+  const fixtureApiId = String(fixture.api_fixture_id || '').trim();
+  if (!fixtureApiId) {
+    return 0;
+  }
+
+  const payload = await fetchApiFootballJson('/odds', { fixture: fixtureApiId });
+  const oddSnapshots = Array.isArray(payload?.response) ? payload.response : [];
+  let saved = 0;
+  const now = isoNow();
+
+  for (const snapshot of oddSnapshots) {
+    const bookmakers = Array.isArray(snapshot?.bookmakers) ? snapshot.bookmakers : [];
+
+    for (const bookmaker of bookmakers) {
+      const bookmakerName = typeof bookmaker?.name === 'string' ? bookmaker.name.trim() : '';
+      const bookmakerApiId = bookmaker?.id != null ? String(bookmaker.id) : null;
+      const bets = Array.isArray(bookmaker?.bets) ? bookmaker.bets : [];
+
+      for (const bet of bets) {
+        const marketName = typeof bet?.name === 'string' ? bet.name.trim() : '';
+        const betApiId = bet?.id != null ? String(bet.id) : null;
+        const values = Array.isArray(bet?.values) ? bet.values : [];
+
+        for (let index = 0; index < values.length; index += 1) {
+          const value = values[index] || {};
+          const selectionName = typeof value?.value === 'string'
+            ? value.value.trim()
+            : typeof value?.label === 'string'
+              ? value.label.trim()
+              : '';
+          const oddValue = Number.parseFloat(String(value?.odd ?? value?.price ?? ''));
+          const lineValue = value?.handicap != null
+            ? String(value.handicap)
+            : value?.line != null
+              ? String(value.line)
+              : null;
+
+          await upsertRow(
+            tablesdb,
+            databaseId,
+            oddsTable,
+            `odds_${safeIdPart(fixtureApiId)}_${safeIdPart(bookmakerApiId || bookmakerName)}_${safeIdPart(betApiId || marketName)}_${index}`,
+            {
+              fixture_api_id: fixtureApiId,
+              bookmaker_name: bookmakerName || 'Unknown bookmaker',
+              market_name: marketName || 'Unknown market',
+              selection_name: selectionName || 'Unknown selection',
+              odd_value: Number.isFinite(oddValue) ? oddValue : null,
+              line_value: lineValue,
+              last_update_at: snapshot?.update || bookmaker?.update || null,
+              created_at: now,
+              updated_at: now,
+            },
+          );
+          saved += 1;
+        }
+      }
+    }
+  }
+
+  return saved;
+}
+
+async function saveFixtureH2HHistory({
+  tablesdb,
+  databaseId,
+  h2hTable,
+  fixture,
+}) {
+  const fixtureApiId = String(fixture.api_fixture_id || '').trim();
+  const homeTeamId = String(fixture.home_team_api_id || '').trim();
+  const awayTeamId = String(fixture.away_team_api_id || '').trim();
+
+  if (!fixtureApiId || !homeTeamId || !awayTeamId) {
+    return 0;
+  }
+
+  const payload = await fetchApiFootballJson('/fixtures/headtohead', {
+    h2h: `${homeTeamId}-${awayTeamId}`,
+    last: 10,
+  });
+
+  const historicalFixtures = Array.isArray(payload?.response) ? payload.response : [];
+  let saved = 0;
+  const now = isoNow();
+
+  for (const historicalFixture of historicalFixtures) {
+    const historicalFixtureApiId = historicalFixture?.fixture?.id ?? null;
+    if (historicalFixtureApiId == null) {
+      continue;
+    }
+
+    const historicalFixtureId = String(historicalFixtureApiId);
+    const homeGoals = historicalFixture?.goals?.home;
+    const awayGoals = historicalFixture?.goals?.away;
+
+    await upsertRow(
+      tablesdb,
+      databaseId,
+      h2hTable,
+      `h2h_${safeIdPart(fixtureApiId)}_${safeIdPart(historicalFixtureId)}`,
+      {
+        current_fixture_api_id: fixtureApiId,
+        historical_fixture_api_id: historicalFixtureId,
+        home_team_api_id: String(historicalFixture?.teams?.home?.id ?? homeTeamId),
+        away_team_api_id: String(historicalFixture?.teams?.away?.id ?? awayTeamId),
+        kickoff_at: historicalFixture?.fixture?.date || null,
+        home_score: homeGoals != null ? String(homeGoals) : null,
+        away_score: awayGoals != null ? String(awayGoals) : null,
+        winner: determineWinnerLabel(historicalFixture),
+        status_short: historicalFixture?.fixture?.status?.short || 'NS',
+        league_api_id: historicalFixture?.league?.id != null ? String(historicalFixture.league.id) : null,
+        season: historicalFixture?.league?.season != null ? String(historicalFixture.league.season) : null,
+        created_at: now,
+        updated_at: now,
+      },
+    );
+    saved += 1;
+  }
+
+  return saved;
+}
+
 function buildPrompt(fixture, oddsRows, h2hRows) {
   return [
     'You are a football prediction assistant.',
@@ -138,6 +324,8 @@ function buildPrompt(fixture, oddsRows, h2hRows) {
     'That single pick must include: selection, confidence, reason.',
     'Focus on low-odds markets such as over, under, gg/btts, corners, double chance 12, and throw-ins if the data exists.',
     'If throw-in data is not available, skip it.',
+    'Do not answer with "not enough data" or refuse to predict.',
+    'If odds or h2h are sparse, still give the best conservative pick and explain the reasoning from the available fixture context.',
     'Confidence should be a decimal between 0 and 1.',
     'Use confidence_label values like high, medium, or low.',
     '',
@@ -291,6 +479,20 @@ function isWithinFourHours(kickoffAt, now) {
   return kickoffAt.getTime() <= now.getTime() + 4 * 60 * 60 * 1000;
 }
 
+function normalizePrimaryReason(reason, fixture, oddsRows, h2hRows, selection) {
+  const text = typeof reason === 'string' ? reason.trim() : '';
+  if (text && !/not enough data|insufficient/i.test(text)) {
+    return text;
+  }
+
+  const home = fixture?.home_team_name || 'home team';
+  const away = fixture?.away_team_name || 'away team';
+  const oddsCount = Array.isArray(oddsRows) ? oddsRows.length : 0;
+  const h2hCount = Array.isArray(h2hRows) ? h2hRows.length : 0;
+
+  return `Based on the available fixture context for ${home} vs ${away} and ${oddsCount} odds rows plus ${h2hCount} h2h rows, ${selection || 'this pick'} is the best conservative choice.`;
+}
+
 async function savePredictionAndMaybePublish({
   tablesdb,
   databaseId,
@@ -298,13 +500,21 @@ async function savePredictionAndMaybePublish({
   messaging,
   topicId,
   fixture,
+  oddsRows,
+  h2hRows,
   aiResponse,
   parsed,
   startedAt,
 }) {
   const fixtureApiId = String(fixture.api_fixture_id || '').trim();
   const primaryPick = pickAt(parsed.picks, 0);
-  const primaryReason = primaryPick?.reason?.trim() || '';
+  const primaryReason = normalizePrimaryReason(
+    primaryPick?.reason,
+    fixture,
+    oddsRows,
+    h2hRows,
+    primaryPick?.selection?.trim() || '',
+  );
   const primarySelection = primaryPick?.selection?.trim() || '';
 
   if (!fixtureApiId || !primarySelection || !primaryReason) {
@@ -441,7 +651,7 @@ async function generatePredictionsForBatch({
       const aiResponse = await deepSeekChat([
         {
           role: 'system',
-          content: 'Return only valid JSON. Include predicted_winner, confidence, confidence_label, and picks.',
+          content: 'Return only valid JSON. Include predicted_winner, confidence, confidence_label, and picks. Never refuse with not enough data. Always return one best conservative pick.',
         },
         {
           role: 'user',
@@ -469,6 +679,8 @@ async function generatePredictionsForBatch({
         messaging,
         topicId,
         fixture,
+        oddsRows,
+        h2hRows,
         aiResponse,
         parsed,
         startedAt,
@@ -538,10 +750,12 @@ export default async function main({ res, error: reportError }) {
   let generationCompleted = false;
 
   try {
-    const [teamsDelete, leaguesDelete, fixturesDelete] = await Promise.all([
+    const [teamsDelete, leaguesDelete, fixturesDelete, oddsDelete, h2hDelete] = await Promise.all([
       deleteAllRows(tablesdb, databaseId, teamsTable),
       deleteAllRows(tablesdb, databaseId, leaguesTable),
       deleteAllRows(tablesdb, databaseId, fixturesTable),
+      deleteAllRows(tablesdb, databaseId, oddsTable),
+      deleteAllRows(tablesdb, databaseId, h2hTable),
     ]);
 
     await createRun(tablesdb, databaseId, syncRunsTable, {
@@ -552,7 +766,7 @@ export default async function main({ res, error: reportError }) {
       finished_at: isoNow(),
       items_seen: '0',
       items_saved: '0',
-      message: 'Deleted existing teams, leagues, and fixtures before the next sync cycle.',
+      message: 'Deleted existing teams, leagues, fixtures, odds, and h2h rows before the next sync cycle.',
       created_at: isoNow(),
       updated_at: isoNow(),
     });
@@ -597,6 +811,42 @@ export default async function main({ res, error: reportError }) {
 
       for (const row of [...teamRows, leagueRow, fixtureRow]) {
         await upsertRow(tablesdb, databaseId, row.tableId, row.rowId, row.data);
+      }
+
+      try {
+        await saveFixtureOdds({
+          tablesdb,
+          databaseId,
+          oddsTable,
+          fixture: fixtureRow.data,
+        });
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            job: 'daily-sync-generate',
+            fixture_api_id: fixtureRow.data.api_fixture_id,
+            stage: 'odds',
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
+
+      try {
+        await saveFixtureH2HHistory({
+          tablesdb,
+          databaseId,
+          h2hTable,
+          fixture: fixtureRow.data,
+        });
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            job: 'daily-sync-generate',
+            fixture_api_id: fixtureRow.data.api_fixture_id,
+            stage: 'h2h',
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
       }
     }
 
@@ -651,6 +901,8 @@ export default async function main({ res, error: reportError }) {
         teams: teamsDelete?.total ?? null,
         leagues: leaguesDelete?.total ?? null,
         fixtures: fixturesDelete?.total ?? null,
+        odds: oddsDelete?.total ?? null,
+        h2h: h2hDelete?.total ?? null,
       },
       items_seen: String(fixtures.length),
       items_saved: String(generationResult.saved),
