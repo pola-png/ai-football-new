@@ -24,6 +24,17 @@ function buildApiFootballHeaders() {
   };
 }
 
+function buildAppwriteLogger(context) {
+  const log = typeof context?.log === 'function'
+    ? (message) => context.log(message)
+    : (message) => console.log(message);
+  const error = typeof context?.error === 'function'
+    ? (message) => context.error(message)
+    : (message) => console.error(message);
+
+  return { log, error };
+}
+
 function isoNow() {
   return new Date().toISOString();
 }
@@ -199,29 +210,70 @@ function chunkArray(values, chunkSize) {
   return chunks;
 }
 
-async function fetchFixturesByIds(ids) {
+async function fetchFixturesByIds(ids, logFn) {
   const uniqueIds = [...new Set(ids.map((value) => String(value || '').trim()).filter(Boolean))];
   const fixtureMap = new Map();
 
   if (uniqueIds.length === 0) {
+    if (typeof logFn === 'function') {
+      logFn(JSON.stringify({
+        job: 'publish-and-maintain',
+        stage: 'fixture-fetch-skip',
+        reason: 'no-fixture-ids',
+      }));
+    }
     return fixtureMap;
   }
 
   const baseUrl = required('API_FOOTBALL_BASE_URL').replace(/\/$/, '');
+  if (typeof logFn === 'function') {
+    logFn(JSON.stringify({
+      job: 'publish-and-maintain',
+      stage: 'fixture-fetch-start',
+      total_ids: uniqueIds.length,
+    }));
+  }
+
   for (const batch of chunkArray(uniqueIds, 20)) {
     const url = new URL(`${baseUrl}/fixtures`);
     url.searchParams.set('ids', batch.join('-'));
+
+    if (typeof logFn === 'function') {
+      logFn(JSON.stringify({
+        job: 'publish-and-maintain',
+        stage: 'fixture-fetch-batch-start',
+        batch_size: batch.length,
+        request_url: url.toString(),
+      }));
+    }
 
     const response = await fetch(url.toString(), {
       headers: buildApiFootballHeaders(),
     });
 
     if (!response.ok) {
+      if (typeof logFn === 'function') {
+        logFn(JSON.stringify({
+          job: 'publish-and-maintain',
+          stage: 'fixture-fetch-batch-error',
+          batch_size: batch.length,
+          status: response.status,
+        }));
+      }
       throw new Error(`API-Football request failed with status ${response.status}`);
     }
 
     const payload = await response.json();
     const fixtures = Array.isArray(payload?.response) ? payload.response : [];
+
+    if (typeof logFn === 'function') {
+      logFn(JSON.stringify({
+        job: 'publish-and-maintain',
+        stage: 'fixture-fetch-batch-complete',
+        batch_size: batch.length,
+        fixtures_received: fixtures.length,
+      }));
+    }
 
     for (const fixture of fixtures) {
       const fixtureId = fixture?.fixture?.id ?? fixture?.id ?? null;
@@ -229,6 +281,14 @@ async function fetchFixturesByIds(ids) {
         fixtureMap.set(String(fixtureId), fixture);
       }
     }
+  }
+
+  if (typeof logFn === 'function') {
+    logFn(JSON.stringify({
+      job: 'publish-and-maintain',
+      stage: 'fixture-fetch-complete',
+      fixtures_found: fixtureMap.size,
+    }));
   }
 
   return fixtureMap;
@@ -276,13 +336,45 @@ async function publishPredictionRow({
   messaging,
   topicId,
   row,
+  logFn,
 }) {
   const now = isoNow();
   const primarySelection = typeof row.primary_selection === 'string' ? row.primary_selection.trim() : '';
   const primaryReason = typeof row.primary_reason === 'string' ? row.primary_reason.trim() : '';
 
+  if (typeof logFn === 'function') {
+    logFn(JSON.stringify({
+      job: 'publish-and-maintain',
+      fixture_api_id: row.fixture_api_id || null,
+      prediction_id: row.$id || null,
+      stage: 'publish-check',
+      primary_selection: primarySelection || null,
+      has_reason: Boolean(primaryReason),
+      notification_sent: Boolean(row.notification_sent),
+    }));
+  }
+
   if (!primarySelection || !primaryReason) {
+    if (typeof logFn === 'function') {
+      logFn(JSON.stringify({
+        job: 'publish-and-maintain',
+        fixture_api_id: row.fixture_api_id || null,
+        prediction_id: row.$id || null,
+        stage: 'publish-skip',
+        reason: 'missing-primary-selection-or-reason',
+      }));
+    }
     return { published: false, skipped: true };
+  }
+
+  if (typeof logFn === 'function') {
+    logFn(JSON.stringify({
+      job: 'publish-and-maintain',
+      fixture_api_id: row.fixture_api_id || null,
+      prediction_id: row.$id || null,
+      stage: 'publish-update',
+      message: 'Marking prediction as published.',
+    }));
   }
 
   await upsertRow(tablesdb, databaseId, predictionsTable, row.$id, {
@@ -296,6 +388,16 @@ async function publishPredictionRow({
   }
 
   try {
+    if (typeof logFn === 'function') {
+      logFn(JSON.stringify({
+        job: 'publish-and-maintain',
+        fixture_api_id: row.fixture_api_id || null,
+        prediction_id: row.$id || null,
+        stage: 'notification-send',
+        message: 'Sending push notification.',
+      }));
+    }
+
     await messaging.createPush({
       messageId: ID.unique(),
       title: 'New prediction is live',
@@ -319,15 +421,25 @@ async function publishPredictionRow({
 
     return { published: true, notified: true };
   } catch (error) {
-    console.error(
-      JSON.stringify({
+    if (typeof logFn === 'function') {
+      logFn(JSON.stringify({
         job: 'publish-and-maintain',
-        fixture_api_id: row.fixture_api_id,
-        prediction_id: row.$id,
-        stage: 'notification',
+        fixture_api_id: row.fixture_api_id || null,
+        prediction_id: row.$id || null,
+        stage: 'notification-error',
         message: error instanceof Error ? error.message : String(error),
-      }),
-    );
+      }));
+    } else {
+      console.error(
+        JSON.stringify({
+          job: 'publish-and-maintain',
+          fixture_api_id: row.fixture_api_id,
+          prediction_id: row.$id,
+          stage: 'notification',
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
 
     return { published: true, notified: false };
   }
@@ -339,6 +451,7 @@ async function refreshOutcomeRow({
   predictionsTable,
   row,
   fixture,
+  logFn,
 }) {
   if (!fixture) {
     return { updated: false, reason: 'missing-fixture' };
@@ -357,6 +470,23 @@ async function refreshOutcomeRow({
   const nextOutcome = finalStatus && finalHomeGoals != null && finalAwayGoals != null
     ? determineOutcome(finalHomeGoals, finalAwayGoals)
     : existingOutcome || null;
+
+  if (typeof logFn === 'function') {
+    logFn(JSON.stringify({
+      job: 'publish-and-maintain',
+      fixture_api_id: row.fixture_api_id || null,
+      prediction_id: row.$id || null,
+      stage: 'outcome-refresh',
+      status_short: statusShort,
+      status_long: statusLong,
+      current_home_goals: homeGoals,
+      current_away_goals: awayGoals,
+      fulltime_home_goals: finalHomeGoals,
+      fulltime_away_goals: finalAwayGoals,
+      match_outcome: nextOutcome,
+      final: finalStatus,
+    }));
+  }
 
   await upsertRow(tablesdb, databaseId, predictionsTable, row.$id, {
     match_status_short: statusShort,
@@ -391,23 +521,64 @@ export default async function main({ res, error: reportError }) {
   const now = new Date();
   const outcomeLookbackHours = Number.parseInt(process.env.OUTCOME_LOOKBACK_HOURS || '8', 10);
 
+  const log = (message) => {
+    console.log(message);
+  };
+  const logError = (message) => {
+    console.error(message);
+  };
+
   try {
+    log(JSON.stringify({
+      job: 'publish-and-maintain',
+      stage: 'run-start',
+      started_at: startedAt,
+      outcome_lookback_hours: outcomeLookbackHours,
+    }));
+
     const draftPredictions = await fetchAllRows(tablesdb, databaseId, predictionsTable, [
       Query.equal('release_status', 'draft'),
       Query.orderAsc('kickoff_at'),
     ]);
+
+    log(JSON.stringify({
+      job: 'publish-and-maintain',
+      stage: 'drafts-loaded',
+      total_drafts: draftPredictions.length,
+    }));
 
     const publishedPredictions = await fetchAllRows(tablesdb, databaseId, predictionsTable, [
       Query.equal('release_status', 'published'),
       Query.orderAsc('kickoff_at'),
     ]);
 
+    log(JSON.stringify({
+      job: 'publish-and-maintain',
+      stage: 'published-loaded',
+      total_published: publishedPredictions.length,
+    }));
+
     const publishCandidates = draftPredictions.filter((row) => shouldPublishPrediction(row, now));
     const outcomeCandidates = publishedPredictions.filter((row) => needsOutcomeRefreshWithinWindow(row, now, outcomeLookbackHours));
+
+    log(JSON.stringify({
+      job: 'publish-and-maintain',
+      stage: 'candidates-ready',
+      publish_candidates: publishCandidates.length,
+      outcome_candidates: outcomeCandidates.length,
+    }));
 
     let published = 0;
     let notified = 0;
     for (const row of publishCandidates) {
+      log(JSON.stringify({
+        job: 'publish-and-maintain',
+        fixture_api_id: row.fixture_api_id || null,
+        prediction_id: row.$id || null,
+        stage: 'publish-loop',
+        message: 'Processing draft prediction for publication.',
+      }));
+
       const result = await publishPredictionRow({
         tablesdb,
         databaseId,
@@ -415,6 +586,7 @@ export default async function main({ res, error: reportError }) {
         messaging,
         topicId,
         row,
+        logFn: log,
       });
       if (result.published) {
         published += 1;
@@ -428,12 +600,38 @@ export default async function main({ res, error: reportError }) {
       .map((row) => String(row.fixture_api_id || '').trim())
       .filter(Boolean))];
 
-    const fixtureMap = await fetchFixturesByIds(outcomeFixtureIds);
+    log(JSON.stringify({
+      job: 'publish-and-maintain',
+      stage: 'fixture-fetch-start',
+      fixture_ids: outcomeFixtureIds.length,
+    }));
+
+    const fixtureMap = await fetchFixturesByIds(outcomeFixtureIds, log);
+    log(JSON.stringify({
+      job: 'publish-and-maintain',
+      stage: 'fixture-fetch-complete',
+      fixtures_found: fixtureMap.size,
+    }));
     let outcomesUpdated = 0;
 
     for (const row of outcomeCandidates) {
       const fixture = fixtureMap.get(String(row.fixture_api_id || '').trim()) || null;
+      log(JSON.stringify({
+        job: 'publish-and-maintain',
+        fixture_api_id: row.fixture_api_id || null,
+        prediction_id: row.$id || null,
+        stage: 'outcome-loop',
+        fixture_found: Boolean(fixture),
+      }));
+
       if (!fixture) {
+        log(JSON.stringify({
+          job: 'publish-and-maintain',
+          fixture_api_id: row.fixture_api_id || null,
+          prediction_id: row.$id || null,
+          stage: 'outcome-skip',
+          reason: 'fixture-not-found-from-api-football',
+        }));
         continue;
       }
 
@@ -443,6 +641,7 @@ export default async function main({ res, error: reportError }) {
         predictionsTable,
         row,
         fixture,
+        logFn: log,
       });
 
       if (result.updated) {
@@ -462,6 +661,15 @@ export default async function main({ res, error: reportError }) {
       updated_at: isoNow(),
     });
 
+    log(JSON.stringify({
+      job: 'publish-and-maintain',
+      stage: 'run-complete',
+      published,
+      notified,
+      outcomes_updated: outcomesUpdated,
+      outcome_lookback_hours: outcomeLookbackHours,
+    }));
+
     return res.json({
       ok: true,
       items_seen: String(draftPredictions.length + publishedPredictions.length),
@@ -473,6 +681,12 @@ export default async function main({ res, error: reportError }) {
       outcome_lookback_hours: String(outcomeLookbackHours),
     });
   } catch (error) {
+    logError(JSON.stringify({
+      job: 'publish-and-maintain',
+      stage: 'run-error',
+      message: error instanceof Error ? error.message : String(error),
+    }));
+
     await createRun(tablesdb, databaseId, syncRunsTable, {
       job_name: 'publish-and-maintain',
       status: 'failed',

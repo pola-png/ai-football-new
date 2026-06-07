@@ -336,7 +336,6 @@ async function saveFixtureH2HHistory({
 
   const requestQuery = {
     h2h: `${homeTeamId}-${awayTeamId}`,
-    last: 5,
   };
   if (leagueId) {
     requestQuery.league = leagueId;
