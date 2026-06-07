@@ -1,4 +1,4 @@
-import { Client, TablesDB, ID, Query, Messaging } from 'node-appwrite';
+import { Client, TablesDB, ID, Query } from 'node-appwrite';
 
 function required(name) {
   const value = process.env[name];
@@ -15,6 +15,17 @@ function buildClient() {
     .setProject(required('APPWRITE_FUNCTION_PROJECT_ID'))
     .setKey(required('APPWRITE_FUNCTION_API_KEY'));
   return client;
+}
+
+function buildAppwriteLogger(context) {
+  const log = typeof context?.log === 'function'
+    ? (message) => context.log(message)
+    : (message) => console.log(message);
+  const error = typeof context?.error === 'function'
+    ? (message) => context.error(message)
+    : (message) => console.error(message);
+
+  return { log, error };
 }
 
 function buildApiFootballHeaders() {
@@ -209,10 +220,10 @@ async function saveFixtureH2HHistory({
     return 0;
   }
 
-    const payload = await fetchApiFootballJson('/fixtures/headtohead', {
-      h2h: `${homeTeamId}-${awayTeamId}`,
-      last: 5,
-    });
+  const payload = await fetchApiFootballJson('/fixtures/headtohead', {
+    h2h: `${homeTeamId}-${awayTeamId}`,
+    last: 5,
+  });
 
   const historicalFixtures = Array.isArray(payload?.response) ? payload.response : [];
   let saved = 0;
@@ -255,6 +266,85 @@ async function saveFixtureH2HHistory({
   }
 
   return saved;
+}
+
+async function fetchAndSaveH2HForFixtures({
+  tablesdb,
+  databaseId,
+  h2hTable,
+  fixtures,
+  h2hFetchLimit,
+  logger,
+}) {
+  const limit = Number.isFinite(h2hFetchLimit) && h2hFetchLimit > 0
+    ? h2hFetchLimit
+    : fixtures.length;
+  const log = typeof logger === 'function' ? logger : console.log;
+
+  let totalSaved = 0;
+
+  log(
+    JSON.stringify({
+      job: 'daily-sync-generate',
+      stage: 'h2h-batch-start',
+      total_fixtures: fixtures.length,
+      fetch_limit: limit,
+    }),
+  );
+
+  for (const [fixtureIndex, fixture] of fixtures.entries()) {
+    if (fixtureIndex >= limit) {
+      log(
+        JSON.stringify({
+          job: 'daily-sync-generate',
+          fixture_api_id: fixture.api_fixture_id || null,
+          stage: 'h2h-skipped',
+          reason: 'h2h-fetch-limit-reached',
+        }),
+      );
+      continue;
+    }
+
+      try {
+      const saved = await saveFixtureH2HHistory({
+        tablesdb,
+        databaseId,
+        h2hTable,
+        fixture,
+      });
+
+      totalSaved += saved;
+
+      log(
+        JSON.stringify({
+          job: 'daily-sync-generate',
+          fixture_api_id: fixture.api_fixture_id || null,
+          stage: 'h2h',
+          h2h_rows_saved: saved,
+        }),
+      );
+    } catch (error) {
+      log(
+        JSON.stringify({
+          job: 'daily-sync-generate',
+          fixture_api_id: fixture.api_fixture_id || null,
+          stage: 'h2h',
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+  }
+
+  log(
+    JSON.stringify({
+      job: 'daily-sync-generate',
+      stage: 'h2h-batch-complete',
+      h2h_fixtures_processed: Math.min(fixtures.length, limit),
+      h2h_rows_saved: totalSaved,
+    }),
+  );
+
+  return { totalSaved, h2hFetchedFixtures: Math.min(fixtures.length, limit) };
 }
 
 function buildPrompt(fixture, h2hRows) {
@@ -367,6 +457,152 @@ async function deepSeekChat(messages) {
   return response.json();
 }
 
+function stripCodeFences(text) {
+  const value = typeof text === 'string' ? text.trim() : '';
+  if (!value) {
+    return '';
+  }
+
+  const fenceMatch = value.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  if (fenceMatch) {
+    return fenceMatch[1].trim();
+  }
+
+  return value;
+}
+
+function extractFirstJsonBlock(text) {
+  const value = stripCodeFences(text);
+  if (!value) {
+    return '';
+  }
+
+  const firstBrace = value.indexOf('{');
+  const lastBrace = value.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    return value.slice(firstBrace, lastBrace + 1);
+  }
+
+  const firstBracket = value.indexOf('[');
+  const lastBracket = value.lastIndexOf(']');
+  if (firstBracket >= 0 && lastBracket > firstBracket) {
+    return value.slice(firstBracket, lastBracket + 1);
+  }
+
+  return value;
+}
+
+function parsePredictionJson(text) {
+  const candidate = extractFirstJsonBlock(text);
+  if (!candidate) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(candidate);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizePredictionShape(parsed) {
+  const safe = parsed && typeof parsed === 'object' ? parsed : {};
+  const picks = Array.isArray(safe.picks) ? safe.picks : [];
+
+  return {
+    predicted_winner: typeof safe.predicted_winner === 'string' ? safe.predicted_winner : null,
+    confidence: typeof safe.confidence === 'number' ? safe.confidence : null,
+    confidence_label: typeof safe.confidence_label === 'string' ? safe.confidence_label : null,
+    picks: picks.map((pick) => ({
+      selection: typeof pick?.selection === 'string' ? pick.selection : null,
+      confidence: typeof pick?.confidence === 'number' ? pick.confidence : null,
+      reason: typeof pick?.reason === 'string' ? pick.reason : null,
+    })),
+  };
+}
+
+async function requestAiPrediction(fixtureApiId, prompt, fixture, logFn) {
+  const systemPrompt = [
+    'Return only valid JSON.',
+    'Include predicted_winner, confidence, confidence_label, and picks.',
+    'picks must be an array with exactly 1 item.',
+    'The single pick must include selection, confidence, and reason.',
+    'Do not add markdown, explanation text, or code fences.',
+    'Use fixture context and h2h only.',
+  ].join(' ');
+
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: prompt },
+  ];
+
+  if (typeof logFn === 'function') {
+    logFn(
+      JSON.stringify({
+        job: 'daily-sync-generate',
+        fixture_api_id: fixtureApiId,
+        stage: 'ai-request',
+        message: 'Sending prediction request to DeepSeek.',
+      }),
+    );
+  }
+
+  let aiResponse = await deepSeekChat(messages);
+  let content = aiResponse?.choices?.[0]?.message?.content || '';
+  let parsed = parsePredictionJson(content);
+
+  if (!parsed) {
+    if (typeof logFn === 'function') {
+      logFn(
+        JSON.stringify({
+          job: 'daily-sync-generate',
+          fixture_api_id: fixtureApiId,
+          stage: 'ai-repair',
+          message: 'Initial AI response was not clean JSON. Sending repair prompt.',
+        }),
+      );
+    }
+
+    const repairResponse = await deepSeekChat([
+      { role: 'system', content: systemPrompt },
+      {
+        role: 'user',
+        content: [
+          prompt,
+          '',
+          'Your previous answer was not valid JSON.',
+          'Return the exact same prediction content again, but only as valid JSON.',
+          `FIXTURE_ID: ${fixtureApiId}`,
+          `FIXTURE_SNAPSHOT: ${JSON.stringify(fixture)}`,
+        ].join('\n'),
+      },
+    ]);
+
+    aiResponse = repairResponse;
+    content = aiResponse?.choices?.[0]?.message?.content || '';
+    parsed = parsePredictionJson(content);
+  }
+
+  if (typeof logFn === 'function') {
+    logFn(
+      JSON.stringify({
+        job: 'daily-sync-generate',
+        fixture_api_id: fixtureApiId,
+        stage: 'ai-complete',
+        parsed_ok: Boolean(parsed),
+      }),
+    );
+  }
+
+  return {
+    aiResponse,
+    rawContent: content,
+    parsed: normalizePredictionShape(parsed),
+    parsedOk: Boolean(parsed),
+  };
+}
+
 async function fetchRows(tablesdb, databaseId, tableId, queries) {
   const result = await tablesdb.listRows({
     databaseId,
@@ -447,35 +683,6 @@ function toDate(value) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function isWithinFourHours(kickoffAt, now) {
-  if (!kickoffAt) {
-    return false;
-  }
-
-  return kickoffAt.getTime() <= now.getTime() + 4 * 60 * 60 * 1000;
-}
-
-function shouldFetchOptionalContext(fixture, fixtureIndex, optionalLimit, optionalWindowHours, now) {
-  if (!Number.isFinite(optionalLimit) || optionalLimit <= 0) {
-    return false;
-  }
-
-  if (fixtureIndex >= optionalLimit) {
-    return false;
-  }
-
-  if (!Number.isFinite(optionalWindowHours) || optionalWindowHours <= 0) {
-    return true;
-  }
-
-  const kickoffAt = toDate(fixture?.kickoff_at || fixture?.fixture?.date || null);
-  if (!kickoffAt) {
-    return false;
-  }
-
-  return kickoffAt.getTime() <= now.getTime() + optionalWindowHours * 60 * 60 * 1000;
-}
-
 function normalizePrimaryReason(reason, fixture, h2hRows, selection) {
   const text = typeof reason === 'string' ? reason.trim() : '';
   if (text && !/not enough data|insufficient|low data|no history/i.test(text)) {
@@ -520,13 +727,12 @@ async function savePredictionAndMaybePublish({
   databaseId,
   fixturesTable,
   predictionsTable,
-  messaging,
-  topicId,
   fixture,
   h2hRows,
   aiResponse,
   parsed,
   startedAt,
+  logFn,
 }) {
   const fixtureApiId = String(fixture.api_fixture_id || '').trim();
   const primaryPick = pickAt(parsed.picks, 0);
@@ -540,17 +746,9 @@ async function savePredictionAndMaybePublish({
   );
   const primaryConfidence = normalizeConfidence(primaryPick?.confidence ?? fallbackPick.confidence);
 
-  if (!fixtureApiId || !primarySelection || !primaryReason) {
+  if (!fixtureApiId) {
     return { saved: false, published: false, notified: false };
   }
-
-  const kickoffAt = toDate(fixture.kickoff_at);
-  const now = new Date();
-  const releaseAt = kickoffAt
-    ? new Date(kickoffAt.getTime() - 4 * 60 * 60 * 1000).toISOString()
-    : null;
-  const publishNow = kickoffAt ? isWithinFourHours(kickoffAt, now) : false;
-  const publishedAt = publishNow ? isoNow() : null;
 
   await upsertRow(tablesdb, databaseId, predictionsTable, `prediction_${fixtureApiId}`, {
     fixture_api_id: fixtureApiId,
@@ -578,10 +776,10 @@ async function savePredictionAndMaybePublish({
     tertiary_selection: null,
     tertiary_confidence: null,
     tertiary_reason: null,
-    release_status: publishNow ? 'published' : 'draft',
-    release_at: releaseAt,
+    release_status: 'published',
+    release_at: startedAt,
     generated_at: startedAt,
-    published_at: publishedAt,
+    published_at: startedAt,
     notification_sent: false,
     notification_sent_at: null,
     created_at: startedAt,
@@ -596,44 +794,19 @@ async function savePredictionAndMaybePublish({
     });
   }
 
-  if (!publishNow) {
-    return { saved: true, published: false, notified: false };
-  }
-
-  try {
-    await messaging.createPush({
-      messageId: ID.unique(),
-      title: 'New prediction is live',
-      body: primaryReason,
-      topics: [topicId],
-      data: {
-        fixture_api_id: fixtureApiId,
-        prediction_id: `prediction_${fixtureApiId}`,
-        release_status: 'published',
-      },
-      draft: false,
-    });
-
-    await upsertRow(tablesdb, databaseId, predictionsTable, `prediction_${fixtureApiId}`, {
-      release_status: 'published',
-      published_at: publishedAt || isoNow(),
-      notification_sent: true,
-      notification_sent_at: isoNow(),
-      updated_at: isoNow(),
-    });
-
-    return { saved: true, published: true, notified: true };
-  } catch (error) {
-    console.error(
+  if (typeof logFn === 'function') {
+    logFn(
       JSON.stringify({
         job: 'daily-sync-generate',
         fixture_api_id: fixtureApiId,
-        stage: 'notification',
-        message: error instanceof Error ? error.message : String(error),
+        stage: 'prediction-saved',
+        primary_market: primarySelection,
+        primary_confidence: primaryConfidence,
       }),
     );
-    return { saved: true, published: true, notified: false };
   }
+
+  return { saved: true, published: true, notified: false };
 }
 
 async function generatePredictionsForBatch({
@@ -642,15 +815,24 @@ async function generatePredictionsForBatch({
   fixtureContexts,
   fixturesTable,
   predictionsTable,
-  messaging,
-  topicId,
   startedAt,
+  logFn,
 }) {
   let saved = 0;
   let failed = 0;
   let published = 0;
   let notified = 0;
-  const concurrency = parseConcurrency(process.env.APPWRITE_PREDICTION_CONCURRENCY || 1);
+  const concurrency = parseConcurrency(process.env.APPWRITE_PREDICTION_CONCURRENCY || 10);
+  const logger = typeof logFn === 'function' ? logFn : console.log;
+
+  logger(
+    JSON.stringify({
+      job: 'daily-sync-generate',
+      stage: 'prediction-batch-start',
+      total_fixtures: fixtureContexts.length,
+      concurrency,
+    }),
+  );
 
   await runWithConcurrency(fixtureContexts, concurrency, async (contextRow) => {
     try {
@@ -658,7 +840,7 @@ async function generatePredictionsForBatch({
       const fixtureApiId = contextRow?.fixtureApiId || fixture?.api_fixture_id || null;
       if (!fixtureApiId) {
         failed += 1;
-        console.error(
+        logger(
           JSON.stringify({
             job: 'daily-sync-generate',
             message: 'Skipping fixture with missing api_fixture_id',
@@ -669,30 +851,45 @@ async function generatePredictionsForBatch({
       }
 
       const h2hRows = Array.isArray(contextRow?.h2hRows) ? contextRow.h2hRows : [];
+      logger(
+        JSON.stringify({
+          job: 'daily-sync-generate',
+          fixture_api_id: fixtureApiId,
+          stage: 'prediction-start',
+          h2h_rows: h2hRows.length,
+        }),
+      );
 
       const prompt = buildPrompt(fixture, h2hRows);
-      const aiResponse = await deepSeekChat([
-      {
-        role: 'system',
-          content: 'Return only valid JSON. Include predicted_winner, confidence, confidence_label, and picks. Use fixture context and h2h only. Always return one best conservative pick with a clear reason from the fixture context if needed.',
-      },
-        {
-          role: 'user',
-          content: prompt,
-        },
-      ]);
-
-      const content = aiResponse?.choices?.[0]?.message?.content || '{}';
-      let parsed;
+      let aiResult;
       try {
-        parsed = JSON.parse(content);
-      } catch {
-        parsed = {
-          predicted_winner: null,
-          confidence: null,
-          confidence_label: null,
-          picks: [],
+        aiResult = await requestAiPrediction(fixtureApiId, prompt, fixture, logFn);
+      } catch (error) {
+        logger(
+          JSON.stringify({
+            job: 'daily-sync-generate',
+            fixture_api_id: fixtureApiId,
+            stage: 'ai',
+            message: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        aiResult = {
+          aiResponse: null,
+          rawContent: '',
+          parsed: normalizePredictionShape(null),
+          parsedOk: false,
         };
+      }
+
+      if (!aiResult.parsedOk) {
+        logger(
+          JSON.stringify({
+            job: 'daily-sync-generate',
+            fixture_api_id: fixtureApiId,
+            stage: 'ai',
+            message: 'AI returned content that could not be parsed cleanly; using fallback normalization.',
+          }),
+        );
       }
 
       const result = await savePredictionAndMaybePublish({
@@ -700,22 +897,21 @@ async function generatePredictionsForBatch({
         databaseId,
         fixturesTable,
         predictionsTable,
-        messaging,
-        topicId,
         fixture,
         h2hRows,
-        aiResponse,
-        parsed,
+        aiResponse: aiResult.aiResponse,
+        parsed: aiResult.parsed,
         startedAt,
+        logFn,
       });
 
       if (!result.saved) {
         failed += 1;
-        console.error(
+        logger(
           JSON.stringify({
             job: 'daily-sync-generate',
             fixture_api_id: fixtureApiId,
-            message: 'Skipping prediction without a usable primary pick.',
+            message: 'Prediction save failed for this fixture.',
           }),
         );
         return;
@@ -728,17 +924,19 @@ async function generatePredictionsForBatch({
       if (result.notified) {
         notified += 1;
       }
-    } catch (error) {
-      failed += 1;
-      console.error(
-        JSON.stringify({
-          job: 'daily-sync-generate',
-          fixture_api_id: fixture.api_fixture_id || null,
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
     }
   });
+
+  logger(
+    JSON.stringify({
+      job: 'daily-sync-generate',
+      stage: 'prediction-batch-complete',
+      saved,
+      failed,
+      published,
+      notified,
+    }),
+  );
 
   return { saved, failed, published, notified };
 }
@@ -747,7 +945,7 @@ export default async function main(context) {
   const { res, error: reportError } = context;
   const client = buildClient();
   const tablesdb = new TablesDB(client);
-  const messaging = new Messaging(client);
+  const { log: appwriteLog, error: appwriteError } = buildAppwriteLogger(context);
 
   const databaseId = required('APPWRITE_DATABASE_ID');
   const teamsTable = required('APPWRITE_TABLE_TEAMS');
@@ -756,7 +954,6 @@ export default async function main(context) {
   const h2hTable = required('APPWRITE_TABLE_FIXTURE_H2H_HISTORY');
   const predictionsTable = required('APPWRITE_TABLE_PREDICTIONS');
   const syncRunsTable = required('APPWRITE_TABLE_SYNC_RUNS');
-  const topicId = required('APPWRITE_TOPIC_PREDICTIONS');
 
   const league = process.env.API_FOOTBALL_LEAGUE ? Number(process.env.API_FOOTBALL_LEAGUE) : null;
   const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(0);
@@ -802,19 +999,22 @@ export default async function main(context) {
 
     const payload = await response.json();
     const fixtures = Array.isArray(payload?.response) ? payload.response : [];
+    appwriteLog(
+      JSON.stringify({
+        job: 'daily-sync-generate',
+        stage: 'fixtures-fetched',
+        date: fetchDate,
+        total_fixtures: fixtures.length,
+      }),
+    );
 
-    const optionalContextLimit = Number.parseInt(process.env.OPTIONAL_CONTEXT_FIXTURE_LIMIT || '12', 10);
-    const optionalContextWindowHours = Number.parseInt(process.env.OPTIONAL_CONTEXT_WINDOW_HOURS || '24', 10);
-    const syncNow = new Date();
-
-    for (const [fixtureIndex, fixture] of fixtures.entries()) {
+    for (const fixture of fixtures) {
       const leagueInfo = fixture.league;
       const homeTeam = fixture.teams.home;
       const awayTeam = fixture.teams.away;
       const fixtureApiId = fixture?.fixture?.id != null ? String(fixture.fixture.id) : null;
 
-      (context.log || console.log).call(
-        context,
+      appwriteLog(
         JSON.stringify({
           job: 'daily-sync-generate',
           fixture_api_id: fixtureApiId,
@@ -849,52 +1049,11 @@ export default async function main(context) {
         await upsertRow(tablesdb, databaseId, row.tableId, row.rowId, row.data);
       }
 
-      let h2hSaved = 0;
-      const fetchOptionalContext = shouldFetchOptionalContext(
-        fixtureRow.data,
-        fixtureIndex,
-        optionalContextLimit,
-        optionalContextWindowHours,
-        syncNow,
-      );
-
-      if (fetchOptionalContext) {
-        try {
-          h2hSaved = await saveFixtureH2HHistory({
-            tablesdb,
-            databaseId,
-            h2hTable,
-            fixture: fixtureRow.data,
-          });
-        } catch (error) {
-          console.error(
-            JSON.stringify({
-              job: 'daily-sync-generate',
-              fixture_api_id: fixtureRow.data.api_fixture_id,
-              stage: 'h2h',
-              message: error instanceof Error ? error.message : String(error),
-            }),
-          );
-        }
-      } else {
-        (context.log || console.log).call(
-          context,
-          JSON.stringify({
-            job: 'daily-sync-generate',
-            fixture_api_id: fixtureRow.data.api_fixture_id,
-            stage: 'optional-context-skipped',
-            reason: 'fixture-only-prediction-batch',
-          }),
-        );
-      }
-
-      (context.log || console.log).call(
-        context,
+      appwriteLog(
         JSON.stringify({
           job: 'daily-sync-generate',
           fixture_api_id: fixtureApiId,
-          h2h_rows_saved: h2hSaved,
-          stage: 'saved-context',
+          stage: 'saved-fixture',
         }),
       );
     }
@@ -917,8 +1076,46 @@ export default async function main(context) {
       Query.equal('sync_run_id', syncRunId),
       Query.orderAsc('$createdAt'),
     ]);
+
+    appwriteLog(
+      JSON.stringify({
+        job: 'daily-sync-generate',
+        stage: 'fixtures-loaded',
+        total_fixtures: syncedFixtures.length,
+      }),
+    );
+
+    const h2hFetchLimit = Number.parseInt(
+      process.env.H2H_FETCH_FIXTURE_LIMIT || String(Math.max(1, syncedFixtures.length)),
+      10,
+    );
+    const h2hFetchResult = await fetchAndSaveH2HForFixtures({
+      tablesdb,
+      databaseId,
+      h2hTable,
+      fixtures: syncedFixtures,
+      h2hFetchLimit,
+      logger: appwriteLog,
+    });
     const syncedH2hRows = await fetchAllRows(tablesdb, databaseId, h2hTable, []);
     const fixtureContexts = mergeFixtureContexts(syncedFixtures, syncedH2hRows);
+
+    appwriteLog(
+      JSON.stringify({
+        job: 'daily-sync-generate',
+        stage: 'h2h-loaded',
+        h2h_rows: syncedH2hRows.length,
+        h2h_fixtures_processed: h2hFetchResult.h2hFetchedFixtures,
+      }),
+    );
+
+    appwriteLog(
+      JSON.stringify({
+        job: 'daily-sync-generate',
+        stage: 'merged-contexts-ready',
+        total_contexts: fixtureContexts.length,
+      }),
+    );
 
     const generationResult = await generatePredictionsForBatch({
       tablesdb,
@@ -926,9 +1123,8 @@ export default async function main(context) {
       fixtureContexts,
       fixturesTable,
       predictionsTable,
-      messaging,
-      topicId,
       startedAt,
+      logFn: appwriteLog,
     });
     generationCompleted = true;
 
@@ -945,6 +1141,21 @@ export default async function main(context) {
       updated_at: isoNow(),
     });
 
+    appwriteLog(
+      JSON.stringify({
+        job: 'daily-sync-generate',
+        stage: 'run-complete',
+        sync_run_id: syncRunId,
+        fixtures_total: fixtures.length,
+        contexts_total: fixtureContexts.length,
+        predictions_saved: generationResult.saved,
+        predictions_failed: generationResult.failed,
+        predictions_published: generationResult.published,
+        h2h_fixtures_processed: h2hFetchResult.h2hFetchedFixtures,
+        h2h_rows_saved: h2hFetchResult.totalSaved,
+      }),
+    );
+
     return res.json({
       ok: true,
       cleaned: {
@@ -958,6 +1169,8 @@ export default async function main(context) {
       items_failed: String(generationResult.failed),
       published: String(generationResult.published),
       notified: String(generationResult.notified),
+      h2h_fixtures_processed: String(h2hFetchResult.h2hFetchedFixtures),
+      h2h_rows_saved: String(h2hFetchResult.totalSaved),
       sync_run_id: syncRunId,
     });
   } catch (error) {
@@ -974,7 +1187,7 @@ export default async function main(context) {
       updated_at: isoNow(),
     });
 
-    reportError(error instanceof Error ? error.message : String(error));
+    appwriteError(error instanceof Error ? error.message : String(error));
     throw error;
   }
 }
