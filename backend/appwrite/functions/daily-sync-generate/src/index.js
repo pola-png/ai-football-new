@@ -168,32 +168,6 @@ function safeIdPart(value) {
     .slice(0, 80) || 'item';
 }
 
-function shouldKeepOddsRow(marketName, selectionName) {
-  const market = String(marketName || '').toLowerCase();
-  const selection = String(selectionName || '').toLowerCase();
-  const allowedMarkets = [
-    'match winner',
-    'home team',
-    'away team',
-    'goals',
-    'over',
-    'under',
-    'both teams',
-    'btts',
-    'double chance',
-    'corners',
-    'cards',
-    'handicap',
-    'throw',
-  ];
-
-  if (allowedMarkets.some((term) => market.includes(term) || selection.includes(term))) {
-    return true;
-  }
-
-  return market.includes('goals') || market.includes('corner') || market.includes('btts') || market.includes('double chance');
-}
-
 function determineWinnerLabel(historicalFixture) {
   const homeWinner = historicalFixture?.teams?.home?.winner;
   const awayWinner = historicalFixture?.teams?.away?.winner;
@@ -219,84 +193,6 @@ function determineWinnerLabel(historicalFixture) {
   }
 
   return null;
-}
-
-async function saveFixtureOdds({
-  tablesdb,
-  databaseId,
-  oddsTable,
-  fixture,
-}) {
-  const fixtureApiId = String(fixture.api_fixture_id || '').trim();
-  if (!fixtureApiId) {
-    return 0;
-  }
-
-  const payload = await fetchApiFootballJson('/odds', { fixture: fixtureApiId });
-  const oddSnapshots = Array.isArray(payload?.response) ? payload.response : [];
-  let saved = 0;
-  const now = isoNow();
-  const maxRowsPerFixture = Number.parseInt(process.env.ODDS_MAX_ROWS_PER_FIXTURE || '120', 10);
-
-  for (const snapshot of oddSnapshots) {
-    const bookmakers = Array.isArray(snapshot?.bookmakers) ? snapshot.bookmakers : [];
-
-    for (const bookmaker of bookmakers) {
-      const bookmakerName = typeof bookmaker?.name === 'string' ? bookmaker.name.trim() : '';
-      const bookmakerApiId = bookmaker?.id != null ? String(bookmaker.id) : null;
-      const bets = Array.isArray(bookmaker?.bets) ? bookmaker.bets : [];
-
-      for (const bet of bets) {
-        const marketName = typeof bet?.name === 'string' ? bet.name.trim() : '';
-        const betApiId = bet?.id != null ? String(bet.id) : null;
-        const values = Array.isArray(bet?.values) ? bet.values : [];
-
-        for (let index = 0; index < values.length; index += 1) {
-          const value = values[index] || {};
-          const selectionName = typeof value?.value === 'string'
-            ? value.value.trim()
-            : typeof value?.label === 'string'
-              ? value.label.trim()
-              : '';
-          const oddValue = Number.parseFloat(String(value?.odd ?? value?.price ?? ''));
-          const lineValue = value?.handicap != null
-            ? String(value.handicap)
-            : value?.line != null
-              ? String(value.line)
-              : null;
-
-          if (!shouldKeepOddsRow(marketName, selectionName)) {
-            continue;
-          }
-
-          if (saved >= maxRowsPerFixture) {
-            return saved;
-          }
-
-          await upsertRow(
-            tablesdb,
-            databaseId,
-            oddsTable,
-            `odds_${safeIdPart(fixtureApiId)}_${safeIdPart(bookmakerApiId || bookmakerName)}_${safeIdPart(betApiId || marketName)}_${index}`,
-            {
-              fixture_api_id: fixtureApiId,
-              bookmaker_name: bookmakerName || 'Unknown bookmaker',
-              market_name: marketName || 'Unknown market',
-              selection_name: selectionName || 'Unknown selection',
-              odd_value: Number.isFinite(oddValue) ? oddValue : null,
-              line_value: lineValue,
-              last_update_at: snapshot?.update || bookmaker?.update || null,
-              created_at: now,
-              updated_at: now,
-            },
-          );
-          saved += 1;
-        }
-      }
-    }
-  }
-
-  return saved;
 }
 
 async function saveFixtureH2HHistory({
@@ -361,22 +257,20 @@ async function saveFixtureH2HHistory({
   return saved;
 }
 
-function buildPrompt(fixture, oddsRows, h2hRows) {
+function buildPrompt(fixture, h2hRows) {
   return [
     'You are a football prediction assistant.',
-    'Use the fixture, and if available the odds and h2h history, to produce a single JSON object.',
+    'Use the fixture and h2h history to produce a single JSON object.',
     'Return valid JSON only.',
     'Required JSON keys: predicted_winner, confidence, confidence_label, picks.',
     'The picks array must contain exactly 1 entry.',
     'That single pick must include: selection, confidence, reason.',
-    'Focus on low-odds markets such as over, under, gg/btts, corners, double chance 12, and throw-ins when those markets are available.',
-    'If throw-in data is not available, skip it.',
+    'Focus on fixture context and h2h history when choosing the best conservative pick.',
     'Always provide one best conservative pick with a clear reason.',
     'Confidence should be a decimal between 0 and 1.',
     'Use confidence_label values like high, medium, or low.',
     '',
     `FIXTURE: ${JSON.stringify(fixture)}`,
-    `ODDS: ${JSON.stringify(oddsRows)}`,
     `H2H_HISTORY: ${JSON.stringify(h2hRows)}`,
     '',
     'JSON EXAMPLE:',
@@ -529,8 +423,7 @@ function buildRowIndex(rows, keySelector) {
   return index;
 }
 
-function mergeFixtureContexts(fixtures, oddsRows, h2hRows) {
-  const oddsIndex = buildRowIndex(oddsRows, (row) => row.fixture_api_id);
+function mergeFixtureContexts(fixtures, h2hRows) {
   const h2hIndex = buildRowIndex(h2hRows, (row) => row.current_fixture_api_id);
 
   return Array.isArray(fixtures)
@@ -539,7 +432,6 @@ function mergeFixtureContexts(fixtures, oddsRows, h2hRows) {
         return {
           fixture,
           fixtureApiId,
-          oddsRows: fixtureApiId ? (oddsIndex.get(String(fixtureApiId)) || []) : [],
           h2hRows: fixtureApiId ? (h2hIndex.get(String(fixtureApiId)) || []) : [],
         };
       })
@@ -584,7 +476,7 @@ function shouldFetchOptionalContext(fixture, fixtureIndex, optionalLimit, option
   return kickoffAt.getTime() <= now.getTime() + optionalWindowHours * 60 * 60 * 1000;
 }
 
-function normalizePrimaryReason(reason, fixture, oddsRows, h2hRows, selection) {
+function normalizePrimaryReason(reason, fixture, h2hRows, selection) {
   const text = typeof reason === 'string' ? reason.trim() : '';
   if (text && !/not enough data|insufficient|low data|no history/i.test(text)) {
     return text;
@@ -592,19 +484,24 @@ function normalizePrimaryReason(reason, fixture, oddsRows, h2hRows, selection) {
 
   const home = fixture?.home_team_name || 'home team';
   const away = fixture?.away_team_name || 'away team';
-  return `${selection || 'This pick'} is the best available choice for ${home} vs ${away} based on the fixture context, odds movement, and recent match history.`;
+  const h2hCount = Array.isArray(h2hRows) ? h2hRows.length : 0;
+  return `${selection || 'This pick'} is the best available choice for ${home} vs ${away} based on the fixture context${h2hCount ? ` and ${h2hCount} recent head-to-head matches` : ''}.`;
 }
 
-function buildFallbackPrimaryPick(fixture, oddsRows, h2hRows) {
-  const sortedOdds = Array.isArray(oddsRows)
-    ? [...oddsRows].filter((row) => Number.isFinite(Number(row?.odd_value))).sort((a, b) => Number(a.odd_value) - Number(b.odd_value))
-    : [];
-  const topOdd = sortedOdds[0] || null;
-  const selection = typeof topOdd?.selection_name === 'string' && topOdd.selection_name.trim()
-    ? topOdd.selection_name.trim()
-    : typeof topOdd?.market_name === 'string' && topOdd.market_name.trim()
-      ? topOdd.market_name.trim()
-      : 'Under 4.5 Goals';
+function buildFallbackPrimaryPick(fixture, h2hRows) {
+  const h2hCount = Array.isArray(h2hRows) ? h2hRows.length : 0;
+  const totalGoals = Array.isArray(h2hRows)
+    ? h2hRows.reduce((sum, row) => {
+        const home = Number(row?.home_score);
+        const away = Number(row?.away_score);
+        if (!Number.isFinite(home) || !Number.isFinite(away)) {
+          return sum;
+        }
+        return sum + home + away;
+      }, 0)
+    : 0;
+  const averageGoals = h2hCount > 0 ? totalGoals / h2hCount : 0;
+  const selection = averageGoals >= 2 ? 'Over 1.5 Goals' : 'Under 4.5 Goals';
 
   return {
     selection,
@@ -612,7 +509,6 @@ function buildFallbackPrimaryPick(fixture, oddsRows, h2hRows) {
     reason: normalizePrimaryReason(
       '',
       fixture,
-      oddsRows,
       h2hRows,
       selection,
     ),
@@ -627,7 +523,6 @@ async function savePredictionAndMaybePublish({
   messaging,
   topicId,
   fixture,
-  oddsRows,
   h2hRows,
   aiResponse,
   parsed,
@@ -635,12 +530,11 @@ async function savePredictionAndMaybePublish({
 }) {
   const fixtureApiId = String(fixture.api_fixture_id || '').trim();
   const primaryPick = pickAt(parsed.picks, 0);
-  const fallbackPick = buildFallbackPrimaryPick(fixture, oddsRows, h2hRows);
+  const fallbackPick = buildFallbackPrimaryPick(fixture, h2hRows);
   const primarySelection = primaryPick?.selection?.trim() || fallbackPick.selection;
   const primaryReason = normalizePrimaryReason(
     primaryPick?.reason,
     fixture,
-    oddsRows,
     h2hRows,
     primarySelection,
   );
@@ -774,14 +668,13 @@ async function generatePredictionsForBatch({
         return;
       }
 
-      const oddsRows = Array.isArray(contextRow?.oddsRows) ? contextRow.oddsRows : [];
       const h2hRows = Array.isArray(contextRow?.h2hRows) ? contextRow.h2hRows : [];
 
-      const prompt = buildPrompt(fixture, oddsRows, h2hRows);
+      const prompt = buildPrompt(fixture, h2hRows);
       const aiResponse = await deepSeekChat([
       {
         role: 'system',
-          content: 'Return only valid JSON. Include predicted_winner, confidence, confidence_label, and picks. Odds and h2h are optional enrichment. Always return one best conservative pick with a clear reason from the fixture context if needed.',
+          content: 'Return only valid JSON. Include predicted_winner, confidence, confidence_label, and picks. Use fixture context and h2h only. Always return one best conservative pick with a clear reason from the fixture context if needed.',
       },
         {
           role: 'user',
@@ -810,7 +703,6 @@ async function generatePredictionsForBatch({
         messaging,
         topicId,
         fixture,
-        oddsRows,
         h2hRows,
         aiResponse,
         parsed,
@@ -861,7 +753,6 @@ export default async function main(context) {
   const teamsTable = required('APPWRITE_TABLE_TEAMS');
   const leaguesTable = required('APPWRITE_TABLE_LEAGUES');
   const fixturesTable = required('APPWRITE_TABLE_FIXTURES');
-  const oddsTable = required('APPWRITE_TABLE_FIXTURE_ODDS');
   const h2hTable = required('APPWRITE_TABLE_FIXTURE_H2H_HISTORY');
   const predictionsTable = required('APPWRITE_TABLE_PREDICTIONS');
   const syncRunsTable = required('APPWRITE_TABLE_SYNC_RUNS');
@@ -882,11 +773,10 @@ export default async function main(context) {
   let generationCompleted = false;
 
   try {
-    const [teamsDelete, leaguesDelete, fixturesDelete, oddsDelete, h2hDelete] = await Promise.all([
+    const [teamsDelete, leaguesDelete, fixturesDelete, h2hDelete] = await Promise.all([
       deleteAllRows(tablesdb, databaseId, teamsTable),
       deleteAllRows(tablesdb, databaseId, leaguesTable),
       deleteAllRows(tablesdb, databaseId, fixturesTable),
-      deleteAllRows(tablesdb, databaseId, oddsTable),
       deleteAllRows(tablesdb, databaseId, h2hTable),
     ]);
 
@@ -898,7 +788,7 @@ export default async function main(context) {
       finished_at: isoNow(),
       items_seen: '0',
       items_saved: '0',
-      message: 'Deleted existing teams, leagues, fixtures, odds, and h2h rows before the next sync cycle.',
+      message: 'Deleted existing teams, leagues, fixtures, and h2h rows before the next sync cycle.',
       created_at: isoNow(),
       updated_at: isoNow(),
     });
@@ -959,7 +849,6 @@ export default async function main(context) {
         await upsertRow(tablesdb, databaseId, row.tableId, row.rowId, row.data);
       }
 
-      let oddsSaved = 0;
       let h2hSaved = 0;
       const fetchOptionalContext = shouldFetchOptionalContext(
         fixtureRow.data,
@@ -970,24 +859,6 @@ export default async function main(context) {
       );
 
       if (fetchOptionalContext) {
-        try {
-          oddsSaved = await saveFixtureOdds({
-            tablesdb,
-            databaseId,
-            oddsTable,
-            fixture: fixtureRow.data,
-          });
-        } catch (error) {
-          console.error(
-            JSON.stringify({
-              job: 'daily-sync-generate',
-              fixture_api_id: fixtureRow.data.api_fixture_id,
-              stage: 'odds',
-              message: error instanceof Error ? error.message : String(error),
-            }),
-          );
-        }
-
         try {
           h2hSaved = await saveFixtureH2HHistory({
             tablesdb,
@@ -1022,7 +893,6 @@ export default async function main(context) {
         JSON.stringify({
           job: 'daily-sync-generate',
           fixture_api_id: fixtureApiId,
-          odds_rows_saved: oddsSaved,
           h2h_rows_saved: h2hSaved,
           stage: 'saved-context',
         }),
@@ -1047,9 +917,8 @@ export default async function main(context) {
       Query.equal('sync_run_id', syncRunId),
       Query.orderAsc('$createdAt'),
     ]);
-    const syncedOddsRows = await fetchAllRows(tablesdb, databaseId, oddsTable, []);
     const syncedH2hRows = await fetchAllRows(tablesdb, databaseId, h2hTable, []);
-    const fixtureContexts = mergeFixtureContexts(syncedFixtures, syncedOddsRows, syncedH2hRows);
+    const fixtureContexts = mergeFixtureContexts(syncedFixtures, syncedH2hRows);
 
     const generationResult = await generatePredictionsForBatch({
       tablesdb,
@@ -1082,7 +951,6 @@ export default async function main(context) {
         teams: teamsDelete?.total ?? null,
         leagues: leaguesDelete?.total ?? null,
         fixtures: fixturesDelete?.total ?? null,
-        odds: oddsDelete?.total ?? null,
         h2h: h2hDelete?.total ?? null,
       },
       items_seen: String(fixtureContexts.length),
