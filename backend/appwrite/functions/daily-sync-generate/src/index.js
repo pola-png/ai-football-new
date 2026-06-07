@@ -211,21 +211,56 @@ async function saveFixtureH2HHistory({
   databaseId,
   h2hTable,
   fixture,
+  logger,
 }) {
   const fixtureApiId = String(fixture.api_fixture_id || '').trim();
   const homeTeamId = String(fixture.home_team_api_id || '').trim();
   const awayTeamId = String(fixture.away_team_api_id || '').trim();
+  const leagueId = String(fixture.league_api_id || '').trim();
+  const season = String(fixture.season || '').trim();
+  const log = typeof logger === 'function' ? logger : console.log;
 
   if (!fixtureApiId || !homeTeamId || !awayTeamId) {
     return 0;
   }
 
-  const payload = await fetchApiFootballJson('/fixtures/headtohead', {
+  const requestQuery = {
     h2h: `${homeTeamId}-${awayTeamId}`,
     last: 5,
-  });
+  };
+  if (leagueId) {
+    requestQuery.league = leagueId;
+  }
+  if (season) {
+    requestQuery.season = season;
+  }
+
+  const requestUrl = buildApiFootballUrl('/fixtures/headtohead', requestQuery).toString();
+
+  log(
+    JSON.stringify({
+      job: 'daily-sync-generate',
+      fixture_api_id: fixtureApiId,
+      stage: 'h2h-request',
+      request_url: requestUrl,
+    }),
+  );
+
+  const payload = await fetchApiFootballJson('/fixtures/headtohead', requestQuery);
 
   const historicalFixtures = Array.isArray(payload?.response) ? payload.response : [];
+  log(
+    JSON.stringify({
+      job: 'daily-sync-generate',
+      fixture_api_id: fixtureApiId,
+      stage: 'h2h-response',
+      historical_matches: historicalFixtures.length,
+      api_get: payload?.get || null,
+      api_results: payload?.results ?? null,
+      api_errors: payload?.errors || [],
+    }),
+  );
+
   let saved = 0;
   const now = isoNow();
 
@@ -311,6 +346,7 @@ async function fetchAndSaveH2HForFixtures({
         databaseId,
         h2hTable,
         fixture,
+        logger: log,
       });
 
       totalSaved += saved;
@@ -1134,7 +1170,7 @@ export default async function main(context) {
     });
     syncCompleted = true;
 
-    const syncedFixtures = await fetchRows(tablesdb, databaseId, fixturesTable, [
+    const syncedFixtures = await fetchAllRows(tablesdb, databaseId, fixturesTable, [
       Query.equal('sync_run_id', syncRunId),
       Query.orderAsc('$createdAt'),
     ]);
@@ -1148,7 +1184,7 @@ export default async function main(context) {
     );
 
     const h2hFetchLimit = Number.parseInt(
-      process.env.H2H_FETCH_FIXTURE_LIMIT || String(Math.max(1, syncedFixtures.length)),
+      process.env.H2H_FETCH_FIXTURE_LIMIT || String(Math.min(25, Math.max(1, syncedFixtures.length))),
       10,
     );
     const h2hFetchResult = await fetchAndSaveH2HForFixtures({
