@@ -121,17 +121,11 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
                                     'When the backend publishes predictions, they will appear here as primary pick cards.',
                               )
                             else
-                              ListView.separated(
-                                shrinkWrap: true,
-                                physics: const NeverScrollableScrollPhysics(),
-                                itemCount: predictions.length,
-                                separatorBuilder: (_, __) =>
-                                    const SizedBox(height: 16),
-                                itemBuilder: (context, index) {
-                                  return PredictionGroupCard(
-                                    prediction: predictions[index],
-                                  );
-                                },
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: _buildGroupedPredictionWidgets(
+                                  predictions,
+                                ),
                               ),
                           ],
                         ),
@@ -205,6 +199,249 @@ class _HeaderCard extends StatelessWidget {
               fontSize: 28,
               fontWeight: FontWeight.w800,
               height: 1.05,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PredictionDateSection {
+  const _PredictionDateSection({
+    required this.date,
+    required this.label,
+    required this.predictions,
+  });
+
+  final DateTime date;
+  final String label;
+  final List<PredictionRecord> predictions;
+}
+
+List<Widget> _buildGroupedPredictionWidgets(List<PredictionRecord> predictions) {
+  final sections = _groupPredictionsByDate(predictions);
+  final widgets = <Widget>[];
+
+  for (var sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
+    final section = sections[sectionIndex];
+
+    if (sectionIndex > 0) {
+      widgets.add(const SizedBox(height: 20));
+    }
+
+    widgets.add(
+      _DateSectionHeader(
+        label: section.label,
+        count: section.predictions.length,
+      ),
+    );
+    widgets.add(const SizedBox(height: 12));
+
+    for (var i = 0; i < section.predictions.length; i++) {
+      widgets.add(PredictionGroupCard(prediction: section.predictions[i]));
+      if (i < section.predictions.length - 1) {
+        widgets.add(const SizedBox(height: 16));
+      }
+    }
+  }
+
+  return widgets;
+}
+
+List<_PredictionDateSection> _groupPredictionsByDate(
+  List<PredictionRecord> predictions,
+) {
+  final now = DateTime.now().toLocal();
+  final grouped = <DateTime, List<PredictionRecord>>{};
+
+  final sortedPredictions = [...predictions]
+    ..sort(_comparePredictionsByKickoff);
+
+  for (final prediction in sortedPredictions) {
+    final dateKey = _predictionDateKey(prediction);
+    grouped.putIfAbsent(dateKey, () => <PredictionRecord>[]).add(prediction);
+  }
+
+  final keys = grouped.keys.toList()
+    ..sort((left, right) => _compareSectionDates(left, right, now));
+
+  return keys.map((date) {
+    final items = grouped[date]!..sort(_comparePredictionsByKickoff);
+    return _PredictionDateSection(
+      date: date,
+      label: _predictionDateLabel(date, now),
+      predictions: items,
+    );
+  }).toList();
+}
+
+DateTime _predictionDateKey(PredictionRecord prediction) {
+  final source = prediction.kickoffAt ??
+      prediction.publishedAt ??
+      prediction.releaseAt ??
+      DateTime.now();
+  final local = source.toLocal();
+  return DateTime(local.year, local.month, local.day);
+}
+
+String _predictionDateLabel(DateTime date, DateTime now) {
+  final diff = _dateOnly(date).difference(_dateOnly(now)).inDays;
+
+  if (diff == 0) {
+    return 'Today';
+  }
+  if (diff == 1) {
+    return 'Tomorrow';
+  }
+  if (diff == -1) {
+    return 'Yesterday';
+  }
+  if (diff.abs() <= 6) {
+    return _weekdayName(date.weekday);
+  }
+
+  return _formatSectionDate(date);
+}
+
+int _compareSectionDates(DateTime left, DateTime right, DateTime now) {
+  final leftPriority = _datePriority(left, now);
+  final rightPriority = _datePriority(right, now);
+
+  if (leftPriority != rightPriority) {
+    return leftPriority.compareTo(rightPriority);
+  }
+
+  if (leftPriority == 2) {
+    return left.compareTo(right);
+  }
+
+  if (leftPriority == 4) {
+    return right.compareTo(left);
+  }
+
+  return left.compareTo(right);
+}
+
+int _datePriority(DateTime date, DateTime now) {
+  final diff = _dateOnly(date).difference(_dateOnly(now)).inDays;
+  if (diff == 0) {
+    return 0;
+  }
+  if (diff == 1) {
+    return 1;
+  }
+  if (diff > 1) {
+    return 2;
+  }
+  if (diff == -1) {
+    return 3;
+  }
+  return 4;
+}
+
+DateTime _dateOnly(DateTime value) {
+  final local = value.toLocal();
+  return DateTime(local.year, local.month, local.day);
+}
+
+String _weekdayName(int weekday) {
+  switch (weekday) {
+    case DateTime.monday:
+      return 'Monday';
+    case DateTime.tuesday:
+      return 'Tuesday';
+    case DateTime.wednesday:
+      return 'Wednesday';
+    case DateTime.thursday:
+      return 'Thursday';
+    case DateTime.friday:
+      return 'Friday';
+    case DateTime.saturday:
+      return 'Saturday';
+    case DateTime.sunday:
+      return 'Sunday';
+    default:
+      return 'Unknown';
+  }
+}
+
+String _formatSectionDate(DateTime value) {
+  final local = value.toLocal();
+  final month = local.month.toString().padLeft(2, '0');
+  final day = local.day.toString().padLeft(2, '0');
+  return '$month/$day/${local.year}';
+}
+
+int _comparePredictionsByKickoff(
+  PredictionRecord left,
+  PredictionRecord right,
+) {
+  final leftKickoff = left.kickoffAt ?? left.publishedAt ?? left.releaseAt;
+  final rightKickoff = right.kickoffAt ?? right.publishedAt ?? right.releaseAt;
+
+  if (leftKickoff == null && rightKickoff == null) {
+    return left.fixtureApiId.compareTo(right.fixtureApiId);
+  }
+  if (leftKickoff == null) {
+    return 1;
+  }
+  if (rightKickoff == null) {
+    return -1;
+  }
+
+  final comparison = leftKickoff.toUtc().compareTo(rightKickoff.toUtc());
+  if (comparison != 0) {
+    return comparison;
+  }
+
+  return left.fixtureApiId.compareTo(right.fixtureApiId);
+}
+
+class _DateSectionHeader extends StatelessWidget {
+  const _DateSectionHeader({
+    required this.label,
+    required this.count,
+  });
+
+  final String label;
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0D1B2D),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFF20364E)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: const Color(0xFF00D4AA).withAlpha(31),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              '$count',
+              style: const TextStyle(
+                color: Color(0xFF75F7D7),
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
         ],

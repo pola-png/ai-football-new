@@ -509,6 +509,44 @@ async function fetchAllRows(tablesdb, databaseId, tableId, baseQueries, pageSize
   return rows;
 }
 
+function buildRowIndex(rows, keySelector) {
+  const index = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const key = keySelector(row);
+    if (!key) {
+      continue;
+    }
+
+    const normalizedKey = String(key);
+    const existing = index.get(normalizedKey);
+    if (existing) {
+      existing.push(row);
+    } else {
+      index.set(normalizedKey, [row]);
+    }
+  }
+
+  return index;
+}
+
+function mergeFixtureContexts(fixtures, oddsRows, h2hRows) {
+  const oddsIndex = buildRowIndex(oddsRows, (row) => row.fixture_api_id);
+  const h2hIndex = buildRowIndex(h2hRows, (row) => row.current_fixture_api_id);
+
+  return Array.isArray(fixtures)
+    ? fixtures.map((fixture) => {
+        const fixtureApiId = fixture.api_fixture_id || null;
+        return {
+          fixture,
+          fixtureApiId,
+          oddsRows: fixtureApiId ? (oddsIndex.get(String(fixtureApiId)) || []) : [],
+          h2hRows: fixtureApiId ? (h2hIndex.get(String(fixtureApiId)) || []) : [],
+        };
+      })
+    : [];
+}
+
 function toDate(value) {
   if (typeof value !== 'string' || !value.trim()) {
     return null;
@@ -567,6 +605,7 @@ function buildFallbackPrimaryPick(fixture, oddsRows, h2hRows) {
 async function savePredictionAndMaybePublish({
   tablesdb,
   databaseId,
+  fixturesTable,
   predictionsTable,
   messaging,
   topicId,
@@ -638,6 +677,14 @@ async function savePredictionAndMaybePublish({
     updated_at: isoNow(),
   });
 
+  if (fixturesTable) {
+    await upsertRow(tablesdb, databaseId, fixturesTable, `fixture_${fixtureApiId}`, {
+      processed: true,
+      processed_at: isoNow(),
+      updated_at: isoNow(),
+    });
+  }
+
   if (!publishNow) {
     return { saved: true, published: false, notified: false };
   }
@@ -681,9 +728,8 @@ async function savePredictionAndMaybePublish({
 async function generatePredictionsForBatch({
   tablesdb,
   databaseId,
-  fixtures,
-  oddsTable,
-  h2hTable,
+  fixtureContexts,
+  fixturesTable,
   predictionsTable,
   messaging,
   topicId,
@@ -695,9 +741,10 @@ async function generatePredictionsForBatch({
   let notified = 0;
   const concurrency = parseConcurrency(process.env.APPWRITE_PREDICTION_CONCURRENCY || 1);
 
-  await runWithConcurrency(fixtures, concurrency, async (fixture) => {
+  await runWithConcurrency(fixtureContexts, concurrency, async (contextRow) => {
     try {
-      const fixtureApiId = fixture.api_fixture_id || null;
+      const fixture = contextRow?.fixture || null;
+      const fixtureApiId = contextRow?.fixtureApiId || fixture?.api_fixture_id || null;
       if (!fixtureApiId) {
         failed += 1;
         console.error(
@@ -710,15 +757,8 @@ async function generatePredictionsForBatch({
         return;
       }
 
-      const oddsRows = await fetchRows(tablesdb, databaseId, oddsTable, [
-        Query.equal('fixture_api_id', fixtureApiId),
-        Query.orderAsc('$createdAt'),
-      ]);
-
-      const h2hRows = await fetchRows(tablesdb, databaseId, h2hTable, [
-        Query.equal('current_fixture_api_id', fixtureApiId),
-        Query.orderAsc('$createdAt'),
-      ]);
+      const oddsRows = Array.isArray(contextRow?.oddsRows) ? contextRow.oddsRows : [];
+      const h2hRows = Array.isArray(contextRow?.h2hRows) ? contextRow.h2hRows : [];
 
       const prompt = buildPrompt(fixture, oddsRows, h2hRows);
       const aiResponse = await deepSeekChat([
@@ -748,6 +788,7 @@ async function generatePredictionsForBatch({
       const result = await savePredictionAndMaybePublish({
         tablesdb,
         databaseId,
+        fixturesTable,
         predictionsTable,
         messaging,
         topicId,
@@ -810,7 +851,7 @@ export default async function main(context) {
   const topicId = required('APPWRITE_TOPIC_PREDICTIONS');
 
   const league = process.env.API_FOOTBALL_LEAGUE ? Number(process.env.API_FOOTBALL_LEAGUE) : null;
-  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(1);
+  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(0);
   const syncRunId = `sync_${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}`;
   const startedAt = isoNow();
 
@@ -966,13 +1007,15 @@ export default async function main(context) {
       Query.equal('sync_run_id', syncRunId),
       Query.orderAsc('$createdAt'),
     ]);
+    const syncedOddsRows = await fetchAllRows(tablesdb, databaseId, oddsTable, []);
+    const syncedH2hRows = await fetchAllRows(tablesdb, databaseId, h2hTable, []);
+    const fixtureContexts = mergeFixtureContexts(syncedFixtures, syncedOddsRows, syncedH2hRows);
 
     const generationResult = await generatePredictionsForBatch({
       tablesdb,
       databaseId,
-      fixtures: syncedFixtures,
-      oddsTable,
-      h2hTable,
+      fixtureContexts,
+      fixturesTable,
       predictionsTable,
       messaging,
       topicId,
@@ -986,9 +1029,9 @@ export default async function main(context) {
       status: 'success',
       started_at: startedAt,
       finished_at: isoNow(),
-      items_seen: String(syncedFixtures.length),
+      items_seen: String(fixtureContexts.length),
       items_saved: String(generationResult.saved),
-      message: `Generated ${generationResult.saved} predictions from batch ${syncRunId}. Published ${generationResult.published} immediately and notified ${generationResult.notified}.`,
+      message: `Generated ${generationResult.saved} predictions from merged batch ${syncRunId}. Published ${generationResult.published} immediately and notified ${generationResult.notified}.`,
       created_at: isoNow(),
       updated_at: isoNow(),
     });
@@ -1002,7 +1045,7 @@ export default async function main(context) {
         odds: oddsDelete?.total ?? null,
         h2h: h2hDelete?.total ?? null,
       },
-      items_seen: String(fixtures.length),
+      items_seen: String(fixtureContexts.length),
       items_saved: String(generationResult.saved),
       items_failed: String(generationResult.failed),
       published: String(generationResult.published),
