@@ -863,7 +863,7 @@ async function generatePredictionsForBatch({
       const prompt = buildPrompt(fixture, h2hRows);
       let aiResult;
       try {
-        aiResult = await requestAiPrediction(fixtureApiId, prompt, fixture, logFn);
+        aiResult = await requestAiPrediction(fixtureApiId, prompt, fixture, logger);
       } catch (error) {
         logger(
           JSON.stringify({
@@ -924,6 +924,16 @@ async function generatePredictionsForBatch({
       if (result.notified) {
         notified += 1;
       }
+    } catch (error) {
+      failed += 1;
+      logger(
+        JSON.stringify({
+          job: 'daily-sync-generate',
+          fixture_api_id: contextRow?.fixtureApiId || contextRow?.fixture?.api_fixture_id || null,
+          stage: 'prediction-worker',
+          message: error instanceof Error ? error.message : String(error),
+        }),
+      );
     }
   });
 
