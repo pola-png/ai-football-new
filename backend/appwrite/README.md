@@ -56,6 +56,13 @@ Notification-specific:
 
 - `APPWRITE_TOPIC_PREDICTIONS`
 
+Push provider note:
+
+- Appwrite Messaging must have a working FCM push provider configured in the Appwrite console.
+- If the provider is missing the Firebase service-account private key, notification sends will fail with a JWT encode error.
+- The app can subscribe successfully and still receive nothing until that provider is fixed.
+- When this is set correctly, `publish-and-maintain` can send to `APPWRITE_TOPIC_PREDICTIONS` normally.
+
 Flutter app config:
 
 - `APPWRITE_ENDPOINT`

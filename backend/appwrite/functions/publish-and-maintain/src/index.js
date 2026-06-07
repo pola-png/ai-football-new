@@ -421,13 +421,22 @@ async function publishPredictionRow({
 
     return { published: true, notified: true };
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const isFcmConfigIssue =
+      errorMessage.includes('JWT::encode') ||
+      errorMessage.includes('Argument #2 ($key) must be of type string, null given') ||
+      errorMessage.toLowerCase().includes('private key');
+
     if (typeof logFn === 'function') {
       logFn(JSON.stringify({
         job: 'publish-and-maintain',
         fixture_api_id: row.fixture_api_id || null,
         prediction_id: row.$id || null,
-        stage: 'notification-error',
-        message: error instanceof Error ? error.message : String(error),
+        stage: isFcmConfigIssue ? 'notification-config-error' : 'notification-error',
+        message: errorMessage,
+        hint: isFcmConfigIssue
+          ? 'Check the Appwrite Messaging push provider. The FCM service-account private key is missing or not loaded.'
+          : null,
       }));
     } else {
       console.error(
@@ -435,8 +444,8 @@ async function publishPredictionRow({
           job: 'publish-and-maintain',
           fixture_api_id: row.fixture_api_id,
           prediction_id: row.$id,
-          stage: 'notification',
-          message: error instanceof Error ? error.message : String(error),
+          stage: isFcmConfigIssue ? 'notification-config' : 'notification',
+          message: errorMessage,
         }),
       );
     }

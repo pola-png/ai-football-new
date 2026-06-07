@@ -54,6 +54,7 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
   final PredictionRepository _repository = PredictionRepository();
   late Future<List<PredictionRecord>> _futurePredictions;
   final Set<String> _expandedSectionKeys = <String>{};
+  _TodayBucket _selectedTodayBucket = _TodayBucket.coming;
 
   @override
   void initState() {
@@ -75,6 +76,16 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
       } else {
         _expandedSectionKeys.add(key);
       }
+    });
+  }
+
+  void _selectTodayBucket(_TodayBucket bucket) {
+    if (_selectedTodayBucket == bucket) {
+      return;
+    }
+
+    setState(() {
+      _selectedTodayBucket = bucket;
     });
   }
 
@@ -190,6 +201,8 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
                               predictions,
                               _expandedSectionKeys,
                               _toggleSection,
+                              _selectedTodayBucket,
+                              _selectTodayBucket,
                             ),
                           ),
                         ),
@@ -390,6 +403,8 @@ List<Widget> _buildGroupedPredictionWidgets(
   List<PredictionRecord> predictions,
   Set<String> expandedSectionKeys,
   void Function(String key) onToggleSection,
+  _TodayBucket selectedTodayBucket,
+  void Function(_TodayBucket bucket) onSelectTodayBucket,
 ) {
   final sections = _groupPredictionsByDate(predictions);
   final widgets = <Widget>[];
@@ -419,7 +434,13 @@ List<Widget> _buildGroupedPredictionWidgets(
     widgets.add(const SizedBox(height: 12));
 
     if (isTodaySection) {
-      widgets.addAll(_buildTodayStatusWidgets(section.predictions));
+      widgets.addAll(
+        _buildTodayStatusWidgets(
+          section.predictions,
+          selectedTodayBucket,
+          onSelectTodayBucket,
+        ),
+      );
       continue;
     }
 
@@ -440,7 +461,11 @@ enum _TodayBucket {
   finished,
 }
 
-List<Widget> _buildTodayStatusWidgets(List<PredictionRecord> predictions) {
+List<Widget> _buildTodayStatusWidgets(
+  List<PredictionRecord> predictions,
+  _TodayBucket selectedBucket,
+  void Function(_TodayBucket bucket) onSelectBucket,
+) {
   final now = DateTime.now();
   final grouped = <_TodayBucket, List<PredictionRecord>>{
     _TodayBucket.coming: <PredictionRecord>[],
@@ -456,82 +481,25 @@ List<Widget> _buildTodayStatusWidgets(List<PredictionRecord> predictions) {
   }
 
   final widgets = <Widget>[];
-  var addedAnyBucket = false;
+  final selectedItems = grouped[selectedBucket] ?? const <PredictionRecord>[];
 
-  for (final bucket in _TodayBucket.values) {
-    final items = grouped[bucket] ?? const <PredictionRecord>[];
-    if (items.isEmpty) {
-      continue;
-    }
+  widgets.add(
+    _TodayCategorySelector(
+      selectedBucket: selectedBucket,
+      counts: {
+        for (final bucket in _TodayBucket.values) bucket: grouped[bucket]?.length ?? 0,
+      },
+      onSelectBucket: onSelectBucket,
+    ),
+  );
+  widgets.add(const SizedBox(height: 14));
 
-    if (addedAnyBucket) {
-      widgets.add(const SizedBox(height: 14));
-    }
-
-    if (bucket == _TodayBucket.coming) {
-      widgets.add(
-        Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 10),
-          child: Row(
-            children: [
-              Text(
-                _todayBucketLabel(bucket),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF20364E),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  '${items.length}',
-                  style: const TextStyle(
-                    color: Color(0xFF84D6FF),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    } else {
-      widgets.add(
-        _DateSectionHeader(
-          label: _todayBucketLabel(bucket),
-          count: items.length,
-          isExpanded: true,
-          canToggle: false,
-          onTap: () {},
-        ),
-      );
-    }
-
-    widgets.add(const SizedBox(height: 12));
-
-    for (var i = 0; i < items.length; i++) {
-      widgets.add(PredictionGroupCard(prediction: items[i]));
-      if (i < items.length - 1) {
-        widgets.add(const SizedBox(height: 16));
-      }
-    }
-
-    addedAnyBucket = true;
-  }
-
-  if (!addedAnyBucket) {
+  if (selectedItems.isEmpty) {
     widgets.add(
       const Padding(
         padding: EdgeInsets.only(top: 4),
         child: Text(
-          'No matches scheduled for today.',
+          'No matches in this category.',
           style: TextStyle(
             color: Color(0xFF84D6FF),
             fontSize: 13,
@@ -540,6 +508,14 @@ List<Widget> _buildTodayStatusWidgets(List<PredictionRecord> predictions) {
         ),
       ),
     );
+    return widgets;
+  }
+
+  for (var i = 0; i < selectedItems.length; i++) {
+    widgets.add(PredictionGroupCard(prediction: selectedItems[i]));
+    if (i < selectedItems.length - 1) {
+      widgets.add(const SizedBox(height: 16));
+    }
   }
 
   return widgets;
@@ -548,9 +524,9 @@ List<Widget> _buildTodayStatusWidgets(List<PredictionRecord> predictions) {
 String _todayBucketLabel(_TodayBucket bucket) {
   switch (bucket) {
     case _TodayBucket.coming:
-      return 'Coming';
+      return 'Upcoming';
     case _TodayBucket.live:
-      return 'Live';
+      return 'Live now';
     case _TodayBucket.finished:
       return 'Finished';
   }
@@ -614,6 +590,69 @@ bool _isFinishedPrediction(PredictionRecord prediction, DateTime now) {
   }
 
   return prediction.fulltimeHomeGoals != null || prediction.fulltimeAwayGoals != null;
+}
+
+class _TodayCategorySelector extends StatelessWidget {
+  const _TodayCategorySelector({
+    required this.selectedBucket,
+    required this.counts,
+    required this.onSelectBucket,
+  });
+
+  final _TodayBucket selectedBucket;
+  final Map<_TodayBucket, int> counts;
+  final void Function(_TodayBucket bucket) onSelectBucket;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = _TodayBucket.values.map((bucket) {
+      final isSelected = bucket == selectedBucket;
+      final count = counts[bucket] ?? 0;
+      return Expanded(
+        child: GestureDetector(
+          onTap: () => onSelectBucket(bucket),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            margin: const EdgeInsets.only(right: 8),
+            decoration: BoxDecoration(
+              color: isSelected ? const Color(0xFF00D4AA) : const Color(0xFF0D1B2D),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: isSelected ? const Color(0xFF00D4AA) : const Color(0xFF20364E),
+              ),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _todayBucketLabel(bucket),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: isSelected ? const Color(0xFF07111F) : Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '$count',
+                  style: TextStyle(
+                    color: isSelected ? const Color(0xFF07111F) : const Color(0xFF84D6FF),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }).toList();
+
+    return Row(children: items);
+  }
 }
 
 bool _isComingPrediction(PredictionRecord prediction, DateTime now) {
