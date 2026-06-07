@@ -235,7 +235,7 @@ class _StickyHeader extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                '$count live cards',
+                '$count cards',
                 style: const TextStyle(
                   color: Color(0xFF75F7D7),
                   fontSize: 12,
@@ -412,19 +412,216 @@ List<Widget> _buildGroupedPredictionWidgets(
         onTap: () => onToggleSection(section.keyValue),
       ),
     );
-    if (isExpanded) {
-      widgets.add(const SizedBox(height: 12));
+    if (!isExpanded) {
+      continue;
+    }
 
-      for (var i = 0; i < section.predictions.length; i++) {
-        widgets.add(PredictionGroupCard(prediction: section.predictions[i]));
-        if (i < section.predictions.length - 1) {
-          widgets.add(const SizedBox(height: 16));
-        }
+    widgets.add(const SizedBox(height: 12));
+
+    if (isTodaySection) {
+      widgets.addAll(_buildTodayStatusWidgets(section.predictions));
+      continue;
+    }
+
+    for (var i = 0; i < section.predictions.length; i++) {
+      widgets.add(PredictionGroupCard(prediction: section.predictions[i]));
+      if (i < section.predictions.length - 1) {
+        widgets.add(const SizedBox(height: 16));
       }
     }
   }
 
   return widgets;
+}
+
+enum _TodayBucket {
+  coming,
+  live,
+  finished,
+}
+
+List<Widget> _buildTodayStatusWidgets(List<PredictionRecord> predictions) {
+  final now = DateTime.now();
+  final grouped = <_TodayBucket, List<PredictionRecord>>{
+    _TodayBucket.coming: <PredictionRecord>[],
+    _TodayBucket.live: <PredictionRecord>[],
+    _TodayBucket.finished: <PredictionRecord>[],
+  };
+
+  final sortedPredictions = [...predictions]..sort(_comparePredictionsByKickoff);
+
+  for (final prediction in sortedPredictions) {
+    final bucket = _todayBucketForPrediction(prediction, now);
+    grouped[bucket]!.add(prediction);
+  }
+
+  final widgets = <Widget>[];
+  var addedAnyBucket = false;
+
+  for (final bucket in _TodayBucket.values) {
+    final items = grouped[bucket] ?? const <PredictionRecord>[];
+    if (items.isEmpty) {
+      continue;
+    }
+
+    if (addedAnyBucket) {
+      widgets.add(const SizedBox(height: 14));
+    }
+
+    if (bucket == _TodayBucket.coming) {
+      widgets.add(
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 10),
+          child: Row(
+            children: [
+              Text(
+                _todayBucketLabel(bucket),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF20364E),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  '${items.length}',
+                  style: const TextStyle(
+                    color: Color(0xFF84D6FF),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    } else {
+      widgets.add(
+        _DateSectionHeader(
+          label: _todayBucketLabel(bucket),
+          count: items.length,
+          isExpanded: true,
+          canToggle: false,
+          onTap: () {},
+        ),
+      );
+    }
+
+    widgets.add(const SizedBox(height: 12));
+
+    for (var i = 0; i < items.length; i++) {
+      widgets.add(PredictionGroupCard(prediction: items[i]));
+      if (i < items.length - 1) {
+        widgets.add(const SizedBox(height: 16));
+      }
+    }
+
+    addedAnyBucket = true;
+  }
+
+  if (!addedAnyBucket) {
+    widgets.add(
+      const Padding(
+        padding: EdgeInsets.only(top: 4),
+        child: Text(
+          'No matches scheduled for today.',
+          style: TextStyle(
+            color: Color(0xFF84D6FF),
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+
+  return widgets;
+}
+
+String _todayBucketLabel(_TodayBucket bucket) {
+  switch (bucket) {
+    case _TodayBucket.coming:
+      return 'Coming';
+    case _TodayBucket.live:
+      return 'Live';
+    case _TodayBucket.finished:
+      return 'Finished';
+  }
+}
+
+_TodayBucket _todayBucketForPrediction(PredictionRecord prediction, DateTime now) {
+  if (_isLivePrediction(prediction)) {
+    return _TodayBucket.live;
+  }
+  if (_isFinishedPrediction(prediction, now)) {
+    return _TodayBucket.finished;
+  }
+  return _TodayBucket.coming;
+}
+
+bool _isLivePrediction(PredictionRecord prediction) {
+  final statusShort = prediction.matchStatusShort?.toUpperCase();
+  final statusLong = prediction.matchStatusLong?.toLowerCase() ?? '';
+  const liveStatuses = {
+    '1H',
+    'HT',
+    '2H',
+    'ET',
+    'BT',
+    'LIVE',
+    'INT',
+    'PEN',
+  };
+
+  if (statusShort != null && liveStatuses.contains(statusShort)) {
+    return true;
+  }
+
+  return statusLong.contains('live') || statusLong.contains('in play');
+}
+
+bool _isFinishedPrediction(PredictionRecord prediction, DateTime now) {
+  final statusShort = prediction.matchStatusShort?.toUpperCase();
+  final statusLong = prediction.matchStatusLong?.toLowerCase() ?? '';
+  const finishedStatuses = {
+    'FT',
+    'AET',
+    'PEN',
+    'CANC',
+    'ABD',
+    'AWD',
+    'WO',
+  };
+
+  if (statusShort != null && finishedStatuses.contains(statusShort)) {
+    return true;
+  }
+
+  if (statusLong.contains('finished') || statusLong.contains('full time')) {
+    return true;
+  }
+
+  final kickoffAt = _localDateTime(prediction.kickoffAt);
+  if (kickoffAt != null && now.isAfter(kickoffAt)) {
+    return true;
+  }
+
+  return prediction.fulltimeHomeGoals != null || prediction.fulltimeAwayGoals != null;
+}
+
+bool _isComingPrediction(PredictionRecord prediction, DateTime now) {
+  final kickoffAt = _localDateTime(prediction.kickoffAt);
+  if (kickoffAt == null) {
+    return true;
+  }
+  return kickoffAt.isAfter(now);
 }
 
 List<_PredictionDateSection> _groupPredictionsByDate(
@@ -556,8 +753,8 @@ int _comparePredictionsByKickoff(
   PredictionRecord left,
   PredictionRecord right,
 ) {
-  final leftKickoff = left.kickoffAt ?? left.publishedAt ?? left.releaseAt;
-  final rightKickoff = right.kickoffAt ?? right.publishedAt ?? right.releaseAt;
+  final leftKickoff = _localDateTime(left.kickoffAt ?? left.publishedAt ?? left.releaseAt);
+  final rightKickoff = _localDateTime(right.kickoffAt ?? right.publishedAt ?? right.releaseAt);
 
   if (leftKickoff == null && rightKickoff == null) {
     return left.fixtureApiId.compareTo(right.fixtureApiId);
@@ -575,6 +772,14 @@ int _comparePredictionsByKickoff(
   }
 
   return left.fixtureApiId.compareTo(right.fixtureApiId);
+}
+
+DateTime? _localDateTime(DateTime? value) {
+  if (value == null) {
+    return null;
+  }
+
+  return value.toLocal();
 }
 
 class _DateSectionHeader extends StatelessWidget {
@@ -1451,59 +1656,53 @@ class _PickCardData {
 }
 
 String _formatDate(DateTime? value) {
-  if (value == null) {
+  final local = _localDateTime(value);
+  if (local == null) {
     return 'unknown time';
   }
 
-  final month = value.month.toString().padLeft(2, '0');
-  final day = value.day.toString().padLeft(2, '0');
-  final hour = value.hour.toString().padLeft(2, '0');
-  final minute = value.minute.toString().padLeft(2, '0');
-  return '${value.year}-$month-$day $hour:$minute';
+  final month = local.month.toString().padLeft(2, '0');
+  final day = local.day.toString().padLeft(2, '0');
+  final hour = local.hour.toString().padLeft(2, '0');
+  final minute = local.minute.toString().padLeft(2, '0');
+  return '${local.year}-$month-$day $hour:$minute';
 }
 
 String _formatDateTime(DateTime? value) {
-  if (value == null) {
+  final local = _localDateTime(value);
+  if (local == null) {
     return 'unknown time';
   }
 
-  final month = value.month.toString().padLeft(2, '0');
-  final day = value.day.toString().padLeft(2, '0');
-  final hour = value.hour.toString().padLeft(2, '0');
-  final minute = value.minute.toString().padLeft(2, '0');
-  return '${value.year}-$month-$day $hour:$minute';
+  final month = local.month.toString().padLeft(2, '0');
+  final day = local.day.toString().padLeft(2, '0');
+  final hour = local.hour.toString().padLeft(2, '0');
+  final minute = local.minute.toString().padLeft(2, '0');
+  return '${local.year}-$month-$day $hour:$minute';
 }
 
 String _matchStatusLabel(PredictionRecord prediction) {
   final statusShort = prediction.matchStatusShort?.toUpperCase();
   final statusLong = prediction.matchStatusLong?.trim();
-  final kickoffAt = prediction.kickoffAt;
-  final now = DateTime.now();
+  final now = DateTime.now().toLocal();
 
-  const liveStatuses = {
-    '1H',
-    'HT',
-    '2H',
-    'ET',
-    'BT',
-    'LIVE',
-    'INT',
-    'PEN',
-  };
-
-  if (statusShort != null && liveStatuses.contains(statusShort)) {
+  if (_isLivePrediction(prediction)) {
     return 'Live';
   }
 
-  if (kickoffAt != null && now.isAfter(kickoffAt)) {
-    return 'Going...';
+  if (_isFinishedPrediction(prediction, now)) {
+    return 'Finished';
+  }
+
+  if (_isComingPrediction(prediction, now)) {
+    return 'Coming';
   }
 
   if (statusLong != null && statusLong.isNotEmpty) {
     return statusLong;
   }
 
-  return statusShort ?? 'Scheduled';
+  return statusShort ?? 'Coming';
 }
 
 IconData _matchStatusIcon(PredictionRecord prediction) {

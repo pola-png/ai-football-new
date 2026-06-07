@@ -60,6 +60,116 @@ function lagosDate(offsetDays = 0) {
   return `${year}-${month}-${day}`;
 }
 
+function parseFixtureKickoff(value) {
+  if (typeof value !== 'string' || !value.trim()) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getTimeZoneHour(value, timeZone = 'Africa/Lagos') {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    hour12: false,
+  }).formatToParts(value);
+
+  const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return Number.parseInt(map.hour, 10);
+}
+
+function compareSelectedFixtureItems(left, right) {
+  const leftKickoff = left.kickoff || new Date(0);
+  const rightKickoff = right.kickoff || new Date(0);
+  const comparison = leftKickoff.getTime() - rightKickoff.getTime();
+  if (comparison !== 0) {
+    return comparison;
+  }
+
+  return String(left.fixture?.fixture?.id ?? '').localeCompare(String(right.fixture?.fixture?.id ?? ''));
+}
+
+function selectFixturesBySession(fixtures, amLimit, pmLimit, timeZone = 'Africa/Lagos') {
+  const decorated = (Array.isArray(fixtures) ? fixtures : [])
+    .map((fixture, index) => {
+      const kickoff = parseFixtureKickoff(fixture?.fixture?.date || null);
+      if (!kickoff) {
+        return null;
+      }
+
+      const localHour = getTimeZoneHour(kickoff, timeZone);
+      return {
+        fixture,
+        kickoff,
+        localHour,
+        bucket: localHour < 12 ? 'am' : 'pm',
+        index,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => {
+      const comparison = left.kickoff.getTime() - right.kickoff.getTime();
+      if (comparison !== 0) {
+        return comparison;
+      }
+      return left.index - right.index;
+    });
+
+  const bucketSelect = (bucket, limit) => {
+    const bucketItems = decorated.filter((item) => item.bucket === bucket);
+    const chosen = [];
+    const chosenIndexes = new Set();
+    const seenHours = new Set();
+
+    for (const item of bucketItems) {
+      if (chosen.length >= limit) {
+        break;
+      }
+
+      if (seenHours.has(item.localHour)) {
+        continue;
+      }
+
+      seenHours.add(item.localHour);
+      chosen.push(item);
+      chosenIndexes.add(item.index);
+    }
+
+    for (const item of bucketItems) {
+      if (chosen.length >= limit) {
+        break;
+      }
+
+      if (chosenIndexes.has(item.index)) {
+        continue;
+      }
+
+      chosen.push(item);
+      chosenIndexes.add(item.index);
+    }
+
+    return chosen.sort(compareSelectedFixtureItems);
+  };
+
+  const amSelected = bucketSelect('am', amLimit);
+  const pmSelected = bucketSelect('pm', pmLimit);
+  const selected = [...amSelected, ...pmSelected].sort(compareSelectedFixtureItems);
+
+  return {
+    selectedFixtures: selected.map((item) => item.fixture),
+    stats: {
+      totalAvailable: decorated.length,
+      amAvailable: decorated.filter((item) => item.bucket === 'am').length,
+      pmAvailable: decorated.filter((item) => item.bucket === 'pm').length,
+      amSelected: amSelected.length,
+      pmSelected: pmSelected.length,
+      totalSelected: selected.length,
+    },
+  };
+}
+
 async function createRun(tablesdb, databaseId, tableId, data) {
   return tablesdb.createRow({
     databaseId,
@@ -231,7 +341,7 @@ async function saveFixtureH2HHistory({
   if (leagueId) {
     requestQuery.league = leagueId;
   }
-  if (season) {
+  if (season && String(process.env.API_FOOTBALL_H2H_INCLUDE_SEASON || '').toLowerCase() === 'true') {
     requestQuery.season = season;
   }
 
@@ -383,6 +493,13 @@ async function fetchAndSaveH2HForFixtures({
   return { totalSaved, h2hFetchedFixtures: Math.min(fixtures.length, limit) };
 }
 
+async function fetchStoredH2HRowsForFixture(tablesdb, databaseId, h2hTable, fixtureApiId) {
+  return fetchRows(tablesdb, databaseId, h2hTable, [
+    Query.equal('current_fixture_api_id', String(fixtureApiId)),
+    Query.orderAsc('$createdAt'),
+  ]);
+}
+
 function buildPrompt(fixture, h2hRows) {
   return [
     'You are a football prediction assistant.',
@@ -391,6 +508,13 @@ function buildPrompt(fixture, h2hRows) {
     'Required JSON keys: predicted_winner, confidence, confidence_label, picks.',
     'The picks array must contain exactly 1 entry.',
     'That single pick must include: selection, confidence, reason.',
+    'The reason must be short, one sentence only, and should not include extra explanation.',
+    'Prefer conservative non-straight-win markets such as Over/Under goals, Both Teams To Score, Double Chance, Draw, or No Bet.',
+    "Don't generate straight-win selections like Home Win, Away Win, Team X to win, or bare team-name wins unless confidence is 0.99 or higher.",
+    "Don't choose a straight-win pick unless you are extremely certain.",
+    "Don't waste the response on straight-win markets when a conservative market is available.",
+    'If the supplied H2H history is empty, use any fallback H2H history provided by the backend context.',
+    'If no H2H history is available at all, do not invent it; use fixture context only and stay conservative.',
     'Focus on fixture context and h2h history when choosing the best conservative pick.',
     'Always provide one best conservative pick with a clear reason.',
     'Confidence should be a decimal between 0 and 1.',
@@ -428,13 +552,70 @@ function pickAt(picks, index) {
   };
 }
 
+function isStraightWinSelection(selection) {
+  const value = String(selection || '').trim().toLowerCase();
+  if (!value) {
+    return false;
+  }
+
+  return (
+    /\bhome\s+win\b/.test(value) ||
+    /\baway\s+win\b/.test(value) ||
+    /\bto\s+win\b/.test(value) ||
+    /\bstraight\s+win\b/.test(value) ||
+    /\b1x2\b/.test(value) ||
+    /^\s*(home|away|draw)\s*$/.test(value) ||
+    /\bwin\b/.test(value) && !/\bdouble\s+chance\b/.test(value)
+  );
+}
+
+function isAllowedNonWinSelection(selection) {
+  const value = String(selection || '').trim().toLowerCase();
+  if (!value) {
+    return false;
+  }
+
+  return (
+    /\bover\s*\d/.test(value) ||
+    /\bunder\s*\d/.test(value) ||
+    /\bboth\s+teams\s+to\s+score\b/.test(value) ||
+    /\bbtts\b/.test(value) ||
+    /\bdouble\s+chance\b/.test(value) ||
+    /^\s*draw\s*$/.test(value) ||
+    /\bno\s+bet\b/.test(value) ||
+    /\basian\s+handicap\b/.test(value)
+  );
+}
+
+function sanitizePrimarySelection(selection, confidence, fallbackSelection) {
+  const trimmed = typeof selection === 'string' ? selection.trim() : '';
+  const numericConfidence = typeof confidence === 'number' ? confidence : 0;
+  const fallback = typeof fallbackSelection === 'string' && fallbackSelection.trim()
+    ? fallbackSelection.trim()
+    : 'Under 4.5 Goals';
+
+  if (!trimmed) {
+    return fallback;
+  }
+
+  if (isAllowedNonWinSelection(trimmed)) {
+    return trimmed;
+  }
+
+  if (isStraightWinSelection(trimmed) && numericConfidence >= 0.99) {
+    return trimmed;
+  }
+
+  return fallback;
+}
+
 function normalizeConfidence(value) {
   if (typeof value !== 'number' || Number.isNaN(value)) {
     return 0.8;
   }
 
   const decimalValue = value > 1 ? value / 100 : value;
-  return Math.max(0.8, Math.min(0.99, decimalValue));
+  return Math.max(0.8, Math.min(0.999, decimalValue));
 }
 
 function parseConcurrency(value) {
@@ -565,7 +746,13 @@ async function requestAiPrediction(fixtureApiId, prompt, fixture, logFn) {
     'picks must be an array with exactly 1 item.',
     'The single pick must include selection, confidence, and reason.',
     'Do not add markdown, explanation text, or code fences.',
+    'Do not add extra explanation outside the single short reason field.',
     'Use fixture context and h2h only.',
+    'If H2H data is empty, rely on any fallback H2H data already supplied by the backend.',
+    'If no H2H data exists at all, do not invent H2H and stay conservative.',
+    'Prefer non-straight-win selections such as Over/Under, Both Teams To Score, Double Chance, Draw, or No Bet.',
+    "Don't use straight-win selections unless confidence is 0.99 or higher.",
+    "Don't waste credits on straight-win picks when a safer market is available.",
   ].join(' ');
 
   const messages = [
@@ -773,14 +960,29 @@ async function savePredictionAndMaybePublish({
   const fixtureApiId = String(fixture.api_fixture_id || '').trim();
   const primaryPick = pickAt(parsed.picks, 0);
   const fallbackPick = buildFallbackPrimaryPick(fixture, h2hRows);
-  const primarySelection = primaryPick?.selection?.trim() || fallbackPick.selection;
+  const rawPrimaryConfidence = typeof primaryPick?.confidence === 'number'
+    ? primaryPick.confidence
+    : fallbackPick.confidence;
+  const primarySelection = sanitizePrimarySelection(
+    primaryPick?.selection,
+    rawPrimaryConfidence,
+    fallbackPick.selection,
+  );
+  const usedFallbackSelection = primarySelection === fallbackPick.selection
+    && String(primaryPick?.selection || '').trim() !== fallbackPick.selection;
+  const primaryConfidenceSource = usedFallbackSelection
+    ? fallbackPick.confidence
+    : rawPrimaryConfidence;
   const primaryReason = normalizePrimaryReason(
-    primaryPick?.reason,
+    isAllowedNonWinSelection(primarySelection) || (isStraightWinSelection(primarySelection) && rawPrimaryConfidence >= 0.99)
+      ? primaryPick?.reason
+      : fallbackPick.reason,
     fixture,
     h2hRows,
     primarySelection,
   );
-  const primaryConfidence = normalizeConfidence(primaryPick?.confidence ?? fallbackPick.confidence);
+  const primaryConfidence = normalizeConfidence(primaryConfidenceSource);
+  const predictedWinner = parsed.predicted_winner || null;
 
   if (!fixtureApiId) {
     return { saved: false, published: false, notified: false };
@@ -790,7 +992,7 @@ async function savePredictionAndMaybePublish({
     fixture_api_id: fixtureApiId,
     model_name: aiResponse?.model || (process.env.DEEPSEEK_MODEL || 'deepseek-chat'),
     prediction_text: primaryReason,
-    predicted_winner: parsed.predicted_winner || null,
+    predicted_winner: predictedWinner,
     confidence: primaryConfidence,
     confidence_label: parsed.confidence_label || null,
     home_team_name: fixture.home_team_name || null,
@@ -850,6 +1052,7 @@ async function generatePredictionsForBatch({
   databaseId,
   fixtureContexts,
   fixturesTable,
+  h2hTable,
   predictionsTable,
   startedAt,
   logFn,
@@ -896,7 +1099,49 @@ async function generatePredictionsForBatch({
         }),
       );
 
-      const prompt = buildPrompt(fixture, h2hRows);
+      let workingH2hRows = h2hRows;
+      if (workingH2hRows.length === 0 && String(process.env.API_FOOTBALL_ON_DEMAND_H2H || 'true').toLowerCase() !== 'false') {
+        logger(
+          JSON.stringify({
+            job: 'daily-sync-generate',
+            fixture_api_id: fixtureApiId,
+            stage: 'h2h-on-demand-start',
+            message: 'No cached H2H rows found; fetching them for this fixture.',
+          }),
+        );
+
+        try {
+          await saveFixtureH2HHistory({
+            tablesdb,
+            databaseId,
+            h2hTable,
+            fixture,
+            logger,
+          });
+
+          workingH2hRows = await fetchStoredH2HRowsForFixture(tablesdb, databaseId, h2hTable, fixtureApiId);
+
+          logger(
+            JSON.stringify({
+              job: 'daily-sync-generate',
+              fixture_api_id: fixtureApiId,
+              stage: 'h2h-on-demand-complete',
+              h2h_rows: workingH2hRows.length,
+            }),
+          );
+        } catch (error) {
+          logger(
+            JSON.stringify({
+              job: 'daily-sync-generate',
+              fixture_api_id: fixtureApiId,
+              stage: 'h2h-on-demand-failed',
+              message: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        }
+      }
+
+      const prompt = buildPrompt(fixture, workingH2hRows);
       let aiResult;
       try {
         aiResult = await requestAiPrediction(fixtureApiId, prompt, fixture, logger);
@@ -934,7 +1179,7 @@ async function generatePredictionsForBatch({
         fixturesTable,
         predictionsTable,
         fixture,
-        h2hRows,
+        h2hRows: workingH2hRows,
         aiResponse: aiResult.aiResponse,
         parsed: aiResult.parsed,
         startedAt,
@@ -1086,6 +1331,24 @@ export default async function main(context) {
       });
     }
 
+    const amLimit = Number.parseInt(process.env.API_FOOTBALL_MAX_AM_FIXTURES || '50', 10);
+    const pmLimit = Number.parseInt(process.env.API_FOOTBALL_MAX_PM_FIXTURES || '50', 10);
+    const selectedFixturesResult = selectFixturesBySession(fixtures, amLimit, pmLimit, 'Africa/Lagos');
+    const selectedFixtures = selectedFixturesResult.selectedFixtures;
+
+    appwriteLog(
+      JSON.stringify({
+        job: 'daily-sync-generate',
+        stage: 'fixtures-selected',
+        total_available: selectedFixturesResult.stats.totalAvailable,
+        am_available: selectedFixturesResult.stats.amAvailable,
+        pm_available: selectedFixturesResult.stats.pmAvailable,
+        am_selected: selectedFixturesResult.stats.amSelected,
+        pm_selected: selectedFixturesResult.stats.pmSelected,
+        total_selected: selectedFixturesResult.stats.totalSelected,
+      }),
+    );
+
     const [teamsDelete, leaguesDelete, fixturesDelete, h2hDelete] = await Promise.all([
       deleteAllRows(tablesdb, databaseId, teamsTable),
       deleteAllRows(tablesdb, databaseId, leaguesTable),
@@ -1106,7 +1369,7 @@ export default async function main(context) {
       updated_at: isoNow(),
     });
 
-    for (const fixture of fixtures) {
+    for (const fixture of selectedFixtures) {
       const leagueInfo = fixture.league;
       const homeTeam = fixture.teams.home;
       const awayTeam = fixture.teams.away;
@@ -1162,9 +1425,9 @@ export default async function main(context) {
       status: 'success',
       started_at: startedAt,
       finished_at: isoNow(),
-      items_seen: String(fixtures.length),
-      items_saved: String(fixtures.length),
-      message: `Synced ${fixtures.length} fixtures from API-Football.`,
+      items_seen: String(selectedFixtures.length),
+      items_saved: String(selectedFixtures.length),
+      message: `Synced ${selectedFixtures.length} selected fixtures from API-Football (from ${fixtures.length} fetched).`,
       created_at: isoNow(),
       updated_at: isoNow(),
     });
@@ -1220,6 +1483,7 @@ export default async function main(context) {
       databaseId,
       fixtureContexts,
       fixturesTable,
+      h2hTable,
       predictionsTable,
       startedAt,
       logFn: appwriteLog,
