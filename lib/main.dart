@@ -1,15 +1,26 @@
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'appwrite_subscription_service.dart';
 import 'prediction_repository.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
+    await _ensureNotificationPermission();
     await AppwriteSubscriptionService().ensureSubscribed();
   } catch (_) {
     // Push subscription issues should not block the prediction feed.
   }
   runApp(const MyApp());
+}
+
+Future<void> _ensureNotificationPermission() async {
+  final status = await Permission.notification.status;
+  if (status.isGranted || status.isLimited) {
+    return;
+  }
+  await Permission.notification.request();
 }
 
 class MyApp extends StatelessWidget {
@@ -18,7 +29,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Ai football betting prediction',
+      title: 'AI Football Prediction',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF00C2A8),
@@ -42,6 +53,7 @@ class PredictionFeedPage extends StatefulWidget {
 class _PredictionFeedPageState extends State<PredictionFeedPage> {
   final PredictionRepository _repository = PredictionRepository();
   late Future<List<PredictionRecord>> _futurePredictions;
+  final Set<String> _expandedSectionKeys = <String>{};
 
   @override
   void initState() {
@@ -54,6 +66,16 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
       _futurePredictions = _repository.fetchPublishedPredictions();
     });
     await _futurePredictions;
+  }
+
+  void _toggleSection(String key) {
+    setState(() {
+      if (_expandedSectionKeys.contains(key)) {
+        _expandedSectionKeys.remove(key);
+      } else {
+        _expandedSectionKeys.add(key);
+      }
+    });
   }
 
   @override
@@ -84,53 +106,94 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
                 child: CustomScrollView(
                   physics: const AlwaysScrollableScrollPhysics(),
                   slivers: [
-                    SliverToBoxAdapter(
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _HeaderCard(
-                              title: 'Ai football betting prediction',
-                              count: predictions.length,
-                            ),
-                            const SizedBox(height: 18),
-                            if (snapshot.connectionState ==
-                                    ConnectionState.waiting &&
-                                predictions.isEmpty)
-                              const Center(
-                                child: Padding(
-                                  padding: EdgeInsets.only(top: 32),
-                                  child: CircularProgressIndicator(),
-                                ),
-                              )
-                            else if (snapshot.hasError)
-                              _EmptyState(
-                                icon: Icons.error_outline,
-                                title: 'Unable to load predictions',
-                                message:
-                                    'Pull to refresh and try again.',
-                                actionLabel: 'Retry',
-                                onAction: _reload,
-                              )
-                            else if (predictions.isEmpty)
-                              const _EmptyState(
-                                icon: Icons.sports_soccer,
-                                title: 'No published picks yet',
-                                message:
-                                    'When the backend publishes predictions, they will appear here as primary pick cards.',
-                              )
-                            else
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: _buildGroupedPredictionWidgets(
-                                  predictions,
-                                ),
-                              ),
-                          ],
+                    SliverAppBar(
+                      pinned: true,
+                      floating: false,
+                      toolbarHeight: 72,
+                      backgroundColor: const Color(0xFF0A1220).withAlpha(248),
+                      surfaceTintColor: Colors.transparent,
+                      elevation: 0,
+                      titleSpacing: 20,
+                      title: _StickyHeader(count: predictions.length),
+                      flexibleSpace: Container(
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Color(0xFF07111F),
+                              Color(0xFF0D223A),
+                              Color(0xFF123652),
+                            ],
+                            begin: Alignment.centerLeft,
+                            end: Alignment.centerRight,
+                          ),
                         ),
                       ),
+                      actions: [
+                        Padding(
+                          padding: const EdgeInsets.only(right: 12),
+                          child: IconButton(
+                            tooltip: 'Policy',
+                            onPressed: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => const PolicyPage(),
+                                ),
+                              );
+                            },
+                            icon: const Icon(Icons.menu),
+                            color: const Color(0xFFB8D5FF),
+                          ),
+                        ),
+                      ],
                     ),
+                    if (snapshot.connectionState == ConnectionState.waiting &&
+                        predictions.isEmpty)
+                      const SliverToBoxAdapter(
+                        child: Center(
+                          child: Padding(
+                            padding: EdgeInsets.only(top: 32),
+                            child: CircularProgressIndicator(),
+                          ),
+                        ),
+                      )
+                    else if (snapshot.hasError)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                          child: _EmptyState(
+                            icon: Icons.error_outline,
+                            title: 'Unable to load predictions',
+                            message: 'Pull to refresh and try again.',
+                            actionLabel: 'Retry',
+                            onAction: _reload,
+                          ),
+                        ),
+                      )
+                    else if (predictions.isEmpty)
+                      const SliverToBoxAdapter(
+                        child: Padding(
+                          padding: EdgeInsets.fromLTRB(20, 16, 20, 0),
+                          child: _EmptyState(
+                            icon: Icons.sports_soccer,
+                            title: 'No published picks yet',
+                            message:
+                                'When the backend publishes predictions, they will appear here as primary pick cards.',
+                          ),
+                        ),
+                      )
+                    else
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                        sliver: SliverList(
+                          delegate: SliverChildListDelegate(
+                            _buildGroupedPredictionWidgets(
+                              predictions,
+                              _expandedSectionKeys,
+                              _toggleSection,
+                            ),
+                          ),
+                        ),
+                      ),
                     const SliverToBoxAdapter(child: SizedBox(height: 24)),
                   ],
                 ),
@@ -143,62 +206,127 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
   }
 }
 
-class _HeaderCard extends StatelessWidget {
-  const _HeaderCard({
-    required this.title,
+class _StickyHeader extends StatelessWidget {
+  const _StickyHeader({
     required this.count,
   });
 
-  final String title;
   final int count;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        gradient: const LinearGradient(
-          colors: [Color(0xFF10253E), Color(0xFF0E3A46)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        border: Border.all(color: const Color(0xFF1B4260)),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x4000D4AA),
-            blurRadius: 24,
-            offset: Offset(0, 14),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: const Color(0xFF00D4AA).withAlpha(31),
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Text(
-              '$count live cards',
-              style: const TextStyle(
-                color: Color(0xFF75F7D7),
-                fontWeight: FontWeight.w700,
-                fontSize: 12,
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'AI Football Prediction',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  height: 1.0,
+                  letterSpacing: 0.2,
+                ),
               ),
+              const SizedBox(height: 2),
+              Text(
+                '$count live cards',
+                style: const TextStyle(
+                  color: Color(0xFF75F7D7),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class PolicyPage extends StatelessWidget {
+  const PolicyPage({super.key});
+
+  static const String _policyUrl =
+      'https://www.e-droid.net/privacy.php?ida=4037981&idl=en';
+
+  Future<void> _openPolicyUrl() async {
+    final uri = Uri.parse(_policyUrl);
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Policy'),
+        backgroundColor: const Color(0xFF0A1220),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          const Text(
+            'Privacy and App Policy',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 24,
+              fontWeight: FontWeight.w800,
             ),
           ),
-          const SizedBox(height: 14),
-          Text(
-            title,
+          const SizedBox(height: 12),
+          const Text(
+            'This app provides football prediction content only. It does not encourage, promote, or require users to place bets. Any betting decision is entirely the user\'s responsibility and should only be made where it is legal and appropriate to do so. The app is for informational and entertainment purposes.',
+            style: TextStyle(
+              color: Color(0xFFB8D5FF),
+              fontSize: 14,
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(height: 20),
+          _policySection(
+            title: 'Important notice',
+            body:
+                'The app does not guarantee winnings, outcomes, or financial profit. Predictions are based on available data and should be treated as opinions, not certainty.',
+          ),
+          const SizedBox(height: 12),
+          _policySection(
+            title: 'Age and responsibility',
+            body:
+                'Users should comply with local laws and age restrictions. If gambling is restricted in your location or if you are under the legal age, do not use the app for betting-related activity.',
+          ),
+          const SizedBox(height: 12),
+          _policySection(
+            title: 'Data use',
+            body:
+                'The app may use account, notification, and analytics-related services needed to deliver predictions and alerts. We do not sell user betting choices or ask for payment to access basic prediction content.',
+          ),
+          const SizedBox(height: 20),
+          FilledButton.icon(
+            onPressed: _openPolicyUrl,
+            icon: const Icon(Icons.open_in_new),
+            label: const Text('Open web policy'),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Web policy source:',
+            style: TextStyle(
+              color: Color(0xFF84D6FF),
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          SelectableText(
+            _policyUrl,
             style: const TextStyle(
-              color: Colors.white,
-              fontSize: 28,
-              fontWeight: FontWeight.w800,
-              height: 1.05,
+              color: Color(0xFF75F7D7),
+              fontSize: 13,
             ),
           ),
         ],
@@ -207,24 +335,69 @@ class _HeaderCard extends StatelessWidget {
   }
 }
 
+Widget _policySection({
+  required String title,
+  required String body,
+}) {
+  return Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: const Color(0xFF0D1B2D),
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: const Color(0xFF20364E)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          body,
+          style: const TextStyle(
+            color: Color(0xFFB8D5FF),
+            fontSize: 14,
+            height: 1.5,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
 class _PredictionDateSection {
   const _PredictionDateSection({
     required this.date,
     required this.label,
+    required this.keyValue,
     required this.predictions,
   });
 
   final DateTime date;
   final String label;
+  final String keyValue;
   final List<PredictionRecord> predictions;
 }
 
-List<Widget> _buildGroupedPredictionWidgets(List<PredictionRecord> predictions) {
+List<Widget> _buildGroupedPredictionWidgets(
+  List<PredictionRecord> predictions,
+  Set<String> expandedSectionKeys,
+  void Function(String key) onToggleSection,
+) {
   final sections = _groupPredictionsByDate(predictions);
   final widgets = <Widget>[];
 
   for (var sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
     final section = sections[sectionIndex];
+    final isTodaySection = section.label == 'Today';
+    final isExpanded = isTodaySection || expandedSectionKeys.contains(section.keyValue);
 
     if (sectionIndex > 0) {
       widgets.add(const SizedBox(height: 20));
@@ -234,14 +407,19 @@ List<Widget> _buildGroupedPredictionWidgets(List<PredictionRecord> predictions) 
       _DateSectionHeader(
         label: section.label,
         count: section.predictions.length,
+        isExpanded: isExpanded,
+        canToggle: !isTodaySection,
+        onTap: () => onToggleSection(section.keyValue),
       ),
     );
-    widgets.add(const SizedBox(height: 12));
+    if (isExpanded) {
+      widgets.add(const SizedBox(height: 12));
 
-    for (var i = 0; i < section.predictions.length; i++) {
-      widgets.add(PredictionGroupCard(prediction: section.predictions[i]));
-      if (i < section.predictions.length - 1) {
-        widgets.add(const SizedBox(height: 16));
+      for (var i = 0; i < section.predictions.length; i++) {
+        widgets.add(PredictionGroupCard(prediction: section.predictions[i]));
+        if (i < section.predictions.length - 1) {
+          widgets.add(const SizedBox(height: 16));
+        }
       }
     }
   }
@@ -271,6 +449,7 @@ List<_PredictionDateSection> _groupPredictionsByDate(
     return _PredictionDateSection(
       date: date,
       label: _predictionDateLabel(date, now),
+      keyValue: date.toIso8601String(),
       predictions: items,
     );
   }).toList();
@@ -402,49 +581,75 @@ class _DateSectionHeader extends StatelessWidget {
   const _DateSectionHeader({
     required this.label,
     required this.count,
+    required this.isExpanded,
+    required this.canToggle,
+    required this.onTap,
   });
 
   final String label;
   final int count;
+  final bool isExpanded;
+  final bool canToggle;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
+      child: Material(
         color: const Color(0xFF0D1B2D),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFF20364E)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: InkWell(
+          onTap: canToggle ? onTap : null,
+          borderRadius: BorderRadius.circular(18),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
-              color: const Color(0xFF00D4AA).withAlpha(31),
-              borderRadius: BorderRadius.circular(999),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: const Color(0xFF20364E)),
             ),
-            child: Text(
-              '$count',
-              style: const TextStyle(
-                color: Color(0xFF75F7D7),
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-              ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    label,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF00D4AA).withAlpha(31),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    '$count',
+                    style: const TextStyle(
+                      color: Color(0xFF75F7D7),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (canToggle)
+                  Icon(
+                    isExpanded ? Icons.expand_less : Icons.expand_more,
+                    color: const Color(0xFF84D6FF),
+                  )
+                else
+                  const Icon(
+                    Icons.push_pin,
+                    color: Color(0xFF84D6FF),
+                  ),
+              ],
             ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -461,6 +666,7 @@ class PredictionGroupCard extends StatelessWidget {
       'Primary pick',
       prediction.primaryPick,
       const Color(0xFF00D4AA),
+      prediction,
     );
 
     return Container(
@@ -486,6 +692,8 @@ class PredictionGroupCard extends StatelessWidget {
               homeTeamName: prediction.homeTeamName,
               awayTeamLogoUrl: prediction.awayTeamLogoUrl,
               awayTeamName: prediction.awayTeamName,
+              homeScore: _teamScoreLabel(prediction.currentHomeGoals, prediction.fulltimeHomeGoals),
+              awayScore: _teamScoreLabel(prediction.currentAwayGoals, prediction.fulltimeAwayGoals),
               confidenceLabel: prediction.confidenceLabel ?? 'live',
             ),
             const SizedBox(height: 16),
@@ -521,6 +729,7 @@ Widget _teamBadge({
   required String? logoUrl,
   required String? teamName,
   required bool isHome,
+  required String? scoreText,
 }) {
   final displayName = (teamName?.trim().isNotEmpty ?? false)
       ? teamName!.trim()
@@ -583,6 +792,17 @@ Widget _teamBadge({
           ),
         ),
       ),
+      if (scoreText != null) ...[
+        const SizedBox(height: 4),
+        Text(
+          scoreText,
+          style: const TextStyle(
+            color: Color(0xFF84D6FF),
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
     ],
   );
 }
@@ -593,6 +813,8 @@ class _MatchHeader extends StatelessWidget {
     required this.homeTeamName,
     required this.awayTeamLogoUrl,
     required this.awayTeamName,
+    required this.homeScore,
+    required this.awayScore,
     required this.confidenceLabel,
   });
 
@@ -600,6 +822,8 @@ class _MatchHeader extends StatelessWidget {
   final String? homeTeamName;
   final String? awayTeamLogoUrl;
   final String? awayTeamName;
+  final String? homeScore;
+  final String? awayScore;
   final String confidenceLabel;
 
   @override
@@ -615,23 +839,48 @@ class _MatchHeader extends StatelessWidget {
                 logoUrl: homeTeamLogoUrl,
                 teamName: homeTeamName,
                 isHome: true,
+                scoreText: homeScore,
               ),
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
               child: Container(
-                width: 40,
-                height: 40,
+                width: 46,
+                height: 46,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF10253E),
                   shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0xFF20364E)),
+                  gradient: const RadialGradient(
+                    colors: [
+                      Color(0xFF183B5B),
+                      Color(0xFF0E1E33),
+                    ],
+                    radius: 0.95,
+                  ),
+                  border: Border.all(color: const Color(0xFF2D5A86)),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x3300D4AA),
+                      blurRadius: 14,
+                      offset: Offset(0, 6),
+                    ),
+                  ],
                 ),
                 child: const Center(
-                  child: Icon(
-                    Icons.sports_soccer,
-                    size: 18,
-                    color: Color(0xFF84D6FF),
+                  child: Text(
+                    'VS',
+                    style: TextStyle(
+                      color: Color(0xFFBDF4FF),
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.1,
+                      shadows: [
+                        Shadow(
+                          color: Color(0x6600D4AA),
+                          blurRadius: 8,
+                          offset: Offset(0, 2),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -641,6 +890,7 @@ class _MatchHeader extends StatelessWidget {
                 logoUrl: awayTeamLogoUrl,
                 teamName: awayTeamName,
                 isHome: false,
+                scoreText: awayScore,
               ),
             ),
           ],
@@ -675,6 +925,13 @@ class _PickCard extends StatelessWidget {
         children: [
           Row(
             children: [
+              if (data.verdictLabel != null) ...[
+                _TinyVerdictChip(
+                  label: data.verdictLabel!,
+                  color: data.verdictColor!,
+                ),
+                const SizedBox(width: 8),
+              ],
               Container(
                 width: 10,
                 height: 10,
@@ -694,6 +951,10 @@ class _PickCard extends StatelessWidget {
                   ),
                 ),
               ),
+              if (data.actualOutcomeLabel != null) ...[
+                const SizedBox(width: 8),
+                _TinyOutcomeChip(label: data.actualOutcomeLabel!),
+              ],
               if (data.confidence != null) ...[
                 const SizedBox(width: 8),
                 _ConfidencePill(value: data.confidence!),
@@ -724,8 +985,264 @@ class _PickCard extends StatelessWidget {
   }
 }
 
+class _TinyVerdictChip extends StatelessWidget {
+  const _TinyVerdictChip({
+    required this.label,
+    required this.color,
+  });
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withAlpha(28),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withAlpha(80)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+    );
+  }
+}
+
+class _TinyOutcomeChip extends StatelessWidget {
+  const _TinyOutcomeChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: const Color(0xFF84D6FF).withAlpha(24),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0xFF84D6FF).withAlpha(72)),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Color(0xFF84D6FF),
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
 String finalSelection(_PickCardData data) {
   return data.selection ?? data.market ?? 'Selection';
+}
+
+String? _teamScoreLabel(String? currentGoals, String? fulltimeGoals) {
+  final finalGoals = fulltimeGoals ?? currentGoals;
+  if (finalGoals == null || finalGoals.trim().isEmpty) {
+    return null;
+  }
+  return finalGoals.trim();
+}
+
+enum _PickVerdict {
+  pending,
+  correct,
+  wrong,
+}
+
+class _MiniStatusChip extends StatelessWidget {
+  const _MiniStatusChip({
+    required this.label,
+    required this.color,
+    required this.icon,
+  });
+
+  final String label;
+  final Color color;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: color.withAlpha(28),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withAlpha(80)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: color),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _scoreLabel(PredictionRecord prediction) {
+  final home = prediction.fulltimeHomeGoals ?? prediction.currentHomeGoals;
+  final away = prediction.fulltimeAwayGoals ?? prediction.currentAwayGoals;
+  if (home == null && away == null) {
+    return 'Score pending';
+  }
+
+  return '${home ?? '-'}-${away ?? '-'}';
+}
+
+String? _outcomeLabel(PredictionRecord prediction) {
+  final outcome = prediction.matchOutcome?.trim().toLowerCase();
+  if (outcome == null || outcome.isEmpty) {
+    return null;
+  }
+
+  switch (outcome) {
+    case 'home':
+      return 'Home win';
+    case 'away':
+      return 'Away win';
+    case 'draw':
+      return 'Draw';
+    default:
+      return outcome.toUpperCase();
+  }
+}
+
+_PickVerdict _pickVerdict(PredictionRecord prediction) {
+  final outcome = prediction.matchOutcome?.trim().toLowerCase();
+  if (outcome == null || outcome.isEmpty) {
+    return _PickVerdict.pending;
+  }
+
+  final selection = _normalizeSelection(prediction);
+  if (selection.isEmpty) {
+    return _PickVerdict.pending;
+  }
+
+  final homeTeam = _normalizeText(prediction.homeTeamName ?? '');
+  final awayTeam = _normalizeText(prediction.awayTeamName ?? '');
+  final homeGoals = _goalCount(prediction.fulltimeHomeGoals ?? prediction.currentHomeGoals);
+  final awayGoals = _goalCount(prediction.fulltimeAwayGoals ?? prediction.currentAwayGoals);
+
+  if (selection.contains('btts')) {
+    if (homeGoals == null || awayGoals == null) {
+      return _PickVerdict.pending;
+    }
+    final yesPicked = selection.contains('yes');
+    final actualYes = homeGoals > 0 && awayGoals > 0;
+    return yesPicked == actualYes ? _PickVerdict.correct : _PickVerdict.wrong;
+  }
+
+  final overUnder = _parseOverUnderSelection(selection);
+  if (overUnder != null) {
+    if (homeGoals == null || awayGoals == null) {
+      return _PickVerdict.pending;
+    }
+    final totalGoals = homeGoals + awayGoals;
+    final actualCorrect = overUnder.isOver
+        ? totalGoals > overUnder.line
+        : totalGoals < overUnder.line;
+    return actualCorrect ? _PickVerdict.correct : _PickVerdict.wrong;
+  }
+
+  if (selection.contains('home') ||
+      selection.contains('1') ||
+      selection.contains(homeTeam)) {
+    return outcome == 'home' ? _PickVerdict.correct : _PickVerdict.wrong;
+  }
+
+  if (selection.contains('away') ||
+      selection.contains('2') ||
+      selection.contains(awayTeam)) {
+    return outcome == 'away' ? _PickVerdict.correct : _PickVerdict.wrong;
+  }
+
+  if (selection.contains('draw') || selection == 'x') {
+    return outcome == 'draw' ? _PickVerdict.correct : _PickVerdict.wrong;
+  }
+
+  if (prediction.predictedWinner != null) {
+    final predictedWinner = _normalizeText(prediction.predictedWinner!);
+    if (predictedWinner.isNotEmpty) {
+      if (predictedWinner.contains(homeTeam)) {
+        return outcome == 'home' ? _PickVerdict.correct : _PickVerdict.wrong;
+      }
+      if (predictedWinner.contains(awayTeam)) {
+        return outcome == 'away' ? _PickVerdict.correct : _PickVerdict.wrong;
+      }
+      if (predictedWinner.contains('draw')) {
+        return outcome == 'draw' ? _PickVerdict.correct : _PickVerdict.wrong;
+      }
+    }
+  }
+
+  return _PickVerdict.pending;
+}
+
+String _normalizeSelection(PredictionRecord prediction) {
+  final selection = prediction.primaryPick?.selection?.trim() ?? '';
+  if (selection.isNotEmpty) {
+    return _normalizeText(selection);
+  }
+
+  final market = prediction.primaryPick?.market?.trim() ?? '';
+  return _normalizeText(market);
+}
+
+String _normalizeText(String value) {
+  return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9.]+'), ' ').trim();
+}
+
+double? _goalCount(String? value) {
+  if (value == null || value.trim().isEmpty) {
+    return null;
+  }
+  return double.tryParse(value.trim());
+}
+
+_OverUnderSelection? _parseOverUnderSelection(String selection) {
+  final match = RegExp(r'(over|under)\s*(\d+(?:\.\d+)?)').firstMatch(selection);
+  if (match == null) {
+    return null;
+  }
+
+  final line = double.tryParse(match.group(2) ?? '');
+  if (line == null) {
+    return null;
+  }
+
+  return _OverUnderSelection(
+    isOver: match.group(1) == 'over',
+    line: line,
+  );
+}
+
+class _OverUnderSelection {
+  const _OverUnderSelection({
+    required this.isOver,
+    required this.line,
+  });
+
+  final bool isOver;
+  final double line;
 }
 
 class _ConfidencePill extends StatelessWidget {
@@ -883,6 +1400,9 @@ class _PickCardData {
     required this.confidence,
     required this.reason,
     required this.accent,
+    required this.verdictLabel,
+    required this.verdictColor,
+    required this.actualOutcomeLabel,
   });
 
   final String label;
@@ -891,6 +1411,9 @@ class _PickCardData {
   final double? confidence;
   final String? reason;
   final Color accent;
+  final String? verdictLabel;
+  final Color? verdictColor;
+  final String? actualOutcomeLabel;
 
   bool get hasContent =>
       market != null || selection != null || confidence != null || reason != null;
@@ -899,7 +1422,20 @@ class _PickCardData {
     String label,
     PredictionPick? pick,
     Color accent,
+    PredictionRecord prediction,
   ) {
+    final verdict = _pickVerdict(prediction);
+    final verdictLabel = switch (verdict) {
+      _PickVerdict.correct => 'Correct',
+      _PickVerdict.wrong => 'Wrong',
+      _PickVerdict.pending => null,
+    };
+    final verdictColor = switch (verdict) {
+      _PickVerdict.correct => const Color(0xFF00D4AA),
+      _PickVerdict.wrong => const Color(0xFFFF6B6B),
+      _PickVerdict.pending => null,
+    };
+
     return _PickCardData(
       label: label,
       market: pick?.market,
@@ -907,6 +1443,9 @@ class _PickCardData {
       confidence: pick?.confidence,
       reason: pick?.reason,
       accent: accent,
+      verdictLabel: verdictLabel,
+      verdictColor: verdictColor,
+      actualOutcomeLabel: _outcomeLabel(prediction),
     );
   }
 }

@@ -364,15 +364,14 @@ async function saveFixtureH2HHistory({
 function buildPrompt(fixture, oddsRows, h2hRows) {
   return [
     'You are a football prediction assistant.',
-    'Use the fixture, odds, and h2h history to produce a single JSON object.',
+    'Use the fixture, and if available the odds and h2h history, to produce a single JSON object.',
     'Return valid JSON only.',
     'Required JSON keys: predicted_winner, confidence, confidence_label, picks.',
     'The picks array must contain exactly 1 entry.',
     'That single pick must include: selection, confidence, reason.',
-    'Focus on low-odds markets such as over, under, gg/btts, corners, double chance 12, and throw-ins if the data exists.',
+    'Focus on low-odds markets such as over, under, gg/btts, corners, double chance 12, and throw-ins when those markets are available.',
     'If throw-in data is not available, skip it.',
-    'Do not answer with "not enough data" or refuse to predict.',
-    'If odds or h2h are sparse, still give the best conservative pick and explain the reasoning from the available fixture context.',
+    'Always provide one best conservative pick with a clear reason.',
     'Confidence should be a decimal between 0 and 1.',
     'Use confidence_label values like high, medium, or low.',
     '',
@@ -564,18 +563,36 @@ function isWithinFourHours(kickoffAt, now) {
   return kickoffAt.getTime() <= now.getTime() + 4 * 60 * 60 * 1000;
 }
 
+function shouldFetchOptionalContext(fixture, fixtureIndex, optionalLimit, optionalWindowHours, now) {
+  if (!Number.isFinite(optionalLimit) || optionalLimit <= 0) {
+    return false;
+  }
+
+  if (fixtureIndex >= optionalLimit) {
+    return false;
+  }
+
+  if (!Number.isFinite(optionalWindowHours) || optionalWindowHours <= 0) {
+    return true;
+  }
+
+  const kickoffAt = toDate(fixture?.kickoff_at || fixture?.fixture?.date || null);
+  if (!kickoffAt) {
+    return false;
+  }
+
+  return kickoffAt.getTime() <= now.getTime() + optionalWindowHours * 60 * 60 * 1000;
+}
+
 function normalizePrimaryReason(reason, fixture, oddsRows, h2hRows, selection) {
   const text = typeof reason === 'string' ? reason.trim() : '';
-  if (text && !/not enough data|insufficient/i.test(text)) {
+  if (text && !/not enough data|insufficient|low data|no history/i.test(text)) {
     return text;
   }
 
   const home = fixture?.home_team_name || 'home team';
   const away = fixture?.away_team_name || 'away team';
-  const oddsCount = Array.isArray(oddsRows) ? oddsRows.length : 0;
-  const h2hCount = Array.isArray(h2hRows) ? h2hRows.length : 0;
-
-  return `Based on the available fixture context for ${home} vs ${away} and ${oddsCount} odds rows plus ${h2hCount} h2h rows, ${selection || 'this pick'} is the best conservative choice.`;
+  return `${selection || 'This pick'} is the best available choice for ${home} vs ${away} based on the fixture context, odds movement, and recent match history.`;
 }
 
 function buildFallbackPrimaryPick(fixture, oddsRows, h2hRows) {
@@ -762,10 +779,10 @@ async function generatePredictionsForBatch({
 
       const prompt = buildPrompt(fixture, oddsRows, h2hRows);
       const aiResponse = await deepSeekChat([
-        {
-          role: 'system',
-          content: 'Return only valid JSON. Include predicted_winner, confidence, confidence_label, and picks. Never refuse with not enough data. Always return one best conservative pick.',
-        },
+      {
+        role: 'system',
+          content: 'Return only valid JSON. Include predicted_winner, confidence, confidence_label, and picks. Odds and h2h are optional enrichment. Always return one best conservative pick with a clear reason from the fixture context if needed.',
+      },
         {
           role: 'user',
           content: prompt,
@@ -896,7 +913,11 @@ export default async function main(context) {
     const payload = await response.json();
     const fixtures = Array.isArray(payload?.response) ? payload.response : [];
 
-    for (const fixture of fixtures) {
+    const optionalContextLimit = Number.parseInt(process.env.OPTIONAL_CONTEXT_FIXTURE_LIMIT || '12', 10);
+    const optionalContextWindowHours = Number.parseInt(process.env.OPTIONAL_CONTEXT_WINDOW_HOURS || '24', 10);
+    const syncNow = new Date();
+
+    for (const [fixtureIndex, fixture] of fixtures.entries()) {
       const leagueInfo = fixture.league;
       const homeTeam = fixture.teams.home;
       const awayTeam = fixture.teams.away;
@@ -940,39 +961,58 @@ export default async function main(context) {
 
       let oddsSaved = 0;
       let h2hSaved = 0;
+      const fetchOptionalContext = shouldFetchOptionalContext(
+        fixtureRow.data,
+        fixtureIndex,
+        optionalContextLimit,
+        optionalContextWindowHours,
+        syncNow,
+      );
 
-      try {
-        oddsSaved = await saveFixtureOdds({
-          tablesdb,
-          databaseId,
-          oddsTable,
-          fixture: fixtureRow.data,
-        });
-      } catch (error) {
-        console.error(
+      if (fetchOptionalContext) {
+        try {
+          oddsSaved = await saveFixtureOdds({
+            tablesdb,
+            databaseId,
+            oddsTable,
+            fixture: fixtureRow.data,
+          });
+        } catch (error) {
+          console.error(
+            JSON.stringify({
+              job: 'daily-sync-generate',
+              fixture_api_id: fixtureRow.data.api_fixture_id,
+              stage: 'odds',
+              message: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        }
+
+        try {
+          h2hSaved = await saveFixtureH2HHistory({
+            tablesdb,
+            databaseId,
+            h2hTable,
+            fixture: fixtureRow.data,
+          });
+        } catch (error) {
+          console.error(
+            JSON.stringify({
+              job: 'daily-sync-generate',
+              fixture_api_id: fixtureRow.data.api_fixture_id,
+              stage: 'h2h',
+              message: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        }
+      } else {
+        (context.log || console.log).call(
+          context,
           JSON.stringify({
             job: 'daily-sync-generate',
             fixture_api_id: fixtureRow.data.api_fixture_id,
-            stage: 'odds',
-            message: error instanceof Error ? error.message : String(error),
-          }),
-        );
-      }
-
-      try {
-        h2hSaved = await saveFixtureH2HHistory({
-          tablesdb,
-          databaseId,
-          h2hTable,
-          fixture: fixtureRow.data,
-        });
-      } catch (error) {
-        console.error(
-          JSON.stringify({
-            job: 'daily-sync-generate',
-            fixture_api_id: fixtureRow.data.api_fixture_id,
-            stage: 'h2h',
-            message: error instanceof Error ? error.message : String(error),
+            stage: 'optional-context-skipped',
+            reason: 'fixture-only-prediction-batch',
           }),
         );
       }

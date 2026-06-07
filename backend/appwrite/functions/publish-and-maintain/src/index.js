@@ -37,6 +37,28 @@ function parseDate(value) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+function toTextNumber(value) {
+  if (value == null) {
+    return null;
+  }
+
+  if (typeof value === 'number') {
+    return Number.isNaN(value) ? null : String(value);
+  }
+
+  const normalized = String(value).trim();
+  return normalized ? normalized : null;
+}
+
+function toNumericValue(value) {
+  if (typeof value === 'number') {
+    return Number.isNaN(value) ? null : value;
+  }
+
+  const parsed = Number(String(value || '').trim());
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 async function createRun(tablesdb, databaseId, tableId, data) {
   return tablesdb.createRow({
     databaseId,
@@ -151,6 +173,24 @@ function needsOutcomeRefresh(row, now) {
   return true;
 }
 
+function needsOutcomeRefreshWithinWindow(row, now, lookbackHours) {
+  if (!needsOutcomeRefresh(row, now)) {
+    return false;
+  }
+
+  if (!Number.isFinite(lookbackHours) || lookbackHours <= 0) {
+    return true;
+  }
+
+  const kickoffAt = parseDate(row.kickoff_at);
+  if (!kickoffAt) {
+    return false;
+  }
+
+  const windowStart = new Date(now.getTime() - lookbackHours * 60 * 60 * 1000);
+  return kickoffAt.getTime() >= windowStart.getTime();
+}
+
 function chunkArray(values, chunkSize) {
   const chunks = [];
   for (let index = 0; index < values.length; index += chunkSize) {
@@ -216,16 +256,16 @@ function determineOutcome(homeGoals, awayGoals) {
 
 function buildScoreFields(fixture) {
   return {
-    current_home_goals: toNumber(fixture?.goals?.home),
-    current_away_goals: toNumber(fixture?.goals?.away),
-    halftime_home_goals: toNumber(fixture?.score?.halftime?.home),
-    halftime_away_goals: toNumber(fixture?.score?.halftime?.away),
-    fulltime_home_goals: toNumber(fixture?.score?.fulltime?.home),
-    fulltime_away_goals: toNumber(fixture?.score?.fulltime?.away),
-    extratime_home_goals: toNumber(fixture?.score?.extratime?.home),
-    extratime_away_goals: toNumber(fixture?.score?.extratime?.away),
-    penalty_home_goals: toNumber(fixture?.score?.penalty?.home),
-    penalty_away_goals: toNumber(fixture?.score?.penalty?.away),
+    current_home_goals: toTextNumber(fixture?.goals?.home),
+    current_away_goals: toTextNumber(fixture?.goals?.away),
+    halftime_home_goals: toTextNumber(fixture?.score?.halftime?.home),
+    halftime_away_goals: toTextNumber(fixture?.score?.halftime?.away),
+    fulltime_home_goals: toTextNumber(fixture?.score?.fulltime?.home),
+    fulltime_away_goals: toTextNumber(fixture?.score?.fulltime?.away),
+    extratime_home_goals: toTextNumber(fixture?.score?.extratime?.home),
+    extratime_away_goals: toTextNumber(fixture?.score?.extratime?.away),
+    penalty_home_goals: toTextNumber(fixture?.score?.penalty?.home),
+    penalty_away_goals: toTextNumber(fixture?.score?.penalty?.away),
   };
 }
 
@@ -308,16 +348,21 @@ async function refreshOutcomeRow({
   const statusShort = fixture?.fixture?.status?.short || row.match_status_short || null;
   const statusLong = fixture?.fixture?.status?.long || row.match_status_long || null;
   const scoreFields = buildScoreFields(fixture);
-  const homeGoals = scoreFields.current_home_goals;
-  const awayGoals = scoreFields.current_away_goals;
-  const finalHomeGoals = scoreFields.fulltime_home_goals ?? homeGoals;
-  const finalAwayGoals = scoreFields.fulltime_away_goals ?? awayGoals;
+  const homeGoals = toNumericValue(scoreFields.current_home_goals);
+  const awayGoals = toNumericValue(scoreFields.current_away_goals);
+  const finalHomeGoals = toNumericValue(scoreFields.fulltime_home_goals ?? scoreFields.current_home_goals);
+  const finalAwayGoals = toNumericValue(scoreFields.fulltime_away_goals ?? scoreFields.current_away_goals);
+  const finalStatus = isFinalStatus(statusShort);
+  const existingOutcome = typeof row.match_outcome === 'string' ? row.match_outcome.trim() : '';
+  const nextOutcome = finalStatus && finalHomeGoals != null && finalAwayGoals != null
+    ? determineOutcome(finalHomeGoals, finalAwayGoals)
+    : existingOutcome || null;
 
   await upsertRow(tablesdb, databaseId, predictionsTable, row.$id, {
     match_status_short: statusShort,
     match_status_long: statusLong,
     ...scoreFields,
-    match_outcome: determineOutcome(finalHomeGoals, finalAwayGoals),
+    match_outcome: nextOutcome,
     result_checked_at: now,
     updated_at: now,
   });
@@ -325,7 +370,10 @@ async function refreshOutcomeRow({
   return {
     updated: true,
     status_short: statusShort,
-    final: isFinalStatus(statusShort),
+    final: finalStatus,
+    match_outcome: nextOutcome,
+    current_home_goals: homeGoals,
+    current_away_goals: awayGoals,
   };
 }
 
@@ -340,14 +388,22 @@ export default async function main({ res, error: reportError }) {
   const topicId = required('APPWRITE_TOPIC_PREDICTIONS');
 
   const startedAt = isoNow();
+  const now = new Date();
+  const outcomeLookbackHours = Number.parseInt(process.env.OUTCOME_LOOKBACK_HOURS || '8', 10);
 
   try {
-    const allPredictions = await fetchAllRows(tablesdb, databaseId, predictionsTable, [
-      Query.orderAsc('$createdAt'),
+    const draftPredictions = await fetchAllRows(tablesdb, databaseId, predictionsTable, [
+      Query.equal('release_status', 'draft'),
+      Query.orderAsc('kickoff_at'),
     ]);
 
-    const publishCandidates = allPredictions.filter((row) => shouldPublishPrediction(row, new Date()));
-    const outcomeCandidates = allPredictions.filter((row) => needsOutcomeRefresh(row, new Date()));
+    const publishedPredictions = await fetchAllRows(tablesdb, databaseId, predictionsTable, [
+      Query.equal('release_status', 'published'),
+      Query.orderAsc('kickoff_at'),
+    ]);
+
+    const publishCandidates = draftPredictions.filter((row) => shouldPublishPrediction(row, now));
+    const outcomeCandidates = publishedPredictions.filter((row) => needsOutcomeRefreshWithinWindow(row, now, outcomeLookbackHours));
 
     let published = 0;
     let notified = 0;
@@ -399,19 +455,22 @@ export default async function main({ res, error: reportError }) {
       status: 'success',
       started_at: startedAt,
       finished_at: isoNow(),
-      items_seen: String(allPredictions.length),
+      items_seen: String(draftPredictions.length + publishedPredictions.length),
       items_saved: String(published),
-      message: `Published ${published} predictions, sent ${notified} notifications, and refreshed ${outcomesUpdated} match outcomes.`,
+      message: `Loaded ${draftPredictions.length} drafts and ${publishedPredictions.length} published rows. Published ${published} predictions, sent ${notified} notifications, and refreshed ${outcomesUpdated} match outcomes within the last ${outcomeLookbackHours} hours.`,
       created_at: isoNow(),
       updated_at: isoNow(),
     });
 
     return res.json({
       ok: true,
-      items_seen: String(allPredictions.length),
+      items_seen: String(draftPredictions.length + publishedPredictions.length),
+      drafts_seen: String(draftPredictions.length),
+      published_seen: String(publishedPredictions.length),
       published: String(published),
       notified: String(notified),
       outcomes_updated: String(outcomesUpdated),
+      outcome_lookback_hours: String(outcomeLookbackHours),
     });
   } catch (error) {
     await createRun(tablesdb, databaseId, syncRunsTable, {
