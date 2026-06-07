@@ -980,6 +980,76 @@ export default async function main(context) {
   let generationCompleted = false;
 
   try {
+    appwriteLog(
+      JSON.stringify({
+        job: 'daily-sync-generate',
+        stage: 'fixtures-request',
+        request_url: url.toString(),
+      }),
+    );
+
+    const response = await fetch(url.toString(), {
+      headers: buildApiFootballHeaders(),
+    });
+
+    if (!response.ok) {
+      throw new Error(`API-Football request failed with status ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const fixtures = Array.isArray(payload?.response) ? payload.response : [];
+    appwriteLog(
+      JSON.stringify({
+        job: 'daily-sync-generate',
+        stage: 'fixtures-fetched',
+        date: fetchDate,
+        total_fixtures: fixtures.length,
+      }),
+    );
+
+    if (fixtures.length === 0) {
+      await createRun(tablesdb, databaseId, syncRunsTable, {
+        job_name: 'sync-fixtures',
+        sync_run_id: syncRunId,
+        status: 'success',
+        started_at: startedAt,
+        finished_at: isoNow(),
+        items_seen: '0',
+        items_saved: '0',
+        message: `API-Football returned no fixtures for ${fetchDate}. Raw tables were not cleared.`,
+        created_at: isoNow(),
+        updated_at: isoNow(),
+      });
+
+      appwriteLog(
+        JSON.stringify({
+          job: 'daily-sync-generate',
+          stage: 'run-empty',
+          date: fetchDate,
+          request_url: url.toString(),
+          reason: 'api-football-returned-no-fixtures',
+        }),
+      );
+
+      return res.json({
+        ok: true,
+        cleaned: {
+          teams: null,
+          leagues: null,
+          fixtures: null,
+          h2h: null,
+        },
+        items_seen: '0',
+        items_saved: '0',
+        items_failed: '0',
+        published: '0',
+        notified: '0',
+        h2h_fixtures_processed: '0',
+        h2h_rows_saved: '0',
+        sync_run_id: syncRunId,
+      });
+    }
+
     const [teamsDelete, leaguesDelete, fixturesDelete, h2hDelete] = await Promise.all([
       deleteAllRows(tablesdb, databaseId, teamsTable),
       deleteAllRows(tablesdb, databaseId, leaguesTable),
@@ -999,24 +1069,6 @@ export default async function main(context) {
       created_at: isoNow(),
       updated_at: isoNow(),
     });
-    const response = await fetch(url.toString(), {
-      headers: buildApiFootballHeaders(),
-    });
-
-    if (!response.ok) {
-      throw new Error(`API-Football request failed with status ${response.status}`);
-    }
-
-    const payload = await response.json();
-    const fixtures = Array.isArray(payload?.response) ? payload.response : [];
-    appwriteLog(
-      JSON.stringify({
-        job: 'daily-sync-generate',
-        stage: 'fixtures-fetched',
-        date: fetchDate,
-        total_fixtures: fixtures.length,
-      }),
-    );
 
     for (const fixture of fixtures) {
       const leagueInfo = fixture.league;
