@@ -4,9 +4,10 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     
     <application
-        android:label="Football Prediction App"
+        android:label="AI Football Prediction"
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon"
+        android:roundIcon="@mipmap/launcher_icon"
         android:allowBackup="false"
         android:usesCleartextTraffic="true">
         <activity
@@ -38,7 +39,7 @@
             android:value="2" />
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-3088816615654692~2666394737"/>
+            android:value="ca-app-pub-1523681275533054~6536391282"/>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

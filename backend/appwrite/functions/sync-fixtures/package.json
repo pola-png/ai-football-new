@@ -1,9 +1,9 @@
 {
-  "name": "generate-and-publish",
+  "name": "sync-fixtures",
   "version": "1.0.0",
   "private": true,
   "main": "src/index.js",
-  "type": "module",
+  "type": "commonjs",
   "scripts": {
     "start": "node src/index.js"
   },

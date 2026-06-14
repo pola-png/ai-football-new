@@ -1,26 +1,30 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'ad_gate_service.dart';
 import 'appwrite_subscription_service.dart';
 import 'prediction_repository.dart';
+import 'push_notification_service.dart';
+
+@pragma('vm:entry-point')
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
-    await _ensureNotificationPermission();
-    await AppwriteSubscriptionService().ensureSubscribed();
-  } catch (_) {
+    await Firebase.initializeApp();
+    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+    await PushNotificationService.initialize();
+    await AdGateService.instance.initialize();
+  } catch (error) {
+    debugPrint('Push subscription failed: $error');
     // Push subscription issues should not block the prediction feed.
   }
   runApp(const MyApp());
-}
-
-Future<void> _ensureNotificationPermission() async {
-  final status = await Permission.notification.status;
-  if (status.isGranted || status.isLimited) {
-    return;
-  }
-  await Permission.notification.request();
 }
 
 class MyApp extends StatelessWidget {
@@ -30,6 +34,15 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'AI Football Prediction',
+      builder: (context, child) {
+        final scaledChild = child ?? const SizedBox.shrink();
+        return MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            textScaler: const TextScaler.linear(1.15),
+          ),
+          child: scaledChild,
+        );
+      },
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF00C2A8),
@@ -37,9 +50,66 @@ class MyApp extends StatelessWidget {
         ),
         useMaterial3: true,
         scaffoldBackgroundColor: const Color(0xFF07111F),
+        textTheme: ThemeData.dark().textTheme,
       ),
-      home: const PredictionFeedPage(),
+      home: const NotificationBootstrapPage(),
     );
+  }
+}
+
+class NotificationBootstrapPage extends StatefulWidget {
+  const NotificationBootstrapPage({super.key});
+
+  @override
+  State<NotificationBootstrapPage> createState() => _NotificationBootstrapPageState();
+}
+
+class _NotificationBootstrapPageState extends State<NotificationBootstrapPage> {
+  bool _ready = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _bootstrap();
+    });
+  }
+
+  Future<void> _bootstrap() async {
+    try {
+      await FirebaseMessaging.instance.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+        announcement: false,
+        carPlay: false,
+        criticalAlert: false,
+        provisional: false,
+      );
+      await Permission.notification.request();
+      await AppwriteSubscriptionService().ensureSubscribed();
+    } catch (error) {
+      debugPrint('Push subscription failed: $error');
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _ready = true;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_ready) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    return const PredictionFeedPage();
   }
 }
 
@@ -54,7 +124,9 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
   final PredictionRepository _repository = PredictionRepository();
   late Future<List<PredictionRecord>> _futurePredictions;
   final Set<String> _expandedSectionKeys = <String>{};
+  final Set<String> _unlockedPickKeys = <String>{};
   _TodayBucket _selectedTodayBucket = _TodayBucket.coming;
+  String? _unlockingPickKey;
 
   @override
   void initState() {
@@ -87,6 +159,50 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
     setState(() {
       _selectedTodayBucket = bucket;
     });
+  }
+
+  bool _isPickUnlocked(String unlockKey) {
+    return _unlockedPickKeys.contains(unlockKey);
+  }
+
+  Future<void> _unlockPick(PredictionRecord prediction) async {
+    final unlockKey = _predictionUnlockKey(prediction);
+    if (unlockKey.isEmpty || _unlockedPickKeys.contains(unlockKey)) {
+      return;
+    }
+
+    if (_unlockingPickKey == unlockKey) {
+      return;
+    }
+
+    setState(() {
+      _unlockingPickKey = unlockKey;
+    });
+
+    try {
+      final didUnlock = await AdGateService.instance.showRewardedAd();
+      if (!mounted) {
+        return;
+      }
+
+      if (didUnlock) {
+        setState(() {
+          _unlockedPickKeys.add(unlockKey);
+        });
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Ad not ready yet. Please try again.'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _unlockingPickKey = null;
+        });
+      }
+    }
   }
 
   @override
@@ -125,7 +241,7 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
                       surfaceTintColor: Colors.transparent,
                       elevation: 0,
                       titleSpacing: 20,
-                      title: _StickyHeader(count: predictions.length),
+                      title: const _StickyHeader(),
                       flexibleSpace: Container(
                         decoration: const BoxDecoration(
                           gradient: LinearGradient(
@@ -187,8 +303,7 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
                           child: _EmptyState(
                             icon: Icons.sports_soccer,
                             title: 'No published picks yet',
-                            message:
-                                'When the backend publishes predictions, they will appear here as primary pick cards.',
+                            message: 'When new picks are ready, they will appear here as primary pick cards.',
                           ),
                         ),
                       )
@@ -203,6 +318,9 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
                               _toggleSection,
                               _selectedTodayBucket,
                               _selectTodayBucket,
+                              _isPickUnlocked,
+                              _unlockPick,
+                              _unlockingPickKey,
                             ),
                           ),
                         ),
@@ -219,12 +337,20 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
   }
 }
 
-class _StickyHeader extends StatelessWidget {
-  const _StickyHeader({
-    required this.count,
-  });
+String _normalizeFixtureApiId(String fixtureApiId) {
+  return fixtureApiId.trim();
+}
 
-  final int count;
+String _predictionUnlockKey(PredictionRecord prediction) {
+  final recordId = prediction.recordId?.trim() ?? '';
+  if (recordId.isNotEmpty) {
+    return recordId;
+  }
+  return _normalizeFixtureApiId(prediction.fixtureApiId);
+}
+
+class _StickyHeader extends StatelessWidget {
+  const _StickyHeader();
 
   @override
   Widget build(BuildContext context) {
@@ -244,15 +370,6 @@ class _StickyHeader extends StatelessWidget {
                   fontWeight: FontWeight.w800,
                   height: 1.0,
                   letterSpacing: 0.2,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                '$count cards',
-                style: const TextStyle(
-                  color: Color(0xFF75F7D7),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
                 ),
               ),
             ],
@@ -405,6 +522,9 @@ List<Widget> _buildGroupedPredictionWidgets(
   void Function(String key) onToggleSection,
   _TodayBucket selectedTodayBucket,
   void Function(_TodayBucket bucket) onSelectTodayBucket,
+  bool Function(String fixtureApiId) isPickUnlocked,
+  Future<void> Function(PredictionRecord prediction) onUnlockPick,
+  String? unlockingPickKey,
 ) {
   final sections = _groupPredictionsByDate(predictions);
   final widgets = <Widget>[];
@@ -439,13 +559,24 @@ List<Widget> _buildGroupedPredictionWidgets(
           section.predictions,
           selectedTodayBucket,
           onSelectTodayBucket,
+          isPickUnlocked,
+          onUnlockPick,
+          unlockingPickKey,
         ),
       );
       continue;
     }
 
     for (var i = 0; i < section.predictions.length; i++) {
-      widgets.add(PredictionGroupCard(prediction: section.predictions[i]));
+      final prediction = section.predictions[i];
+      widgets.add(
+        PredictionGroupCard(
+          prediction: prediction,
+          isLocked: !isPickUnlocked(_predictionUnlockKey(prediction)),
+          isUnlocking: unlockingPickKey == _predictionUnlockKey(prediction),
+          onUnlockPressed: () => onUnlockPick(prediction),
+        ),
+      );
       if (i < section.predictions.length - 1) {
         widgets.add(const SizedBox(height: 16));
       }
@@ -465,6 +596,9 @@ List<Widget> _buildTodayStatusWidgets(
   List<PredictionRecord> predictions,
   _TodayBucket selectedBucket,
   void Function(_TodayBucket bucket) onSelectBucket,
+  bool Function(String fixtureApiId) isPickUnlocked,
+  Future<void> Function(PredictionRecord prediction) onUnlockPick,
+  String? unlockingPickKey,
 ) {
   final now = DateTime.now();
   final grouped = <_TodayBucket, List<PredictionRecord>>{
@@ -512,7 +646,15 @@ List<Widget> _buildTodayStatusWidgets(
   }
 
   for (var i = 0; i < selectedItems.length; i++) {
-    widgets.add(PredictionGroupCard(prediction: selectedItems[i]));
+    final prediction = selectedItems[i];
+    widgets.add(
+      PredictionGroupCard(
+        prediction: prediction,
+        isLocked: !isPickUnlocked(_predictionUnlockKey(prediction)),
+        isUnlocking: unlockingPickKey == _predictionUnlockKey(prediction),
+        onUnlockPressed: () => onUnlockPick(prediction),
+      ),
+    );
     if (i < selectedItems.length - 1) {
       widgets.add(const SizedBox(height: 16));
     }
@@ -533,11 +675,11 @@ String _todayBucketLabel(_TodayBucket bucket) {
 }
 
 _TodayBucket _todayBucketForPrediction(PredictionRecord prediction, DateTime now) {
-  if (_isLivePrediction(prediction)) {
-    return _TodayBucket.live;
-  }
   if (_isFinishedPrediction(prediction, now)) {
     return _TodayBucket.finished;
+  }
+  if (_isLivePrediction(prediction)) {
+    return _TodayBucket.live;
   }
   return _TodayBucket.coming;
 }
@@ -553,14 +695,30 @@ bool _isLivePrediction(PredictionRecord prediction) {
     'BT',
     'LIVE',
     'INT',
+    'P',
     'PEN',
+    'SUSP',
   };
 
   if (statusShort != null && liveStatuses.contains(statusShort)) {
     return true;
   }
 
-  return statusLong.contains('live') || statusLong.contains('in play');
+  if (statusLong.contains('live') || statusLong.contains('in play')) {
+    return true;
+  }
+
+  final kickoffAt = _localDateTime(prediction.kickoffAt);
+  if (kickoffAt != null) {
+    final liveStart = kickoffAt;
+    final liveEnd = kickoffAt.add(const Duration(minutes: 90));
+    final now = DateTime.now().toLocal();
+    if (now.isAfter(liveStart) && now.isBefore(liveEnd)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 bool _isFinishedPrediction(PredictionRecord prediction, DateTime now) {
@@ -585,8 +743,11 @@ bool _isFinishedPrediction(PredictionRecord prediction, DateTime now) {
   }
 
   final kickoffAt = _localDateTime(prediction.kickoffAt);
-  if (kickoffAt != null && now.isAfter(kickoffAt)) {
-    return true;
+  if (kickoffAt != null) {
+    final finishedCutoff = kickoffAt.add(const Duration(minutes: 90));
+    if (now.isAfter(finishedCutoff)) {
+      return true;
+    }
   }
 
   return prediction.fulltimeHomeGoals != null || prediction.fulltimeAwayGoals != null;
@@ -900,9 +1061,18 @@ class _DateSectionHeader extends StatelessWidget {
 }
 
 class PredictionGroupCard extends StatelessWidget {
-  const PredictionGroupCard({super.key, required this.prediction});
+  const PredictionGroupCard({
+    super.key,
+    required this.prediction,
+    required this.isLocked,
+    required this.isUnlocking,
+    required this.onUnlockPressed,
+  });
 
   final PredictionRecord prediction;
+  final bool isLocked;
+  final bool isUnlocking;
+  final VoidCallback onUnlockPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -947,7 +1117,7 @@ class PredictionGroupCard extends StatelessWidget {
               children: [
                 _MetaChip(
                   icon: Icons.schedule,
-                  label: _formatDateTime(prediction.kickoffAt ?? prediction.releaseAt),
+                  label: _formatTimeOnly(prediction.kickoffAt ?? prediction.releaseAt),
                 ),
                 _MetaChip(
                   icon: _matchStatusIcon(prediction),
@@ -961,7 +1131,19 @@ class PredictionGroupCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 10),
-            _PickCard(data: primaryPick),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              child: isLocked
+                  ? _LockedPickGate(
+                      key: const ValueKey('locked'),
+                      isUnlocking: isUnlocking,
+                      onUnlockPressed: onUnlockPressed,
+                    )
+                  : _PickCard(
+                      key: const ValueKey('unlocked'),
+                      data: primaryPick,
+                    ),
+            ),
           ],
         ),
       ),
@@ -1150,7 +1332,7 @@ class _MatchHeader extends StatelessWidget {
 }
 
 class _PickCard extends StatelessWidget {
-  const _PickCard({required this.data});
+  const _PickCard({super.key, required this.data});
 
   final _PickCardData data;
 
@@ -1221,6 +1403,83 @@ class _PickCard extends StatelessWidget {
               color: Colors.white.withAlpha(189),
               fontSize: 15,
               height: 1.45,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LockedPickGate extends StatelessWidget {
+  const _LockedPickGate({
+    super.key,
+    required this.isUnlocking,
+    required this.onUnlockPressed,
+  });
+
+  final bool isUnlocking;
+  final VoidCallback onUnlockPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        color: const Color(0xFF13253A),
+        border: Border.all(color: const Color(0xFF294765)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.lock_outline, color: Color(0xFF84D6FF), size: 18),
+              SizedBox(width: 8),
+              Text(
+                'Pick locked',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'Watch an ad to open this pick for this session.',
+            style: TextStyle(
+              color: Color(0xFFB9D3E9),
+              fontSize: 14,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: isUnlocking ? null : onUnlockPressed,
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF00D4AA),
+                foregroundColor: const Color(0xFF07111F),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              child: isUnlocking
+                  ? const SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF07111F)),
+                      ),
+                    )
+                  : const Text(
+                      'Watch ad to unlock',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
             ),
           ),
         ],
@@ -1720,17 +1979,28 @@ String _formatDateTime(DateTime? value) {
   return '${local.year}-$month-$day $hour:$minute';
 }
 
+String _formatTimeOnly(DateTime? value) {
+  final local = _localDateTime(value);
+  if (local == null) {
+    return 'unknown time';
+  }
+
+  final hour = local.hour.toString().padLeft(2, '0');
+  final minute = local.minute.toString().padLeft(2, '0');
+  return '$hour:$minute';
+}
+
 String _matchStatusLabel(PredictionRecord prediction) {
   final statusShort = prediction.matchStatusShort?.toUpperCase();
   final statusLong = prediction.matchStatusLong?.trim();
   final now = DateTime.now().toLocal();
 
-  if (_isLivePrediction(prediction)) {
-    return 'Live';
-  }
-
   if (_isFinishedPrediction(prediction, now)) {
     return 'Finished';
+  }
+
+  if (_isLivePrediction(prediction)) {
+    return 'Live';
   }
 
   if (_isComingPrediction(prediction, now)) {

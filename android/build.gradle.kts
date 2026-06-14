@@ -7,14 +7,6 @@ allprojects {
 
 
 
-subprojects {
-    tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
-        kotlinOptions {
-            jvmTarget = "11"
-        }
-    }
-}
-
 val newBuildDir: Directory =
     rootProject.layout.buildDirectory
         .dir("../../build")

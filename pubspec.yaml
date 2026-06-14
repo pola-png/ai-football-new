@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.2.0+13
+version: 1.3.1+20
 
 environment:
   sdk: ^3.9.2
@@ -33,24 +33,17 @@ flutter:
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
 dependencies:
-  provider: ^6.0.5
   flutter:
     sdk: flutter
-
-  # The following adds the Cupertino Icons font to your application.
-  # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
-  in_app_purchase: ^3.2.0
-
-
-  supabase_flutter: ^2.5.8
-
-  intl: ^0.19.0
-
-
+  appwrite: ^20.3.2
+  firebase_core: ^3.8.0
+  firebase_messaging: ^15.1.5
   google_mobile_ads: ^5.1.0
   flutter_local_notifications: ^17.2.2
-  shared_preferences: ^2.2.2
+  shared_preferences: ^2.3.2
+  permission_handler: ^11.3.1
+  url_launcher: ^6.3.0
 
 
 dev_dependencies:
@@ -74,10 +67,11 @@ dev_dependencies:
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
+  remove_alpha_ios: true
   image_path: "assets/icon.png"
   min_sdk_android: 21
   adaptive_icon_background: "#0A192F"
-  adaptive_icon_foreground: "assets/icon.png"
+  adaptive_icon_foreground: "assets/icon_foreground.png"
   web:
     generate: true
     image_path: "assets/icon.png"

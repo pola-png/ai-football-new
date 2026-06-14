@@ -1,11 +1,11 @@
 {
-    "name": "football_prediction_app",
-    "short_name": "football_prediction_app",
+    "name": "Ai football betting prediction",
+    "short_name": "Ai football betting prediction",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0A192F",
     "theme_color": "#64FFDA",
-    "description": "A new Flutter project.",
+    "description": "Ai football betting prediction.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

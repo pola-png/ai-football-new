@@ -4,12 +4,13 @@ import java.io.FileInputStream
 plugins {
     id("com.android.application")
     id("kotlin-android")
+    id("com.google.gms.google-services")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
 kotlin {
-    jvmToolchain(11)
+    jvmToolchain(17)
 }
 
 val keyProperties = Properties()
@@ -20,18 +21,16 @@ if (keyPropertiesFile.exists()) {
 
 
 android {
-    namespace = "com.example.football_prediction_app"
-    compileSdk = flutter.compileSdkVersion
-    ndkVersion = "26.1.10909125"
+    namespace = "com.Aifootballprediction.app"
+    compileSdk = 36
+    ndkVersion = "28.2.13676358"
+    
+
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
         isCoreLibraryDesugaringEnabled = true
-    }
-
-    kotlinOptions {
-        jvmTarget = "11"
     }
 
     packagingOptions {
@@ -50,10 +49,7 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.footballprediction.app"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
+        applicationId = "com.Aifootballprediction.app"
         minSdk = flutter.minSdkVersion
         targetSdk = 35
         versionCode = flutter.versionCode
@@ -61,13 +57,7 @@ android {
         multiDexEnabled = true
         
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
-        }
-        
-        externalNativeBuild {
-            cmake {
-                arguments += "-DANDROID_PAGE_SIZE_MAX_SUPPORTED=16384"
-            }
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
         }
     }
 
@@ -83,10 +73,10 @@ android {
     
     packaging {
         jniLibs {
-            keepDebugSymbols += "**/arm64-v8a/*.so"
-            keepDebugSymbols += "**/armeabi-v7a/*.so"
-            keepDebugSymbols += "**/x86/*.so"
-            keepDebugSymbols += "**/x86_64/*.so"
+            useLegacyPackaging = false
+        }
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
 }
@@ -94,6 +84,7 @@ android {
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
     implementation("androidx.activity:activity-ktx:1.9.2")
+    implementation("androidx.core:core-ktx:1.13.1")
 }
 
 flutter {

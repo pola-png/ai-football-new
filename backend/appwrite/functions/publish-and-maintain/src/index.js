@@ -528,7 +528,7 @@ export default async function main({ res, error: reportError }) {
 
   const startedAt = isoNow();
   const now = new Date();
-  const outcomeLookbackHours = Number.parseInt(process.env.OUTCOME_LOOKBACK_HOURS || '8', 10);
+  const outcomeLookbackHours = Number.parseInt(process.env.OUTCOME_LOOKBACK_HOURS || '24', 10);
 
   const log = (message) => {
     console.log(message);
