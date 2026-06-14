@@ -65,6 +65,8 @@ Columns:
 - `away_team_logo_url` `url` optional
 - `venue_name` `text` optional
 - `venue_city` `text` optional
+- `odds_summary` `mediumtext` optional
+- `h2h_summary` `mediumtext` optional
 - `sync_run_id` `text` required indexed
 - `processed` `boolean` required default `false`
 - `processed_at` `datetime` optional indexed
@@ -140,6 +142,20 @@ Columns:
 - `tertiary_selection` `text` optional
 - `tertiary_confidence` `float` optional
 - `tertiary_reason` `mediumtext` optional
+- `match_status_short` `text` optional
+- `match_status_long` `text` optional
+- `current_home_goals` `text` optional
+- `current_away_goals` `text` optional
+- `halftime_home_goals` `text` optional
+- `halftime_away_goals` `text` optional
+- `fulltime_home_goals` `text` optional
+- `fulltime_away_goals` `text` optional
+- `extratime_home_goals` `text` optional
+- `extratime_away_goals` `text` optional
+- `penalty_home_goals` `text` optional
+- `penalty_away_goals` `text` optional
+- `match_outcome` `text` optional
+- `result_checked_at` `datetime` optional
 - `odds_summary` `mediumtext` optional
 - `h2h_summary` `mediumtext` optional
 - `release_status` `text` required
@@ -208,7 +224,7 @@ Suggested values for `status`:
 
 1. `cleanup-raw-fetch` deletes old raw fetch rows around `2:00 pm`.
 2. `sync-fixtures` fetches the fixtures for the current date at `7:00 pm`.
-3. It saves the raw fixture rows, odds, and h2h history.
+3. It keeps only fixtures that have both odds and head-to-head data, then saves the merged fixture row, odds, and h2h history.
 4. `generate-predictions` reads only the latest `sync_run_id`.
 5. It saves only prediction rows to `predictions`.
 6. `publish-predictions` changes due drafts to `published` and sends notifications.
