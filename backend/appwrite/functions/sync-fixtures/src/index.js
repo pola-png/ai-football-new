@@ -60,7 +60,7 @@ function isoNow() {
   return new Date().toISOString();
 }
 
-function lagosDate() {
+function lagosDate(offsetDays = 0) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Africa/Lagos',
     year: 'numeric',
@@ -68,7 +68,12 @@ function lagosDate() {
     day: '2-digit',
   }).formatToParts(new Date());
   const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${map.year}-${map.month}-${map.day}`;
+  const base = new Date(Date.UTC(Number(map.year), Number(map.month) - 1, Number(map.day)));
+  base.setUTCDate(base.getUTCDate() + offsetDays);
+  const year = base.getUTCFullYear();
+  const month = String(base.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(base.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function pickTeam(team) {
@@ -277,9 +282,10 @@ async function fetchFixtureH2HHistory({
   if (leagueId) {
     requestQuery.league = leagueId;
   }
-  if (season && String(process.env.API_FOOTBALL_H2H_INCLUDE_SEASON || '').toLowerCase() === 'true') {
+  if (season) {
     requestQuery.season = season;
   }
+  requestQuery.last = '20';
 
   const payload = await fetchApiFootballJson('/fixtures/headtohead', requestQuery);
   const historicalFixtures = Array.isArray(payload?.response) ? payload.response : [];
@@ -423,7 +429,7 @@ async function main() {
   const syncRunsTable = required('APPWRITE_TABLE_SYNC_RUNS');
 
   const league = process.env.API_FOOTBALL_LEAGUE ? Number(process.env.API_FOOTBALL_LEAGUE) : null;
-  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate();
+  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(1);
 
   const url = new URL(`${required('API_FOOTBALL_BASE_URL').replace(/\/$/, '')}/fixtures`);
   url.searchParams.set('date', fetchDate);
@@ -436,6 +442,7 @@ async function main() {
   let itemsSaved = 0;
   let h2hPassedCount = 0;
   let scorePassedCount = 0;
+  let h2hSkippedCount = 0;
 
   try {
     const response = await fetch(url.toString(), {
@@ -486,6 +493,14 @@ async function main() {
       ]);
 
       if ((h2hResult.saved ?? 0) === 0) {
+        h2hSkippedCount += 1;
+        console.log(JSON.stringify({
+          job: 'sync-fixtures',
+          fixture_api_id: fixtureApiId,
+          stage: 'fixture-skip',
+          reason: 'missing-h2h',
+          message: 'Fixture not saved because no H2H data was available.',
+        }));
         continue;
       }
 
@@ -526,6 +541,7 @@ async function main() {
       job: 'sync-fixtures',
       stage: 'fixtures-qualified',
       h2h_passed: h2hPassedCount,
+      h2h_skipped: h2hSkippedCount,
       score_passed: scorePassedCount,
       top_100_selected: selectedFixtures.length,
     }));
@@ -613,7 +629,7 @@ async function main() {
       finished_at: isoNow(),
       items_seen: selectedFixtures.length,
       items_saved: itemsSaved,
-      message: `Fetched ${fixtures.length} fixtures. ${h2hPassedCount} passed H2H. ${scorePassedCount} passed the score gate. Saved top ${itemsSaved} qualified fixtures.`,
+      message: `Fetched ${fixtures.length} fixtures. ${h2hPassedCount} passed H2H. ${h2hSkippedCount} were skipped without H2H. ${scorePassedCount} passed the score gate. Saved top ${itemsSaved} qualified fixtures.`,
       created_at: isoNow(),
       updated_at: isoNow(),
     });

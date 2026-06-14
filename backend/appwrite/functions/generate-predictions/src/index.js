@@ -199,6 +199,20 @@ async function fetchRows(tablesdb, databaseId, tableId, queries) {
   return result.rows || [];
 }
 
+function shouldPublishNearKickoff(kickoffAtValue, now = new Date()) {
+  if (!kickoffAtValue) {
+    return false;
+  }
+
+  const kickoffAt = new Date(kickoffAtValue);
+  if (Number.isNaN(kickoffAt.getTime())) {
+    return false;
+  }
+
+  const timeDiffMs = kickoffAt.getTime() - now.getTime();
+  return timeDiffMs >= 0 && timeDiffMs <= 8 * 60 * 60 * 1000;
+}
+
 function countOddsSignals(oddsRows) {
   const rows = Array.isArray(oddsRows) ? oddsRows : [];
   let signals = 0;
@@ -386,6 +400,12 @@ async function main() {
         continue;
       }
 
+      const shouldPublishNow = shouldPublishNearKickoff(fixture.kickoff_at, new Date());
+      const releaseStatus = shouldPublishNow ? 'published' : 'draft';
+      const publishedAt = shouldPublishNow ? startedAt : null;
+      const notificationSent = false;
+      const notificationSentAt = null;
+
       await upsertRow(tablesdb, databaseId, predictionsTable, `prediction_${fixture.api_fixture_id}`, {
         fixture_api_id: fixture.api_fixture_id,
         model_name: aiResponse?.model || (process.env.DEEPSEEK_MODEL || 'deepseek-chat'),
@@ -408,12 +428,12 @@ async function main() {
         tertiary_selection: null,
         tertiary_confidence: null,
         tertiary_reason: null,
-        release_status: 'draft',
+        release_status: releaseStatus,
         release_at: startedAt,
         generated_at: startedAt,
-        published_at: null,
-        notification_sent: false,
-        notification_sent_at: null,
+        published_at: publishedAt,
+        notification_sent: notificationSent,
+        notification_sent_at: notificationSentAt,
         created_at: startedAt,
         updated_at: isoNow(),
       });
