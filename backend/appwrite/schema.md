@@ -44,6 +44,8 @@ Columns:
 - `created_at` `datetime` required
 - `updated_at` `datetime` required
 
+This table should be treated as a long-lived history cache and should not be cleared by the raw cleanup job.
+
 ## `fixtures`
 
 Stores the raw batch of fixtures fetched from API-Football.

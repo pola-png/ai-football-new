@@ -44,16 +44,14 @@ async function main() {
   const databaseId = required('APPWRITE_DATABASE_ID');
   const fixturesTable = required('APPWRITE_TABLE_FIXTURES');
   const oddsTable = required('APPWRITE_TABLE_FIXTURE_ODDS');
-  const h2hTable = required('APPWRITE_TABLE_FIXTURE_H2H_HISTORY');
   const syncRunsTable = required('APPWRITE_TABLE_SYNC_RUNS');
 
   const startedAt = isoNow();
 
   try {
-    const [fixtures, odds, h2h] = await Promise.all([
+    const [fixtures, odds] = await Promise.all([
       deleteAllRows(tablesdb, databaseId, fixturesTable),
       deleteAllRows(tablesdb, databaseId, oddsTable),
-      deleteAllRows(tablesdb, databaseId, h2hTable),
     ]);
 
     await createRun(tablesdb, databaseId, syncRunsTable, {
@@ -63,7 +61,7 @@ async function main() {
       finished_at: isoNow(),
       items_seen: 0,
       items_saved: 0,
-      message: 'Deleted all raw fetch rows from fixtures, odds, and h2h tables.',
+      message: 'Deleted raw fetch rows from fixtures and odds tables. Preserved h2h history.',
       created_at: isoNow(),
       updated_at: isoNow(),
     });
@@ -73,7 +71,7 @@ async function main() {
       deleted: {
         fixtures: fixtures?.total ?? null,
         odds: odds?.total ?? null,
-        h2h: h2h?.total ?? null,
+        h2h: 0,
       },
     };
   } catch (error) {

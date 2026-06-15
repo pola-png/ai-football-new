@@ -85,6 +85,8 @@ function pickTeam(team) {
     founded: team.founded || null,
     national: Boolean(team.national),
     logo_url: team.logo || null,
+    venue: team.venue?.name || team.venue || null,
+    last_synced_at: isoNow(),
     created_at: isoNow(),
     updated_at: isoNow(),
   };
@@ -168,6 +170,66 @@ function determineWinnerLabel(historicalFixture) {
   return null;
 }
 
+function buildTeamPairKey(homeTeamId, awayTeamId) {
+  const home = String(homeTeamId || '').trim();
+  const away = String(awayTeamId || '').trim();
+  if (!home || !away) {
+    return null;
+  }
+
+  return [home, away].sort().join('-');
+}
+
+function parsePositiveInteger(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return parsed;
+}
+
+function getH2hSeasonRange(fixtureSeason) {
+  const historyYears = parsePositiveInteger(process.env.H2H_HISTORY_YEARS || '7', 7);
+  const currentSeason = Number.parseInt(String(fixtureSeason || '').trim(), 10);
+  const anchorYear = Number.isFinite(currentSeason) ? currentSeason : new Date().getFullYear();
+  const startYear = Math.max(1900, anchorYear - historyYears + 1);
+  const seasons = [];
+
+  for (let seasonYear = startYear; seasonYear <= anchorYear; seasonYear += 1) {
+    seasons.push(seasonYear);
+  }
+
+  return seasons;
+}
+
+async function fetchCachedH2HRowsForPair(tablesdb, databaseId, h2hTable, fixtureApiId, homeTeamId, awayTeamId) {
+  const currentFixtureRows = await fetchRows(tablesdb, databaseId, h2hTable, [
+    Query.equal('current_fixture_api_id', String(fixtureApiId)),
+    Query.orderAsc('$createdAt'),
+  ]);
+
+  const pairKey = buildTeamPairKey(homeTeamId, awayTeamId);
+  if (!pairKey) {
+    return currentFixtureRows;
+  }
+
+  const pairRows = await fetchRows(tablesdb, databaseId, h2hTable, [
+    Query.equal('pair_key', pairKey),
+    Query.orderAsc('$createdAt'),
+  ]);
+
+  const rowsByHistoricalId = new Map();
+  for (const row of [...currentFixtureRows, ...pairRows]) {
+    const key = String(row?.historical_fixture_api_id || row?.$id || '').trim();
+    if (!key || rowsByHistoricalId.has(key)) {
+      continue;
+    }
+    rowsByHistoricalId.set(key, row);
+  }
+
+  return [...rowsByHistoricalId.values()];
+}
+
 function compactOddsRow(row) {
   return {
     fixture_api_id: row?.fixture_api_id || null,
@@ -223,11 +285,12 @@ function countOddsSignals(oddsRows) {
 }
 
 function scoreFixtureForSync({ oddsRows, h2hRows }) {
+  const minimumH2hRows = Number.parseInt(process.env.H2H_MIN_ROWS || '2', 10);
   const h2hCount = Array.isArray(h2hRows) ? h2hRows.length : 0;
   const oddsCount = Array.isArray(oddsRows) ? oddsRows.length : 0;
   const oddsSignals = countOddsSignals(oddsRows);
 
-  if (h2hCount <= 0) {
+  if (h2hCount < (Number.isFinite(minimumH2hRows) && minimumH2hRows > 0 ? minimumH2hRows : 2)) {
     return { score: 0, qualified: false, reasons: ['missing-h2h'] };
   }
 
@@ -265,58 +328,88 @@ function scoreFixtureForSync({ oddsRows, h2hRows }) {
 
 async function fetchFixtureH2HHistory({
   fixture,
+  tablesdb,
+  databaseId,
+  h2hTable,
 }) {
   const fixtureApiId = String(fixture.api_fixture_id || '').trim();
   const homeTeamId = String(fixture.home_team_api_id || '').trim();
   const awayTeamId = String(fixture.away_team_api_id || '').trim();
   const leagueId = String(fixture.league_api_id || '').trim();
   const season = String(fixture.season || '').trim();
+  const pairKey = buildTeamPairKey(homeTeamId, awayTeamId);
 
   if (!fixtureApiId || !homeTeamId || !awayTeamId) {
     return { saved: 0, rows: [] };
   }
 
-  const requestQuery = {
-    h2h: `${homeTeamId}-${awayTeamId}`,
-  };
-  if (leagueId) {
-    requestQuery.league = leagueId;
-  }
-  if (season) {
-    requestQuery.season = season;
-  }
-  requestQuery.last = '20';
-
-  const payload = await fetchApiFootballJson('/fixtures/headtohead', requestQuery);
-  const historicalFixtures = Array.isArray(payload?.response) ? payload.response : [];
   const now = isoNow();
-  const rows = [];
+  const targetSeasons = getH2hSeasonRange(season);
+  const cachedRows = await fetchCachedH2HRowsForPair(tablesdb, databaseId, h2hTable, fixtureApiId, homeTeamId, awayTeamId);
+  const existingSeasons = new Set(
+    cachedRows
+      .map((row) => String(row?.season || '').trim())
+      .filter(Boolean),
+  );
+  const missingSeasons = targetSeasons.filter((seasonYear) => !existingSeasons.has(String(seasonYear)));
+  const rows = [...cachedRows];
+  let saved = 0;
 
-  for (const historicalFixture of historicalFixtures) {
-    const historicalFixtureApiId = historicalFixture?.fixture?.id ?? null;
-    if (historicalFixtureApiId == null) {
-      continue;
+  if (missingSeasons.length === 0) {
+    return {
+      saved: rows.length,
+      rows: rows.map((row) => compactH2HRow(row.data)),
+    };
+  }
+
+  for (const seasonYear of missingSeasons) {
+    const requestQuery = {
+      h2h: `${homeTeamId}-${awayTeamId}`,
+      season: String(seasonYear),
+      last: '20',
+    };
+    if (leagueId) {
+      requestQuery.league = leagueId;
     }
 
-    const historicalFixtureId = String(historicalFixtureApiId);
-    rows.push({
-      rowId: `h2h_${safeIdPart(fixtureApiId)}_${safeIdPart(historicalFixtureId)}`,
-      data: {
-        current_fixture_api_id: fixtureApiId,
-        historical_fixture_api_id: `${fixtureApiId}_${historicalFixtureId}`,
-        home_team_api_id: String(historicalFixture?.teams?.home?.id ?? homeTeamId),
-        away_team_api_id: String(historicalFixture?.teams?.away?.id ?? awayTeamId),
-        kickoff_at: historicalFixture?.fixture?.date || null,
-        home_score: toTextNumber(historicalFixture?.goals?.home),
-        away_score: toTextNumber(historicalFixture?.goals?.away),
-        winner: determineWinnerLabel(historicalFixture),
-        status_short: historicalFixture?.fixture?.status?.short || 'NS',
-        league_api_id: historicalFixture?.league?.id != null ? String(historicalFixture.league.id) : null,
-        season: historicalFixture?.league?.season != null ? String(historicalFixture.league.season) : null,
-        created_at: now,
-        updated_at: now,
-      },
-    });
+    const payload = await fetchApiFootballJson('/fixtures/headtohead', requestQuery);
+    const historicalFixtures = Array.isArray(payload?.response) ? payload.response : [];
+
+    for (const historicalFixture of historicalFixtures) {
+      const historicalFixtureApiId = historicalFixture?.fixture?.id ?? null;
+      if (historicalFixtureApiId == null) {
+        continue;
+      }
+
+      const historicalFixtureId = String(historicalFixtureApiId);
+      const seasonLabel = String(historicalFixture?.league?.season ?? seasonYear);
+      const compositeHistoricalId = `${pairKey || fixtureApiId}_${seasonLabel}_${historicalFixtureId}`;
+      rows.push({
+        rowId: `h2h_${safeIdPart(pairKey || fixtureApiId)}_${safeIdPart(seasonLabel)}_${safeIdPart(historicalFixtureId)}`,
+        data: {
+          current_fixture_api_id: fixtureApiId,
+          historical_fixture_api_id: compositeHistoricalId,
+          home_team_api_id: String(historicalFixture?.teams?.home?.id ?? homeTeamId),
+          away_team_api_id: String(historicalFixture?.teams?.away?.id ?? awayTeamId),
+          pair_key: pairKey,
+          kickoff_at: historicalFixture?.fixture?.date || null,
+          home_score: toTextNumber(historicalFixture?.goals?.home),
+          away_score: toTextNumber(historicalFixture?.goals?.away),
+          winner: determineWinnerLabel(historicalFixture),
+          status_short: historicalFixture?.fixture?.status?.short || 'NS',
+          league_api_id: historicalFixture?.league?.id != null ? String(historicalFixture.league.id) : null,
+          season: seasonLabel,
+          created_at: now,
+          updated_at: now,
+        },
+      });
+      saved += 1;
+    }
+  }
+
+  const newRows = rows.slice(cachedRows.length);
+  for (const row of newRows) {
+    await upsertRow(tablesdb, databaseId, h2hTable, row.rowId, row.data);
   }
 
   return {
@@ -443,6 +536,7 @@ async function main() {
   let h2hPassedCount = 0;
   let scorePassedCount = 0;
   let h2hSkippedCount = 0;
+  const minimumH2hRows = Number.parseInt(process.env.H2H_MIN_ROWS || '2', 10);
 
   try {
     const response = await fetch(url.toString(), {
@@ -489,17 +583,23 @@ async function main() {
         }),
         fetchFixtureH2HHistory({
           fixture: fixtureStub,
+          tablesdb,
+          databaseId,
+          h2hTable,
         }),
       ]);
 
-      if ((h2hResult.saved ?? 0) === 0) {
+      const h2hSaved = Number(h2hResult.saved ?? 0);
+      if (h2hSaved < (Number.isFinite(minimumH2hRows) && minimumH2hRows > 0 ? minimumH2hRows : 2)) {
         h2hSkippedCount += 1;
         console.log(JSON.stringify({
           job: 'sync-fixtures',
           fixture_api_id: fixtureApiId,
           stage: 'fixture-skip',
           reason: 'missing-h2h',
-          message: 'Fixture not saved because no H2H data was available.',
+          minimum_h2h_rows: Number.isFinite(minimumH2hRows) && minimumH2hRows > 0 ? minimumH2hRows : 2,
+          h2h_rows: h2hSaved,
+          message: 'Fixture not saved because not enough H2H data was available.',
         }));
         continue;
       }

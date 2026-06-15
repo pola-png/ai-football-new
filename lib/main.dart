@@ -5,6 +5,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'ad_gate_service.dart';
 import 'appwrite_subscription_service.dart';
+import 'feed_banner_ad.dart';
 import 'prediction_repository.dart';
 import 'push_notification_service.dart';
 
@@ -308,20 +309,17 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
                         ),
                       )
                     else
-                      SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-                        sliver: SliverList(
-                          delegate: SliverChildListDelegate(
-                            _buildGroupedPredictionWidgets(
-                              predictions,
-                              _expandedSectionKeys,
-                              _toggleSection,
-                              _selectedTodayBucket,
-                              _selectTodayBucket,
-                              _isPickUnlocked,
-                              _unlockPick,
-                              _unlockingPickKey,
-                            ),
+                      SliverList(
+                        delegate: SliverChildListDelegate(
+                          _buildGroupedPredictionWidgets(
+                            predictions,
+                            _expandedSectionKeys,
+                            _toggleSection,
+                            _selectedTodayBucket,
+                            _selectTodayBucket,
+                            _isPickUnlocked,
+                            _unlockPick,
+                            _unlockingPickKey,
                           ),
                         ),
                       ),
@@ -528,6 +526,7 @@ List<Widget> _buildGroupedPredictionWidgets(
 ) {
   final sections = _groupPredictionsByDate(predictions);
   final widgets = <Widget>[];
+  const horizontalPadding = EdgeInsets.symmetric(horizontal: 20);
 
   for (var sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
     final section = sections[sectionIndex];
@@ -539,12 +538,15 @@ List<Widget> _buildGroupedPredictionWidgets(
     }
 
     widgets.add(
-      _DateSectionHeader(
-        label: section.label,
-        count: section.predictions.length,
-        isExpanded: isExpanded,
-        canToggle: !isTodaySection,
-        onTap: () => onToggleSection(section.keyValue),
+      Padding(
+        padding: horizontalPadding,
+        child: _DateSectionHeader(
+          label: section.label,
+          count: section.predictions.length,
+          isExpanded: isExpanded,
+          canToggle: !isTodaySection,
+          onTap: () => onToggleSection(section.keyValue),
+        ),
       ),
     );
     if (!isExpanded) {
@@ -570,15 +572,20 @@ List<Widget> _buildGroupedPredictionWidgets(
     for (var i = 0; i < section.predictions.length; i++) {
       final prediction = section.predictions[i];
       widgets.add(
-        PredictionGroupCard(
-          prediction: prediction,
-          isLocked: !isPickUnlocked(_predictionUnlockKey(prediction)),
-          isUnlocking: unlockingPickKey == _predictionUnlockKey(prediction),
-          onUnlockPressed: () => onUnlockPick(prediction),
+        Padding(
+          padding: horizontalPadding,
+          child: PredictionGroupCard(
+            prediction: prediction,
+            isLocked: !isPickUnlocked(_predictionUnlockKey(prediction)),
+            isUnlocking: unlockingPickKey == _predictionUnlockKey(prediction),
+            onUnlockPressed: () => onUnlockPick(prediction),
+          ),
         ),
       );
       if (i < section.predictions.length - 1) {
-        widgets.add(const SizedBox(height: 16));
+        widgets.add(const SizedBox(height: 12));
+        widgets.add(const FeedBannerAd());
+        widgets.add(const SizedBox(height: 12));
       }
     }
   }
@@ -618,12 +625,15 @@ List<Widget> _buildTodayStatusWidgets(
   final selectedItems = grouped[selectedBucket] ?? const <PredictionRecord>[];
 
   widgets.add(
-    _TodayCategorySelector(
-      selectedBucket: selectedBucket,
-      counts: {
-        for (final bucket in _TodayBucket.values) bucket: grouped[bucket]?.length ?? 0,
-      },
-      onSelectBucket: onSelectBucket,
+    Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: _TodayCategorySelector(
+        selectedBucket: selectedBucket,
+        counts: {
+          for (final bucket in _TodayBucket.values) bucket: grouped[bucket]?.length ?? 0,
+        },
+        onSelectBucket: onSelectBucket,
+      ),
     ),
   );
   widgets.add(const SizedBox(height: 14));
@@ -631,7 +641,7 @@ List<Widget> _buildTodayStatusWidgets(
   if (selectedItems.isEmpty) {
     widgets.add(
       const Padding(
-        padding: EdgeInsets.only(top: 4),
+        padding: EdgeInsets.fromLTRB(20, 4, 20, 0),
         child: Text(
           'No matches in this category.',
           style: TextStyle(
@@ -648,15 +658,20 @@ List<Widget> _buildTodayStatusWidgets(
   for (var i = 0; i < selectedItems.length; i++) {
     final prediction = selectedItems[i];
     widgets.add(
-      PredictionGroupCard(
-        prediction: prediction,
-        isLocked: !isPickUnlocked(_predictionUnlockKey(prediction)),
-        isUnlocking: unlockingPickKey == _predictionUnlockKey(prediction),
-        onUnlockPressed: () => onUnlockPick(prediction),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: PredictionGroupCard(
+          prediction: prediction,
+          isLocked: !isPickUnlocked(_predictionUnlockKey(prediction)),
+          isUnlocking: unlockingPickKey == _predictionUnlockKey(prediction),
+          onUnlockPressed: () => onUnlockPick(prediction),
+        ),
       ),
     );
     if (i < selectedItems.length - 1) {
-      widgets.add(const SizedBox(height: 16));
+      widgets.add(const SizedBox(height: 12));
+      widgets.add(const FeedBannerAd());
+      widgets.add(const SizedBox(height: 12));
     }
   }
 
@@ -687,6 +702,13 @@ _TodayBucket _todayBucketForPrediction(PredictionRecord prediction, DateTime now
 bool _isLivePrediction(PredictionRecord prediction) {
   final statusShort = prediction.matchStatusShort?.toUpperCase();
   final statusLong = prediction.matchStatusLong?.toLowerCase() ?? '';
+  final kickoffAt = _localDateTime(prediction.kickoffAt);
+  final now = DateTime.now().toLocal();
+
+  if (kickoffAt != null && now.isBefore(kickoffAt)) {
+    return false;
+  }
+
   const liveStatuses = {
     '1H',
     'HT',
@@ -708,11 +730,9 @@ bool _isLivePrediction(PredictionRecord prediction) {
     return true;
   }
 
-  final kickoffAt = _localDateTime(prediction.kickoffAt);
   if (kickoffAt != null) {
     final liveStart = kickoffAt;
     final liveEnd = kickoffAt.add(const Duration(minutes: 90));
-    final now = DateTime.now().toLocal();
     if (now.isAfter(liveStart) && now.isBefore(liveEnd)) {
       return true;
     }
@@ -1108,7 +1128,7 @@ class PredictionGroupCard extends StatelessWidget {
               awayTeamName: prediction.awayTeamName,
               homeScore: _teamScoreLabel(prediction.currentHomeGoals, prediction.fulltimeHomeGoals),
               awayScore: _teamScoreLabel(prediction.currentAwayGoals, prediction.fulltimeAwayGoals),
-              confidenceLabel: prediction.confidenceLabel ?? 'live',
+              confidenceLabel: _confidenceBadgeLabel(prediction),
             ),
             const SizedBox(height: 16),
             Wrap(
@@ -1377,10 +1397,6 @@ class _PickCard extends StatelessWidget {
                   ),
                 ),
               ),
-              if (data.actualOutcomeLabel != null) ...[
-                const SizedBox(width: 8),
-                _TinyOutcomeChip(label: data.actualOutcomeLabel!),
-              ],
               if (data.confidence != null) ...[
                 const SizedBox(width: 8),
                 _ConfidencePill(value: data.confidence!),
@@ -1518,32 +1534,6 @@ class _TinyVerdictChip extends StatelessWidget {
   }
 }
 
-class _TinyOutcomeChip extends StatelessWidget {
-  const _TinyOutcomeChip({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-      decoration: BoxDecoration(
-        color: const Color(0xFF84D6FF).withAlpha(24),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: const Color(0xFF84D6FF).withAlpha(72)),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          color: Color(0xFF84D6FF),
-          fontSize: 11,
-          fontWeight: FontWeight.w800,
-        ),
-      ),
-    );
-  }
-}
-
 String finalSelection(_PickCardData data) {
   return data.selection ?? data.market ?? 'Selection';
 }
@@ -1609,24 +1599,6 @@ String _scoreLabel(PredictionRecord prediction) {
   }
 
   return '${home ?? '-'}-${away ?? '-'}';
-}
-
-String? _outcomeLabel(PredictionRecord prediction) {
-  final outcome = prediction.matchOutcome?.trim().toLowerCase();
-  if (outcome == null || outcome.isEmpty) {
-    return null;
-  }
-
-  switch (outcome) {
-    case 'home':
-      return 'Home win';
-    case 'away':
-      return 'Away win';
-    case 'draw':
-      return 'Draw';
-    default:
-      return outcome.toUpperCase();
-  }
 }
 
 _PickVerdict _pickVerdict(PredictionRecord prediction) {
@@ -1905,7 +1877,6 @@ class _PickCardData {
     required this.accent,
     required this.verdictLabel,
     required this.verdictColor,
-    required this.actualOutcomeLabel,
   });
 
   final String label;
@@ -1916,7 +1887,6 @@ class _PickCardData {
   final Color accent;
   final String? verdictLabel;
   final Color? verdictColor;
-  final String? actualOutcomeLabel;
 
   bool get hasContent =>
       market != null || selection != null || confidence != null || reason != null;
@@ -1948,7 +1918,6 @@ class _PickCardData {
       accent: accent,
       verdictLabel: verdictLabel,
       verdictColor: verdictColor,
-      actualOutcomeLabel: _outcomeLabel(prediction),
     );
   }
 }
@@ -2012,6 +1981,20 @@ String _matchStatusLabel(PredictionRecord prediction) {
   }
 
   return statusShort ?? 'Coming';
+}
+
+String _confidenceBadgeLabel(PredictionRecord prediction) {
+  final confidence = prediction.confidence;
+  if (confidence != null) {
+    return confidence >= 0.85 ? 'high' : 'medium';
+  }
+
+  final rawLabel = prediction.confidenceLabel?.trim().toLowerCase() ?? '';
+  if (rawLabel == 'high') {
+    return 'high';
+  }
+
+  return 'medium';
 }
 
 IconData _matchStatusIcon(PredictionRecord prediction) {

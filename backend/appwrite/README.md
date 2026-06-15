@@ -132,6 +132,7 @@ Optional batch setting:
 - Clean up the raw fetch tables at `2:00 pm`.
 - Do not delete `predictions` or `results` during this cleanup.
 - This keeps the raw fetch tables empty before the next sync.
+- Preserve `fixture_h2h_history` so historical pairing data stays available for later predictions.
 
 ## Publish schedule
 
