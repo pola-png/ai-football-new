@@ -8,9 +8,9 @@ enum SubscriptionPlanId { basic, standard, premium }
 
 extension SubscriptionPlanIdX on SubscriptionPlanId {
   String get productId => switch (this) {
-    SubscriptionPlanId.basic => 'basic_plan_monthly',
-    SubscriptionPlanId.standard => 'standard_plan_monthly',
-    SubscriptionPlanId.premium => 'premium_plan_monthly',
+    SubscriptionPlanId.basic => 'basic_monthly',
+    SubscriptionPlanId.standard => 'standard_monthly',
+    SubscriptionPlanId.premium => 'premium_monthly',
   };
 
   String get title => switch (this) {
@@ -59,6 +59,19 @@ class GooglePlayBillingService extends ChangeNotifier {
   bool get isLoading => _loading;
   String? get errorMessage => _errorMessage;
   bool get hasAdFreeAccess => _ownedProductIds.isNotEmpty;
+
+  SubscriptionPlanId? get activePlan {
+    if (_ownedProductIds.contains(SubscriptionPlanId.premium.productId)) {
+      return SubscriptionPlanId.premium;
+    }
+    if (_ownedProductIds.contains(SubscriptionPlanId.standard.productId)) {
+      return SubscriptionPlanId.standard;
+    }
+    if (_ownedProductIds.contains(SubscriptionPlanId.basic.productId)) {
+      return SubscriptionPlanId.basic;
+    }
+    return null;
+  }
 
   List<SubscriptionPlanId> get plans => SubscriptionPlanId.values;
 

@@ -522,7 +522,7 @@ async function main() {
   const syncRunsTable = required('APPWRITE_TABLE_SYNC_RUNS');
 
   const league = process.env.API_FOOTBALL_LEAGUE ? Number(process.env.API_FOOTBALL_LEAGUE) : null;
-  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(1);
+  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(0);
 
   const url = new URL(`${required('API_FOOTBALL_BASE_URL').replace(/\/$/, '')}/fixtures`);
   url.searchParams.set('date', fetchDate);
@@ -635,7 +635,7 @@ async function main() {
       return String(left.fixture?.fixture?.id || '').localeCompare(String(right.fixture?.fixture?.id || ''));
     });
 
-    const selectedFixtures = qualifiedFixtures.slice(0, 100);
+    const selectedFixtures = qualifiedFixtures;
 
     console.log(JSON.stringify({
       job: 'sync-fixtures',

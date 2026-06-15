@@ -249,6 +249,31 @@ async function fetchRows(tablesdb, databaseId, tableId, queries) {
   return result.rows || [];
 }
 
+async function fetchAllRows(tablesdb, databaseId, tableId, baseQueries, pageSize = 100) {
+  const rows = [];
+  let offset = 0;
+
+  while (true) {
+    const result = await tablesdb.listRows({
+      databaseId,
+      tableId,
+      queries: [...baseQueries, Query.limit(pageSize), Query.offset(offset)],
+      total: false,
+    });
+
+    const pageRows = result.rows || [];
+    rows.push(...pageRows);
+
+    if (pageRows.length < pageSize) {
+      break;
+    }
+
+    offset += pageSize;
+  }
+
+  return rows;
+}
+
 function shouldPublishNearKickoff(kickoffAtValue, now = new Date()) {
   if (!kickoffAtValue) {
     return false;
@@ -374,10 +399,9 @@ async function main() {
       throw new Error('No successful sync_run_id found to generate predictions from.');
     }
 
-    const fixtures = await fetchRows(tablesdb, databaseId, fixturesTable, [
+    const fixtures = await fetchAllRows(tablesdb, databaseId, fixturesTable, [
       Query.equal('sync_run_id', syncRunId),
       Query.orderAsc('$createdAt'),
-      Query.limit(100),
     ]);
 
     for (const fixtureRow of fixtures) {

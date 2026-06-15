@@ -1674,9 +1674,7 @@ export default async function main(context) {
       });
     }
 
-    const amLimit = Number.parseInt(process.env.API_FOOTBALL_MAX_AM_FIXTURES || '50', 10);
-    const pmLimit = Number.parseInt(process.env.API_FOOTBALL_MAX_PM_FIXTURES || '50', 10);
-    const selectedFixturesResult = selectFixturesBySession(fixtures, amLimit, pmLimit, 'Africa/Lagos');
+    const selectedFixturesResult = selectFixturesBySession(fixtures, fixtures.length, fixtures.length, 'Africa/Lagos');
     const selectedFixtures = selectedFixturesResult.selectedFixtures;
 
     appwriteLog(
