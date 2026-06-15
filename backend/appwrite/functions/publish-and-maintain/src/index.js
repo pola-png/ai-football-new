@@ -517,19 +517,7 @@ async function refreshOutcomeRow({
 }
 
 export default async function main({ res, error: reportError }) {
-  const client = buildClient();
-  const tablesdb = new TablesDB(client);
-  const messaging = new Messaging(client);
-
-  const databaseId = required('APPWRITE_DATABASE_ID');
-  const predictionsTable = required('APPWRITE_TABLE_PREDICTIONS');
-  const syncRunsTable = required('APPWRITE_TABLE_SYNC_RUNS');
-  const topicId = required('APPWRITE_TOPIC_PREDICTIONS');
-
   const startedAt = isoNow();
-  const now = new Date();
-  const outcomeLookbackHours = Number.parseInt(process.env.OUTCOME_LOOKBACK_HOURS || '24', 10);
-
   const log = (message) => {
     console.log(message);
   };
@@ -537,7 +525,25 @@ export default async function main({ res, error: reportError }) {
     console.error(message);
   };
 
+  let tablesdb = null;
+  let databaseId = null;
+  let syncRunsTable = null;
+  let startedSuccessfully = false;
+
   try {
+    const client = buildClient();
+    tablesdb = new TablesDB(client);
+    const messaging = new Messaging(client);
+
+    databaseId = required('APPWRITE_DATABASE_ID');
+    const predictionsTable = required('APPWRITE_TABLE_PREDICTIONS');
+    syncRunsTable = required('APPWRITE_TABLE_SYNC_RUNS');
+    const topicId = required('APPWRITE_TOPIC_PREDICTIONS');
+
+    const now = new Date();
+    const outcomeLookbackHours = Number.parseInt(process.env.OUTCOME_LOOKBACK_HOURS || '24', 10);
+
+    startedSuccessfully = true;
     log(JSON.stringify({
       job: 'publish-and-maintain',
       stage: 'run-start',
@@ -693,20 +699,32 @@ export default async function main({ res, error: reportError }) {
     logError(JSON.stringify({
       job: 'publish-and-maintain',
       stage: 'run-error',
+      started_at: startedAt,
+      started_successfully: startedSuccessfully,
       message: error instanceof Error ? error.message : String(error),
     }));
 
-    await createRun(tablesdb, databaseId, syncRunsTable, {
-      job_name: 'publish-and-maintain',
-      status: 'failed',
-      started_at: startedAt,
-      finished_at: isoNow(),
-      items_seen: '0',
-      items_saved: '0',
-      message: error instanceof Error ? error.message : String(error),
-      created_at: isoNow(),
-      updated_at: isoNow(),
-    });
+    if (tablesdb && databaseId && syncRunsTable) {
+      try {
+        await createRun(tablesdb, databaseId, syncRunsTable, {
+          job_name: 'publish-and-maintain',
+          status: 'failed',
+          started_at: startedAt,
+          finished_at: isoNow(),
+          items_seen: '0',
+          items_saved: '0',
+          message: error instanceof Error ? error.message : String(error),
+          created_at: isoNow(),
+          updated_at: isoNow(),
+        });
+      } catch (runError) {
+        logError(JSON.stringify({
+          job: 'publish-and-maintain',
+          stage: 'run-error-log-failed',
+          message: runError instanceof Error ? runError.message : String(runError),
+        }));
+      }
+    }
 
     reportError(error instanceof Error ? error.message : String(error));
     throw error;

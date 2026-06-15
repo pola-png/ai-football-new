@@ -1,4 +1,4 @@
-import { Client, TablesDB, ID, Query } from 'node-appwrite';
+import { Client, TablesDB, ID, Query, Messaging } from 'node-appwrite';
 
 function required(name) {
   const value = process.env[name];
@@ -340,9 +340,10 @@ async function saveFixtureH2HHistory({
   if (leagueId) {
     requestQuery.league = leagueId;
   }
-  if (season && String(process.env.API_FOOTBALL_H2H_INCLUDE_SEASON || '').toLowerCase() === 'true') {
+  if (season) {
     requestQuery.season = season;
   }
+  requestQuery.last = '20';
 
   const requestUrl = buildApiFootballUrl('/fixtures/headtohead', requestQuery).toString();
 
@@ -949,6 +950,8 @@ async function savePredictionAndMaybePublish({
   databaseId,
   fixturesTable,
   predictionsTable,
+  messaging,
+  topicId,
   fixture,
   h2hRows,
   aiResponse,
@@ -1043,7 +1046,79 @@ async function savePredictionAndMaybePublish({
     );
   }
 
-  return { saved: true, published: true, notified: false };
+  if (!messaging || !topicId) {
+    return { saved: true, published: true, notified: false };
+  }
+
+  try {
+    if (typeof logFn === 'function') {
+      logFn(
+        JSON.stringify({
+          job: 'daily-sync-generate',
+          fixture_api_id: fixtureApiId,
+          prediction_id: `prediction_${fixtureApiId}`,
+          stage: 'notification-send',
+          message: 'Sending push notification for immediate publish.',
+        }),
+      );
+    }
+
+    await messaging.createPush({
+      messageId: ID.unique(),
+      title: 'New prediction is live',
+      body: primaryReason,
+      topics: [topicId],
+      data: {
+        fixture_api_id: fixtureApiId,
+        prediction_id: `prediction_${fixtureApiId}`,
+        release_status: 'published',
+      },
+      draft: false,
+    });
+
+    await upsertRow(tablesdb, databaseId, predictionsTable, `prediction_${fixtureApiId}`, {
+      release_status: 'published',
+      published_at: startedAt,
+      notification_sent: true,
+      notification_sent_at: isoNow(),
+      updated_at: isoNow(),
+    });
+
+    return { saved: true, published: true, notified: true };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const isFcmConfigIssue =
+      errorMessage.includes('JWT::encode') ||
+      errorMessage.includes('Argument #2 ($key) must be of type string, null given') ||
+      errorMessage.toLowerCase().includes('private key');
+
+    if (typeof logFn === 'function') {
+      logFn(
+        JSON.stringify({
+          job: 'daily-sync-generate',
+          fixture_api_id: fixtureApiId,
+          prediction_id: `prediction_${fixtureApiId}`,
+          stage: isFcmConfigIssue ? 'notification-config-error' : 'notification-error',
+          message: errorMessage,
+          hint: isFcmConfigIssue
+            ? 'Check the Appwrite Messaging push provider. The FCM service-account private key is missing or not loaded.'
+            : null,
+        }),
+      );
+    } else {
+      console.error(
+        JSON.stringify({
+          job: 'daily-sync-generate',
+          fixture_api_id: fixtureApiId,
+          prediction_id: `prediction_${fixtureApiId}`,
+          stage: isFcmConfigIssue ? 'notification-config-error' : 'notification-error',
+          message: errorMessage,
+        }),
+      );
+    }
+
+    return { saved: true, published: true, notified: false };
+  }
 }
 
 async function generatePredictionsForBatch({
@@ -1053,11 +1128,14 @@ async function generatePredictionsForBatch({
   fixturesTable,
   h2hTable,
   predictionsTable,
+  messaging,
+  topicId,
   startedAt,
   logFn,
 }) {
   let saved = 0;
   let failed = 0;
+  let skipped = 0;
   let published = 0;
   let notified = 0;
   const concurrency = parseConcurrency(process.env.APPWRITE_PREDICTION_CONCURRENCY || 10);
@@ -1128,7 +1206,7 @@ async function generatePredictionsForBatch({
               h2h_rows: workingH2hRows.length,
             }),
           );
-        } catch (error) {
+      } catch (error) {
           logger(
             JSON.stringify({
               job: 'daily-sync-generate',
@@ -1138,6 +1216,20 @@ async function generatePredictionsForBatch({
             }),
           );
         }
+      }
+
+      if (workingH2hRows.length === 0) {
+        skipped += 1;
+        logger(
+          JSON.stringify({
+            job: 'daily-sync-generate',
+            fixture_api_id: fixtureApiId,
+            stage: 'ai-skip',
+            reason: 'missing-h2h',
+            message: 'Skipping AI prediction because the fixture has no H2H data.',
+          }),
+        );
+        return;
       }
 
       const prompt = buildPrompt(fixture, workingH2hRows);
@@ -1177,6 +1269,8 @@ async function generatePredictionsForBatch({
         databaseId,
         fixturesTable,
         predictionsTable,
+        messaging,
+        topicId,
         fixture,
         h2hRows: workingH2hRows,
         aiResponse: aiResult.aiResponse,
@@ -1223,18 +1317,20 @@ async function generatePredictionsForBatch({
       stage: 'prediction-batch-complete',
       saved,
       failed,
+      skipped,
       published,
       notified,
     }),
   );
 
-  return { saved, failed, published, notified };
+  return { saved, failed, skipped, published, notified };
 }
 
 export default async function main(context) {
   const { res, error: reportError } = context;
   const client = buildClient();
   const tablesdb = new TablesDB(client);
+  const messaging = new Messaging(client);
   const { log: appwriteLog, error: appwriteError } = buildAppwriteLogger(context);
 
   const databaseId = required('APPWRITE_DATABASE_ID');
@@ -1244,6 +1340,7 @@ export default async function main(context) {
   const h2hTable = required('APPWRITE_TABLE_FIXTURE_H2H_HISTORY');
   const predictionsTable = required('APPWRITE_TABLE_PREDICTIONS');
   const syncRunsTable = required('APPWRITE_TABLE_SYNC_RUNS');
+  const topicId = required('APPWRITE_TOPIC_PREDICTIONS');
 
   const league = process.env.API_FOOTBALL_LEAGUE ? Number(process.env.API_FOOTBALL_LEAGUE) : null;
   const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(0);
@@ -1484,6 +1581,8 @@ export default async function main(context) {
       fixturesTable,
       h2hTable,
       predictionsTable,
+      messaging,
+      topicId,
       startedAt,
       logFn: appwriteLog,
     });
@@ -1497,7 +1596,7 @@ export default async function main(context) {
       finished_at: isoNow(),
       items_seen: String(fixtureContexts.length),
       items_saved: String(generationResult.saved),
-      message: `Generated ${generationResult.saved} predictions from merged batch ${syncRunId}. Published ${generationResult.published} immediately and notified ${generationResult.notified}.`,
+      message: `Generated ${generationResult.saved} predictions from merged batch ${syncRunId}. Skipped ${generationResult.skipped} fixtures without H2H. Published ${generationResult.published} immediately and notified ${generationResult.notified}.`,
       created_at: isoNow(),
       updated_at: isoNow(),
     });
@@ -1511,7 +1610,9 @@ export default async function main(context) {
         contexts_total: fixtureContexts.length,
         predictions_saved: generationResult.saved,
         predictions_failed: generationResult.failed,
+        predictions_skipped: generationResult.skipped,
         predictions_published: generationResult.published,
+        predictions_notified: generationResult.notified,
         h2h_fixtures_processed: h2hFetchResult.h2hFetchedFixtures,
         h2h_rows_saved: h2hFetchResult.totalSaved,
       }),
@@ -1528,6 +1629,7 @@ export default async function main(context) {
       items_seen: String(fixtureContexts.length),
       items_saved: String(generationResult.saved),
       items_failed: String(generationResult.failed),
+      items_skipped: String(generationResult.skipped),
       published: String(generationResult.published),
       notified: String(generationResult.notified),
       h2h_fixtures_processed: String(h2hFetchResult.h2hFetchedFixtures),
