@@ -81,6 +81,8 @@ const NOTIFICATION_CALL_TO_ACTIONS = [
   'Open the app now and follow the signal.',
 ];
 
+const HIGH_CONFIDENCE_REASON_THRESHOLD = 0.85;
+
 function shouldSendPredictionNotification(confidence) {
   return Number.isFinite(confidence) && confidence >= 0.85;
 }
@@ -583,6 +585,8 @@ function buildPrompt(fixture, h2hRows) {
     'Required JSON keys: predicted_winner, confidence, confidence_label, picks.',
     'The picks array must contain exactly 1 entry.',
     'That single pick must include: selection, confidence, reason.',
+    'If the confidence is below 0.85, set reason to an empty string and do not add any explanation text.',
+    'Never use phrases about limited data, small samples, missing history, insufficient evidence, or not enough matches as reason text for a 0.85+ confidence pick.',
     'The reason must be short, one sentence only, and should not include extra explanation.',
     'Prefer conservative non-straight-win markets such as Over/Under goals, Both Teams To Score, Double Chance, Draw, or No Bet.',
     "Don't generate straight-win selections like Home Win, Away Win, Team X to win, or bare team-name wins unless confidence is 0.99 or higher.",
@@ -590,8 +594,9 @@ function buildPrompt(fixture, h2hRows) {
     "Don't waste the response on straight-win markets when a conservative market is available.",
     'If the supplied H2H history is empty, use any fallback H2H history provided by the backend context.',
     'If no H2H history is available at all, do not invent it; use fixture context only and stay conservative.',
+    'If the evidence is weak, lower confidence below 0.85 and leave reason empty.',
     'Focus on fixture context and h2h history when choosing the best conservative pick.',
-    'Always provide one best conservative pick with a clear reason.',
+    'Always provide one best conservative pick, and only provide reason text when confidence is 0.85 or higher.',
     'Confidence should be a decimal between 0 and 1.',
     'Use confidence_label values like high, medium, or low.',
     '',
@@ -828,6 +833,8 @@ async function requestAiPrediction(fixtureApiId, prompt, fixture, logFn) {
     'Include predicted_winner, confidence, confidence_label, and picks.',
     'picks must be an array with exactly 1 item.',
     'The single pick must include selection, confidence, and reason.',
+    'If confidence is below 0.85, reason must be an empty string.',
+    'Never use phrases about limited data, small samples, missing history, insufficient evidence, or not enough matches as reason text for a 0.85+ confidence pick.',
     'Do not add markdown, explanation text, or code fences.',
     'Do not add extra explanation outside the single short reason field.',
     'Use fixture context and h2h only.',
@@ -991,14 +998,50 @@ function toDate(value) {
 
 function normalizePrimaryReason(reason, fixture, h2hRows, selection) {
   const text = typeof reason === 'string' ? reason.trim() : '';
-  if (text && !/not enough data|insufficient|low data|no history/i.test(text)) {
-    return text;
+  if (!text) {
+    return '';
   }
 
-  const home = fixture?.home_team_name || 'home team';
-  const away = fixture?.away_team_name || 'away team';
-  const h2hCount = Array.isArray(h2hRows) ? h2hRows.length : 0;
-  return `${selection || 'This pick'} is the best available choice for ${home} vs ${away} based on the fixture context${h2hCount ? ` and ${h2hCount} recent head-to-head matches` : ''}.`;
+  if (reasonLooksLikeLimitedEvidence(text)) {
+    return '';
+  }
+
+  return text;
+}
+
+function reasonLooksLikeLimitedEvidence(reason) {
+  const text = String(reason || '').toLowerCase();
+  if (!text) {
+    return false;
+  }
+
+  return (
+    text.includes('limited data') ||
+    text.includes('small sample') ||
+    text.includes('not enough history') ||
+    text.includes('insufficient') ||
+    text.includes('lack of data') ||
+    text.includes('no history') ||
+    text.includes('missing h2h') ||
+    text.includes('few matches') ||
+    text.includes('few meetings') ||
+    text.includes('weak evidence') ||
+    text.includes('weak data')
+  );
+}
+
+function normalizeReasonByConfidence(reason, confidence) {
+  const numericConfidence = Number.isFinite(confidence) ? confidence : 0;
+  if (numericConfidence < HIGH_CONFIDENCE_REASON_THRESHOLD) {
+    return '';
+  }
+
+  const text = typeof reason === 'string' ? reason.trim() : '';
+  if (!text || reasonLooksLikeLimitedEvidence(text)) {
+    return '';
+  }
+
+  return text;
 }
 
 function buildFallbackPrimaryPick(fixture, h2hRows) {
@@ -1058,6 +1101,7 @@ async function savePredictionAndMaybePublish({
   const primaryConfidenceSource = usedFallbackSelection
     ? fallbackPick.confidence
     : rawPrimaryConfidence;
+  const primaryConfidence = normalizeConfidence(primaryConfidenceSource);
   const primaryReason = normalizePrimaryReason(
     isAllowedNonWinSelection(primarySelection) || (isStraightWinSelection(primarySelection) && rawPrimaryConfidence >= 0.99)
       ? primaryPick?.reason
@@ -1066,7 +1110,10 @@ async function savePredictionAndMaybePublish({
     h2hRows,
     primarySelection,
   );
-  const primaryConfidence = normalizeConfidence(primaryConfidenceSource);
+  const normalizedPrimaryReason = normalizeReasonByConfidence(
+    primaryReason,
+    primaryConfidence,
+  );
   const predictedWinner = parsed.predicted_winner || null;
 
   if (!fixtureApiId) {
@@ -1076,7 +1123,7 @@ async function savePredictionAndMaybePublish({
   await upsertRow(tablesdb, databaseId, predictionsTable, `prediction_${fixtureApiId}`, {
     fixture_api_id: fixtureApiId,
     model_name: aiResponse?.model || (process.env.DEEPSEEK_MODEL || 'deepseek-chat'),
-    prediction_text: primaryReason,
+    prediction_text: normalizedPrimaryReason,
     predicted_winner: predictedWinner,
     confidence: primaryConfidence,
     confidence_label: parsed.confidence_label || null,
@@ -1090,7 +1137,7 @@ async function savePredictionAndMaybePublish({
     primary_market: primarySelection,
     primary_selection: primarySelection,
     primary_confidence: primaryConfidence,
-    primary_reason: primaryReason,
+    primary_reason: normalizedPrimaryReason,
     secondary_market: null,
     secondary_selection: null,
     secondary_confidence: null,
