@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'ad_gate_service.dart';
 import 'appwrite_subscription_service.dart';
 import 'feed_banner_ad.dart';
+import 'google_play_billing_service.dart';
 import 'prediction_repository.dart';
 import 'push_notification_service.dart';
 
@@ -21,6 +22,7 @@ Future<void> main() async {
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
     await PushNotificationService.initialize();
     await AdGateService.instance.initialize();
+    await GooglePlayBillingService.instance.initialize();
   } catch (error) {
     debugPrint('Push subscription failed: $error');
     // Push subscription issues should not block the prediction feed.
@@ -38,9 +40,9 @@ class MyApp extends StatelessWidget {
       builder: (context, child) {
         final scaledChild = child ?? const SizedBox.shrink();
         return MediaQuery(
-          data: MediaQuery.of(context).copyWith(
-            textScaler: const TextScaler.linear(1.15),
-          ),
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: const TextScaler.linear(1.15)),
           child: scaledChild,
         );
       },
@@ -62,7 +64,8 @@ class NotificationBootstrapPage extends StatefulWidget {
   const NotificationBootstrapPage({super.key});
 
   @override
-  State<NotificationBootstrapPage> createState() => _NotificationBootstrapPageState();
+  State<NotificationBootstrapPage> createState() =>
+      _NotificationBootstrapPageState();
 }
 
 class _NotificationBootstrapPageState extends State<NotificationBootstrapPage> {
@@ -105,9 +108,7 @@ class _NotificationBootstrapPageState extends State<NotificationBootstrapPage> {
   @override
   Widget build(BuildContext context) {
     if (!_ready) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     return const PredictionFeedPage();
@@ -122,12 +123,162 @@ class PredictionFeedPage extends StatefulWidget {
 }
 
 class _PredictionFeedPageState extends State<PredictionFeedPage> {
+  final Map<String, PredictionRecord> _selectedPredictions =
+      <String, PredictionRecord>{};
+  int _currentIndex = 0;
+
+  List<PredictionRecord> get _selectedItems {
+    final items = _selectedPredictions.values.toList();
+    items.sort(_comparePredictionsByKickoff);
+    return items;
+  }
+
+  void _setIndex(int index) {
+    if (_currentIndex == index) {
+      return;
+    }
+
+    setState(() {
+      _currentIndex = index;
+    });
+  }
+
+  void _toggleSelectedPrediction(PredictionRecord prediction) {
+    final key = _predictionUnlockKey(prediction);
+    if (key.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      if (_selectedPredictions.containsKey(key)) {
+        _selectedPredictions.remove(key);
+      } else {
+        _selectedPredictions[key] = prediction;
+      }
+    });
+  }
+
+  void _clearSelections() {
+    if (_selectedPredictions.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _selectedPredictions.clear();
+    });
+  }
+
+  void _openPickedTab() {
+    _setIndex(2);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: GooglePlayBillingService.instance,
+      builder: (context, _) {
+        final adFree = GooglePlayBillingService.instance.hasAdFreeAccess;
+
+        return Scaffold(
+          body: IndexedStack(
+            index: _currentIndex,
+            children: [
+              _PredictionHomeTab(
+                adFree: adFree,
+                selectedCount: _selectedItems.length,
+                isPredictionSelected: (prediction) => _selectedPredictions
+                    .containsKey(_predictionUnlockKey(prediction)),
+                onToggleSelection: _toggleSelectedPrediction,
+                onOpenPicked: _openPickedTab,
+              ),
+              PremiumPlanPage(
+                adFree: adFree,
+                currentPlans: GooglePlayBillingService.instance.plans,
+              ),
+              PickedMatchesPage(
+                selectedPredictions: _selectedItems,
+                onClearAll: _selectedItems.isEmpty ? null : _clearSelections,
+              ),
+            ],
+          ),
+          bottomNavigationBar: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_selectedItems.isNotEmpty)
+                _SelectedMatchesBar(
+                  count: _selectedItems.length,
+                  onOpenPicked: _openPickedTab,
+                  onClear: _clearSelections,
+                ),
+              NavigationBar(
+                selectedIndex: _currentIndex,
+                onDestinationSelected: _setIndex,
+                backgroundColor: const Color(0xFF081221),
+                indicatorColor: const Color(0xFF00D4AA).withAlpha(40),
+                destinations: const [
+                  NavigationDestination(
+                    icon: Icon(Icons.home_outlined),
+                    selectedIcon: Icon(Icons.home),
+                    label: 'Home',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.workspace_premium_outlined),
+                    selectedIcon: Icon(Icons.workspace_premium),
+                    label: 'Premium Plan',
+                  ),
+                  NavigationDestination(
+                    icon: Icon(Icons.fact_check_outlined),
+                    selectedIcon: Icon(Icons.fact_check),
+                    label: 'Picked',
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+enum _ConfidenceFilter { all, high, medium }
+
+extension _ConfidenceFilterX on _ConfidenceFilter {
+  String get label => switch (this) {
+    _ConfidenceFilter.all => 'All',
+    _ConfidenceFilter.high => 'High',
+    _ConfidenceFilter.medium => 'Medium',
+  };
+}
+
+class _PredictionHomeTab extends StatefulWidget {
+  const _PredictionHomeTab({
+    required this.adFree,
+    required this.selectedCount,
+    required this.isPredictionSelected,
+    required this.onToggleSelection,
+    required this.onOpenPicked,
+  });
+
+  final bool adFree;
+  final int selectedCount;
+  final bool Function(PredictionRecord prediction) isPredictionSelected;
+  final void Function(PredictionRecord prediction) onToggleSelection;
+  final VoidCallback onOpenPicked;
+
+  @override
+  State<_PredictionHomeTab> createState() => _PredictionHomeTabState();
+}
+
+class _PredictionHomeTabState extends State<_PredictionHomeTab> {
   final PredictionRepository _repository = PredictionRepository();
   late Future<List<PredictionRecord>> _futurePredictions;
   final Set<String> _expandedSectionKeys = <String>{};
   final Set<String> _unlockedPickKeys = <String>{};
   _TodayBucket _selectedTodayBucket = _TodayBucket.coming;
   String? _unlockingPickKey;
+  String _searchQuery = '';
+  _ConfidenceFilter _confidenceFilter = _ConfidenceFilter.all;
 
   @override
   void initState() {
@@ -163,10 +314,14 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
   }
 
   bool _isPickUnlocked(String unlockKey) {
-    return _unlockedPickKeys.contains(unlockKey);
+    return widget.adFree || _unlockedPickKeys.contains(unlockKey);
   }
 
   Future<void> _unlockPick(PredictionRecord prediction) async {
+    if (widget.adFree) {
+      return;
+    }
+
     final unlockKey = _predictionUnlockKey(prediction);
     if (unlockKey.isEmpty || _unlockedPickKeys.contains(unlockKey)) {
       return;
@@ -192,9 +347,7 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
         });
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Ad not ready yet. Please try again.'),
-          ),
+          const SnackBar(content: Text('Ad not ready yet. Please try again.')),
         );
       }
     } finally {
@@ -206,133 +359,695 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
     }
   }
 
+  bool _matchesFilter(PredictionRecord prediction) {
+    final query = _searchQuery.trim().toLowerCase();
+    final home = prediction.homeTeamName?.toLowerCase() ?? '';
+    final away = prediction.awayTeamName?.toLowerCase() ?? '';
+    final winner = prediction.predictedWinner?.toLowerCase() ?? '';
+    final confidence = _confidenceBadgeLabel(prediction).toLowerCase();
+
+    final queryMatch =
+        query.isEmpty ||
+        home.contains(query) ||
+        away.contains(query) ||
+        winner.contains(query) ||
+        _matchStatusLabel(prediction).toLowerCase().contains(query) ||
+        _formatTimeOnly(
+          prediction.kickoffAt ?? prediction.releaseAt,
+        ).toLowerCase().contains(query);
+
+    final confidenceMatch = switch (_confidenceFilter) {
+      _ConfidenceFilter.all => true,
+      _ConfidenceFilter.high => confidence == 'high',
+      _ConfidenceFilter.medium => confidence == 'medium',
+    };
+
+    return queryMatch && confidenceMatch;
+  }
+
+  void _handleSelectPrediction(PredictionRecord prediction) {
+    final unlockKey = _predictionUnlockKey(prediction);
+    final isUnlocked = _isPickUnlocked(unlockKey);
+    if (!isUnlocked) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unlock this pick before selecting it.')),
+      );
+      return;
+    }
+
+    widget.onToggleSelection(prediction);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              Color(0xFF07111F),
-              Color(0xFF0B1D35),
-              Color(0xFF122B4A),
-            ],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFF07111F), Color(0xFF0B1D35), Color(0xFF122B4A)],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
         ),
-        child: SafeArea(
-          child: FutureBuilder<List<PredictionRecord>>(
-            future: _futurePredictions,
-            builder: (context, snapshot) {
-              final predictions = snapshot.data ?? const <PredictionRecord>[];
+      ),
+      child: SafeArea(
+        child: FutureBuilder<List<PredictionRecord>>(
+          future: _futurePredictions,
+          builder: (context, snapshot) {
+            final predictions = snapshot.data ?? const <PredictionRecord>[];
+            final filteredPredictions = predictions
+                .where(_matchesFilter)
+                .toList();
 
-              return RefreshIndicator(
-                onRefresh: _reload,
-                color: const Color(0xFF00D4AA),
-                backgroundColor: const Color(0xFF0D1B2D),
-                child: CustomScrollView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  slivers: [
-                    SliverAppBar(
-                      pinned: true,
-                      floating: false,
-                      toolbarHeight: 72,
-                      backgroundColor: const Color(0xFF0A1220).withAlpha(248),
-                      surfaceTintColor: Colors.transparent,
-                      elevation: 0,
-                      titleSpacing: 20,
-                      title: const _StickyHeader(),
-                      flexibleSpace: Container(
-                        decoration: const BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              Color(0xFF07111F),
-                              Color(0xFF0D223A),
-                              Color(0xFF123652),
-                            ],
-                            begin: Alignment.centerLeft,
-                            end: Alignment.centerRight,
-                          ),
+            return RefreshIndicator(
+              onRefresh: _reload,
+              color: const Color(0xFF00D4AA),
+              backgroundColor: const Color(0xFF0D1B2D),
+              child: CustomScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                slivers: [
+                  SliverAppBar(
+                    pinned: true,
+                    floating: false,
+                    toolbarHeight: 72,
+                    backgroundColor: const Color(0xFF0A1220).withAlpha(248),
+                    surfaceTintColor: Colors.transparent,
+                    elevation: 0,
+                    titleSpacing: 20,
+                    title: const _StickyHeader(),
+                    flexibleSpace: Container(
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            Color(0xFF07111F),
+                            Color(0xFF0D223A),
+                            Color(0xFF123652),
+                          ],
+                          begin: Alignment.centerLeft,
+                          end: Alignment.centerRight,
                         ),
                       ),
-                      actions: [
-                        Padding(
-                          padding: const EdgeInsets.only(right: 12),
-                          child: IconButton(
-                            tooltip: 'Policy',
-                            onPressed: () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute<void>(
-                                  builder: (_) => const PolicyPage(),
+                    ),
+                    actions: [
+                      Padding(
+                        padding: const EdgeInsets.only(right: 12),
+                        child: IconButton(
+                          tooltip: 'Policy',
+                          onPressed: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) => const PolicyPage(),
+                              ),
+                            );
+                          },
+                          icon: const Icon(Icons.menu),
+                          color: const Color(0xFFB8D5FF),
+                        ),
+                      ),
+                    ],
+                  ),
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          TextField(
+                            onChanged: (value) {
+                              setState(() {
+                                _searchQuery = value;
+                              });
+                            },
+                            style: const TextStyle(color: Colors.white),
+                            decoration: InputDecoration(
+                              hintText: 'Search teams, status, time',
+                              hintStyle: const TextStyle(
+                                color: Color(0xFF84D6FF),
+                              ),
+                              prefixIcon: const Icon(Icons.search),
+                              filled: true,
+                              fillColor: const Color(0xFF0D1B2D),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(18),
+                                borderSide: BorderSide.none,
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(18),
+                                borderSide: const BorderSide(
+                                  color: Color(0xFF20364E),
+                                ),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(18),
+                                borderSide: const BorderSide(
+                                  color: Color(0xFF00D4AA),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: _ConfidenceFilter.values.map((filter) {
+                              final isSelected = filter == _confidenceFilter;
+                              return ChoiceChip(
+                                label: Text(filter.label),
+                                selected: isSelected,
+                                onSelected: (_) {
+                                  setState(() {
+                                    _confidenceFilter = filter;
+                                  });
+                                },
+                                selectedColor: const Color(0xFF00D4AA),
+                                labelStyle: TextStyle(
+                                  color: isSelected
+                                      ? const Color(0xFF07111F)
+                                      : Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                                backgroundColor: const Color(0xFF0D1B2D),
+                                side: const BorderSide(
+                                  color: Color(0xFF20364E),
                                 ),
                               );
-                            },
-                            icon: const Icon(Icons.menu),
-                            color: const Color(0xFFB8D5FF),
+                            }).toList(),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                    if (snapshot.connectionState == ConnectionState.waiting &&
-                        predictions.isEmpty)
-                      const SliverToBoxAdapter(
-                        child: Center(
-                          child: Padding(
-                            padding: EdgeInsets.only(top: 32),
-                            child: CircularProgressIndicator(),
-                          ),
-                        ),
-                      )
-                    else if (snapshot.hasError)
-                      SliverToBoxAdapter(
+                  ),
+                  if (snapshot.connectionState == ConnectionState.waiting &&
+                      predictions.isEmpty)
+                    const SliverToBoxAdapter(
+                      child: Center(
                         child: Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                          child: _EmptyState(
-                            icon: Icons.error_outline,
-                            title: 'Unable to load predictions',
-                            message: 'Pull to refresh and try again.',
-                            actionLabel: 'Retry',
-                            onAction: _reload,
-                          ),
-                        ),
-                      )
-                    else if (predictions.isEmpty)
-                      const SliverToBoxAdapter(
-                        child: Padding(
-                          padding: EdgeInsets.fromLTRB(20, 16, 20, 0),
-                          child: _EmptyState(
-                            icon: Icons.sports_soccer,
-                            title: 'No published picks yet',
-                            message: 'When new picks are ready, they will appear here as primary pick cards.',
-                          ),
-                        ),
-                      )
-                    else
-                      SliverList(
-                        delegate: SliverChildListDelegate(
-                          _buildGroupedPredictionWidgets(
-                            predictions,
-                            _expandedSectionKeys,
-                            _toggleSection,
-                            _selectedTodayBucket,
-                            _selectTodayBucket,
-                            _isPickUnlocked,
-                            _unlockPick,
-                            _unlockingPickKey,
-                          ),
+                          padding: EdgeInsets.only(top: 32),
+                          child: CircularProgressIndicator(),
                         ),
                       ),
-                    const SliverToBoxAdapter(child: SizedBox(height: 24)),
-                  ],
-                ),
-              );
-            },
-          ),
+                    )
+                  else if (snapshot.hasError)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                        child: _EmptyState(
+                          icon: Icons.error_outline,
+                          title: 'Unable to load predictions',
+                          message: 'Pull to refresh and try again.',
+                          actionLabel: 'Retry',
+                          onAction: _reload,
+                        ),
+                      ),
+                    )
+                  else if (filteredPredictions.isEmpty)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                        child: _EmptyState(
+                          icon: Icons.sports_soccer,
+                          title: 'No matching picks',
+                          message:
+                              'Try a different search term or change the confidence filter.',
+                          actionLabel: predictions.isEmpty
+                              ? null
+                              : 'Clear filters',
+                          onAction: predictions.isEmpty
+                              ? null
+                              : () {
+                                  setState(() {
+                                    _searchQuery = '';
+                                    _confidenceFilter = _ConfidenceFilter.all;
+                                  });
+                                },
+                        ),
+                      ),
+                    )
+                  else
+                    SliverList(
+                      delegate: SliverChildListDelegate(
+                        _buildGroupedPredictionWidgets(
+                          filteredPredictions,
+                          _expandedSectionKeys,
+                          _toggleSection,
+                          _selectedTodayBucket,
+                          _selectTodayBucket,
+                          _isPickUnlocked,
+                          _unlockPick,
+                          _unlockingPickKey,
+                          widget.adFree,
+                          widget.isPredictionSelected,
+                          _handleSelectPrediction,
+                          !widget.adFree,
+                        ),
+                      ),
+                    ),
+                  SliverToBoxAdapter(
+                    child: SizedBox(
+                      height: widget.selectedCount > 0 ? 140 : 96,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
         ),
       ),
     );
   }
+}
+
+class PremiumPlanPage extends StatelessWidget {
+  const PremiumPlanPage({
+    super.key,
+    required this.adFree,
+    required this.currentPlans,
+  });
+
+  final bool adFree;
+  final List<SubscriptionPlanId> currentPlans;
+
+  Future<void> _buyPlan(BuildContext context, SubscriptionPlanId plan) async {
+    try {
+      await GooglePlayBillingService.instance.purchase(plan);
+    } catch (error) {
+      if (!context.mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to start purchase: $error')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: GooglePlayBillingService.instance,
+      builder: (context, _) {
+        final billing = GooglePlayBillingService.instance;
+        return Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF07111F), Color(0xFF0B1D35), Color(0xFF122B4A)],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
+          ),
+          child: SafeArea(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+              children: [
+                const Text(
+                  'Premium Plans',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 28,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  adFree
+                      ? 'Your account is ad-free. Thanks for supporting the app.'
+                      : 'Choose a plan and pay through Google Play Billing to remove all ads.',
+                  style: const TextStyle(
+                    color: Color(0xFFB8D5FF),
+                    fontSize: 14,
+                    height: 1.5,
+                  ),
+                ),
+                if (!billing.isAvailable) ...[
+                  const SizedBox(height: 16),
+                  _planNotice(
+                    title: 'Billing unavailable',
+                    body:
+                        'Google Play Billing is not available on this device or the store connection has not been configured yet.',
+                  ),
+                ],
+                if (billing.errorMessage != null) ...[
+                  const SizedBox(height: 16),
+                  _planNotice(
+                    title: 'Billing setup note',
+                    body: billing.errorMessage!,
+                  ),
+                ],
+                const SizedBox(height: 18),
+                ...currentPlans.map((plan) {
+                  final product = billing.productFor(plan);
+                  final price = product?.price ?? plan.fallbackPrice;
+                  final owned = billing.isOwned(plan);
+
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 14),
+                    child: _SubscriptionPlanCard(
+                      title: plan.title,
+                      price: price,
+                      subtitle: plan.subtitle,
+                      highlight: owned || adFree,
+                      featureLines: const [
+                        'Remove all ads',
+                        'Unlock a cleaner experience',
+                        'Works across the full app',
+                      ],
+                      buttonLabel: owned || adFree
+                          ? 'Active'
+                          : 'Buy on Google Play',
+                      onPressed: owned || adFree
+                          ? null
+                          : () => _buyPlan(context, plan),
+                    ),
+                  );
+                }),
+                const SizedBox(height: 8),
+                FilledButton.tonalIcon(
+                  onPressed: billing.restorePurchases,
+                  icon: const Icon(Icons.restore),
+                  label: const Text('Restore purchases'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class PickedMatchesPage extends StatelessWidget {
+  const PickedMatchesPage({
+    super.key,
+    required this.selectedPredictions,
+    required this.onClearAll,
+  });
+
+  final List<PredictionRecord> selectedPredictions;
+  final VoidCallback? onClearAll;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFF07111F), Color(0xFF0B1D35), Color(0xFF122B4A)],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
+      ),
+      child: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Picked Matches',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 28,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                if (onClearAll != null)
+                  TextButton.icon(
+                    onPressed: onClearAll,
+                    icon: const Icon(Icons.delete_outline),
+                    label: const Text('Clear'),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'All selected matches are arranged below in table form.',
+              style: TextStyle(
+                color: Color(0xFFB8D5FF),
+                fontSize: 14,
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: 18),
+            if (selectedPredictions.isEmpty)
+              const _EmptyState(
+                icon: Icons.fact_check_outlined,
+                title: 'No picked matches yet',
+                message: 'Select an unlocked match from Home to see it here.',
+              )
+            else
+              Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0D1B2D),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0xFF20364E)),
+                ),
+                padding: const EdgeInsets.all(12),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: DataTable(
+                    headingRowColor: const WidgetStatePropertyAll(
+                      Color(0xFF10253E),
+                    ),
+                    dataRowColor: const WidgetStatePropertyAll(
+                      Color(0xFF0D1B2D),
+                    ),
+                    columns: const [
+                      DataColumn(label: Text('Match')),
+                      DataColumn(label: Text('Time')),
+                      DataColumn(label: Text('Confidence')),
+                      DataColumn(label: Text('Selection')),
+                      DataColumn(label: Text('Status')),
+                    ],
+                    rows: selectedPredictions.map((prediction) {
+                      return DataRow(
+                        cells: [
+                          DataCell(
+                            Text(
+                              '${prediction.homeTeamName ?? 'Home'} vs ${prediction.awayTeamName ?? 'Away'}',
+                            ),
+                          ),
+                          DataCell(
+                            Text(
+                              _formatTimeOnly(
+                                prediction.kickoffAt ?? prediction.releaseAt,
+                              ),
+                            ),
+                          ),
+                          DataCell(
+                            Text(
+                              _confidenceBadgeLabel(prediction).toUpperCase(),
+                            ),
+                          ),
+                          DataCell(
+                            Text(
+                              finalSelection(
+                                _PickCardData.fromPick(
+                                  'Primary pick',
+                                  prediction.primaryPick,
+                                  const Color(0xFF00D4AA),
+                                  prediction,
+                                ),
+                              ),
+                            ),
+                          ),
+                          DataCell(Text(_matchStatusLabel(prediction))),
+                        ],
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SelectedMatchesBar extends StatelessWidget {
+  const _SelectedMatchesBar({
+    required this.count,
+    required this.onOpenPicked,
+    required this.onClear,
+  });
+
+  final int count;
+  final VoidCallback onOpenPicked;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xFF0B1626),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: const BoxDecoration(
+          border: Border(top: BorderSide(color: Color(0xFF20364E))),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF00D4AA).withAlpha(36),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Text(
+                '$count selected',
+                style: const TextStyle(
+                  color: Color(0xFF75F7D7),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Selected matches are ready to save.',
+                style: TextStyle(
+                  color: Colors.white.withAlpha(220),
+                  fontSize: 13,
+                ),
+              ),
+            ),
+            TextButton(onPressed: onClear, child: const Text('Clear')),
+            FilledButton.icon(
+              onPressed: onOpenPicked,
+              icon: const Icon(Icons.arrow_forward),
+              label: const Text('Picked'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SubscriptionPlanCard extends StatelessWidget {
+  const _SubscriptionPlanCard({
+    required this.title,
+    required this.price,
+    required this.subtitle,
+    required this.featureLines,
+    required this.buttonLabel,
+    required this.onPressed,
+    required this.highlight,
+  });
+
+  final String title;
+  final String price;
+  final String subtitle;
+  final List<String> featureLines;
+  final String buttonLabel;
+  final VoidCallback? onPressed;
+  final bool highlight;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: highlight ? const Color(0xFF10253E) : const Color(0xFF0D1B2D),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: highlight ? const Color(0xFF00D4AA) : const Color(0xFF20364E),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              Text(
+                price,
+                style: const TextStyle(
+                  color: Color(0xFF75F7D7),
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            subtitle,
+            style: const TextStyle(color: Color(0xFFB8D5FF), fontSize: 13),
+          ),
+          const SizedBox(height: 14),
+          ...featureLines.map(
+            (line) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.check_circle,
+                    size: 16,
+                    color: Color(0xFF00D4AA),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      line,
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(onPressed: onPressed, child: Text(buttonLabel)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+Widget _planNotice({required String title, required String body}) {
+  return Container(
+    width: double.infinity,
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: const Color(0xFF0D1B2D),
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: const Color(0xFF20364E)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          body,
+          style: const TextStyle(
+            color: Color(0xFFB8D5FF),
+            fontSize: 13,
+            height: 1.45,
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 String _normalizeFixtureApiId(String fixtureApiId) {
@@ -452,10 +1167,7 @@ class PolicyPage extends StatelessWidget {
           const SizedBox(height: 4),
           SelectableText(
             _policyUrl,
-            style: const TextStyle(
-              color: Color(0xFF75F7D7),
-              fontSize: 13,
-            ),
+            style: const TextStyle(color: Color(0xFF75F7D7), fontSize: 13),
           ),
         ],
       ),
@@ -463,10 +1175,7 @@ class PolicyPage extends StatelessWidget {
   }
 }
 
-Widget _policySection({
-  required String title,
-  required String body,
-}) {
+Widget _policySection({required String title, required String body}) {
   return Container(
     width: double.infinity,
     padding: const EdgeInsets.all(16),
@@ -523,6 +1232,10 @@ List<Widget> _buildGroupedPredictionWidgets(
   bool Function(String fixtureApiId) isPickUnlocked,
   Future<void> Function(PredictionRecord prediction) onUnlockPick,
   String? unlockingPickKey,
+  bool adFree,
+  bool Function(PredictionRecord prediction) isSelected,
+  void Function(PredictionRecord prediction) onToggleSelection,
+  bool showAds,
 ) {
   final sections = _groupPredictionsByDate(predictions);
   final widgets = <Widget>[];
@@ -531,7 +1244,8 @@ List<Widget> _buildGroupedPredictionWidgets(
   for (var sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
     final section = sections[sectionIndex];
     final isTodaySection = section.label == 'Today';
-    final isExpanded = isTodaySection || expandedSectionKeys.contains(section.keyValue);
+    final isExpanded =
+        isTodaySection || expandedSectionKeys.contains(section.keyValue);
 
     if (sectionIndex > 0) {
       widgets.add(const SizedBox(height: 20));
@@ -564,6 +1278,10 @@ List<Widget> _buildGroupedPredictionWidgets(
           isPickUnlocked,
           onUnlockPick,
           unlockingPickKey,
+          adFree,
+          isSelected,
+          onToggleSelection,
+          showAds,
         ),
       );
       continue;
@@ -579,12 +1297,18 @@ List<Widget> _buildGroupedPredictionWidgets(
             isLocked: !isPickUnlocked(_predictionUnlockKey(prediction)),
             isUnlocking: unlockingPickKey == _predictionUnlockKey(prediction),
             onUnlockPressed: () => onUnlockPick(prediction),
+            isSelected: isSelected(prediction),
+            canSelect:
+                adFree || isPickUnlocked(_predictionUnlockKey(prediction)),
+            onSelectionPressed: () => onToggleSelection(prediction),
           ),
         ),
       );
       if (i < section.predictions.length - 1) {
         widgets.add(const SizedBox(height: 12));
-        widgets.add(const FeedBannerAd());
+        if (showAds) {
+          widgets.add(const FeedBannerAd());
+        }
         widgets.add(const SizedBox(height: 12));
       }
     }
@@ -593,11 +1317,7 @@ List<Widget> _buildGroupedPredictionWidgets(
   return widgets;
 }
 
-enum _TodayBucket {
-  coming,
-  live,
-  finished,
-}
+enum _TodayBucket { coming, live, finished }
 
 List<Widget> _buildTodayStatusWidgets(
   List<PredictionRecord> predictions,
@@ -606,6 +1326,10 @@ List<Widget> _buildTodayStatusWidgets(
   bool Function(String fixtureApiId) isPickUnlocked,
   Future<void> Function(PredictionRecord prediction) onUnlockPick,
   String? unlockingPickKey,
+  bool adFree,
+  bool Function(PredictionRecord prediction) isSelected,
+  void Function(PredictionRecord prediction) onToggleSelection,
+  bool showAds,
 ) {
   final now = DateTime.now();
   final grouped = <_TodayBucket, List<PredictionRecord>>{
@@ -614,7 +1338,8 @@ List<Widget> _buildTodayStatusWidgets(
     _TodayBucket.finished: <PredictionRecord>[],
   };
 
-  final sortedPredictions = [...predictions]..sort(_comparePredictionsByKickoff);
+  final sortedPredictions = [...predictions]
+    ..sort(_comparePredictionsByKickoff);
 
   for (final prediction in sortedPredictions) {
     final bucket = _todayBucketForPrediction(prediction, now);
@@ -630,7 +1355,8 @@ List<Widget> _buildTodayStatusWidgets(
       child: _TodayCategorySelector(
         selectedBucket: selectedBucket,
         counts: {
-          for (final bucket in _TodayBucket.values) bucket: grouped[bucket]?.length ?? 0,
+          for (final bucket in _TodayBucket.values)
+            bucket: grouped[bucket]?.length ?? 0,
         },
         onSelectBucket: onSelectBucket,
       ),
@@ -665,12 +1391,17 @@ List<Widget> _buildTodayStatusWidgets(
           isLocked: !isPickUnlocked(_predictionUnlockKey(prediction)),
           isUnlocking: unlockingPickKey == _predictionUnlockKey(prediction),
           onUnlockPressed: () => onUnlockPick(prediction),
+          isSelected: isSelected(prediction),
+          canSelect: adFree || isPickUnlocked(_predictionUnlockKey(prediction)),
+          onSelectionPressed: () => onToggleSelection(prediction),
         ),
       ),
     );
     if (i < selectedItems.length - 1) {
       widgets.add(const SizedBox(height: 12));
-      widgets.add(const FeedBannerAd());
+      if (showAds) {
+        widgets.add(const FeedBannerAd());
+      }
       widgets.add(const SizedBox(height: 12));
     }
   }
@@ -689,7 +1420,10 @@ String _todayBucketLabel(_TodayBucket bucket) {
   }
 }
 
-_TodayBucket _todayBucketForPrediction(PredictionRecord prediction, DateTime now) {
+_TodayBucket _todayBucketForPrediction(
+  PredictionRecord prediction,
+  DateTime now,
+) {
   if (_isFinishedPrediction(prediction, now)) {
     return _TodayBucket.finished;
   }
@@ -744,15 +1478,7 @@ bool _isLivePrediction(PredictionRecord prediction) {
 bool _isFinishedPrediction(PredictionRecord prediction, DateTime now) {
   final statusShort = prediction.matchStatusShort?.toUpperCase();
   final statusLong = prediction.matchStatusLong?.toLowerCase() ?? '';
-  const finishedStatuses = {
-    'FT',
-    'AET',
-    'PEN',
-    'CANC',
-    'ABD',
-    'AWD',
-    'WO',
-  };
+  const finishedStatuses = {'FT', 'AET', 'PEN', 'CANC', 'ABD', 'AWD', 'WO'};
 
   if (statusShort != null && finishedStatuses.contains(statusShort)) {
     return true;
@@ -770,7 +1496,8 @@ bool _isFinishedPrediction(PredictionRecord prediction, DateTime now) {
     }
   }
 
-  return prediction.fulltimeHomeGoals != null || prediction.fulltimeAwayGoals != null;
+  return prediction.fulltimeHomeGoals != null ||
+      prediction.fulltimeAwayGoals != null;
 }
 
 class _TodayCategorySelector extends StatelessWidget {
@@ -798,10 +1525,14 @@ class _TodayCategorySelector extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             margin: const EdgeInsets.only(right: 8),
             decoration: BoxDecoration(
-              color: isSelected ? const Color(0xFF00D4AA) : const Color(0xFF0D1B2D),
+              color: isSelected
+                  ? const Color(0xFF00D4AA)
+                  : const Color(0xFF0D1B2D),
               borderRadius: BorderRadius.circular(18),
               border: Border.all(
-                color: isSelected ? const Color(0xFF00D4AA) : const Color(0xFF20364E),
+                color: isSelected
+                    ? const Color(0xFF00D4AA)
+                    : const Color(0xFF20364E),
               ),
             ),
             child: Column(
@@ -820,7 +1551,9 @@ class _TodayCategorySelector extends StatelessWidget {
                 Text(
                   '$count',
                   style: TextStyle(
-                    color: isSelected ? const Color(0xFF07111F) : const Color(0xFF84D6FF),
+                    color: isSelected
+                        ? const Color(0xFF07111F)
+                        : const Color(0xFF84D6FF),
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
                   ),
@@ -873,7 +1606,8 @@ List<_PredictionDateSection> _groupPredictionsByDate(
 }
 
 DateTime _predictionDateKey(PredictionRecord prediction) {
-  final source = prediction.kickoffAt ??
+  final source =
+      prediction.kickoffAt ??
       prediction.publishedAt ??
       prediction.releaseAt ??
       DateTime.now();
@@ -973,8 +1707,12 @@ int _comparePredictionsByKickoff(
   PredictionRecord left,
   PredictionRecord right,
 ) {
-  final leftKickoff = _localDateTime(left.kickoffAt ?? left.publishedAt ?? left.releaseAt);
-  final rightKickoff = _localDateTime(right.kickoffAt ?? right.publishedAt ?? right.releaseAt);
+  final leftKickoff = _localDateTime(
+    left.kickoffAt ?? left.publishedAt ?? left.releaseAt,
+  );
+  final rightKickoff = _localDateTime(
+    right.kickoffAt ?? right.publishedAt ?? right.releaseAt,
+  );
 
   if (leftKickoff == null && rightKickoff == null) {
     return left.fixtureApiId.compareTo(right.fixtureApiId);
@@ -1046,7 +1784,10 @@ class _DateSectionHeader extends StatelessWidget {
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFF00D4AA).withAlpha(31),
                     borderRadius: BorderRadius.circular(999),
@@ -1067,10 +1808,7 @@ class _DateSectionHeader extends StatelessWidget {
                     color: const Color(0xFF84D6FF),
                   )
                 else
-                  const Icon(
-                    Icons.push_pin,
-                    color: Color(0xFF84D6FF),
-                  ),
+                  const Icon(Icons.push_pin, color: Color(0xFF84D6FF)),
               ],
             ),
           ),
@@ -1087,12 +1825,18 @@ class PredictionGroupCard extends StatelessWidget {
     required this.isLocked,
     required this.isUnlocking,
     required this.onUnlockPressed,
+    required this.isSelected,
+    required this.canSelect,
+    required this.onSelectionPressed,
   });
 
   final PredictionRecord prediction;
   final bool isLocked;
   final bool isUnlocking;
   final VoidCallback onUnlockPressed;
+  final bool isSelected;
+  final bool canSelect;
+  final VoidCallback onSelectionPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -1126,8 +1870,14 @@ class PredictionGroupCard extends StatelessWidget {
               homeTeamName: prediction.homeTeamName,
               awayTeamLogoUrl: prediction.awayTeamLogoUrl,
               awayTeamName: prediction.awayTeamName,
-              homeScore: _teamScoreLabel(prediction.currentHomeGoals, prediction.fulltimeHomeGoals),
-              awayScore: _teamScoreLabel(prediction.currentAwayGoals, prediction.fulltimeAwayGoals),
+              homeScore: _teamScoreLabel(
+                prediction.currentHomeGoals,
+                prediction.fulltimeHomeGoals,
+              ),
+              awayScore: _teamScoreLabel(
+                prediction.currentAwayGoals,
+                prediction.fulltimeAwayGoals,
+              ),
               confidenceLabel: _confidenceBadgeLabel(prediction),
             ),
             const SizedBox(height: 16),
@@ -1137,7 +1887,9 @@ class PredictionGroupCard extends StatelessWidget {
               children: [
                 _MetaChip(
                   icon: Icons.schedule,
-                  label: _formatTimeOnly(prediction.kickoffAt ?? prediction.releaseAt),
+                  label: _formatTimeOnly(
+                    prediction.kickoffAt ?? prediction.releaseAt,
+                  ),
                 ),
                 _MetaChip(
                   icon: _matchStatusIcon(prediction),
@@ -1164,6 +1916,19 @@ class PredictionGroupCard extends StatelessWidget {
                       data: primaryPick,
                     ),
             ),
+            if (canSelect) ...[
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton.tonalIcon(
+                  onPressed: onSelectionPressed,
+                  icon: Icon(
+                    isSelected ? Icons.check_circle : Icons.add_circle_outline,
+                  ),
+                  label: Text(isSelected ? 'Selected' : 'Select'),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -1232,10 +1997,7 @@ Widget _teamBadge({
           maxLines: 2,
           textAlign: TextAlign.center,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            fontWeight: FontWeight.w700,
-            height: 1.1,
-          ),
+          style: const TextStyle(fontWeight: FontWeight.w700, height: 1.1),
         ),
       ),
       if (scoreText != null) ...[
@@ -1296,10 +2058,7 @@ class _MatchHeader extends StatelessWidget {
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: const RadialGradient(
-                    colors: [
-                      Color(0xFF183B5B),
-                      Color(0xFF0E1E33),
-                    ],
+                    colors: [Color(0xFF183B5B), Color(0xFF0E1E33)],
                     radius: 0.95,
                   ),
                   border: Border.all(color: const Color(0xFF2D5A86)),
@@ -1489,7 +2248,9 @@ class _LockedPickGate extends StatelessWidget {
                       width: 18,
                       child: CircularProgressIndicator(
                         strokeWidth: 2.2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF07111F)),
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          Color(0xFF07111F),
+                        ),
                       ),
                     )
                   : const Text(
@@ -1505,10 +2266,7 @@ class _LockedPickGate extends StatelessWidget {
 }
 
 class _TinyVerdictChip extends StatelessWidget {
-  const _TinyVerdictChip({
-    required this.label,
-    required this.color,
-  });
+  const _TinyVerdictChip({required this.label, required this.color});
 
   final String label;
   final Color color;
@@ -1546,11 +2304,7 @@ String? _teamScoreLabel(String? currentGoals, String? fulltimeGoals) {
   return finalGoals.trim();
 }
 
-enum _PickVerdict {
-  pending,
-  correct,
-  wrong,
-}
+enum _PickVerdict { pending, correct, wrong }
 
 class _MiniStatusChip extends StatelessWidget {
   const _MiniStatusChip({
@@ -1614,8 +2368,12 @@ _PickVerdict _pickVerdict(PredictionRecord prediction) {
 
   final homeTeam = _normalizeText(prediction.homeTeamName ?? '');
   final awayTeam = _normalizeText(prediction.awayTeamName ?? '');
-  final homeGoals = _goalCount(prediction.fulltimeHomeGoals ?? prediction.currentHomeGoals);
-  final awayGoals = _goalCount(prediction.fulltimeAwayGoals ?? prediction.currentAwayGoals);
+  final homeGoals = _goalCount(
+    prediction.fulltimeHomeGoals ?? prediction.currentHomeGoals,
+  );
+  final awayGoals = _goalCount(
+    prediction.fulltimeAwayGoals ?? prediction.currentAwayGoals,
+  );
 
   if (selection.contains('btts')) {
     if (homeGoals == null || awayGoals == null) {
@@ -1704,17 +2462,11 @@ _OverUnderSelection? _parseOverUnderSelection(String selection) {
     return null;
   }
 
-  return _OverUnderSelection(
-    isOver: match.group(1) == 'over',
-    line: line,
-  );
+  return _OverUnderSelection(isOver: match.group(1) == 'over', line: line);
 }
 
 class _OverUnderSelection {
-  const _OverUnderSelection({
-    required this.isOver,
-    required this.line,
-  });
+  const _OverUnderSelection({required this.isOver, required this.line});
 
   final bool isOver;
   final double line;
@@ -1856,10 +2608,7 @@ class _EmptyState extends StatelessWidget {
           ),
           if (actionLabel != null && onAction != null) ...[
             const SizedBox(height: 16),
-            FilledButton(
-              onPressed: onAction,
-              child: Text(actionLabel!),
-            ),
+            FilledButton(onPressed: onAction, child: Text(actionLabel!)),
           ],
         ],
       ),
@@ -1889,7 +2638,10 @@ class _PickCardData {
   final Color? verdictColor;
 
   bool get hasContent =>
-      market != null || selection != null || confidence != null || reason != null;
+      market != null ||
+      selection != null ||
+      confidence != null ||
+      reason != null;
 
   factory _PickCardData.fromPick(
     String label,

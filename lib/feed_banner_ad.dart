@@ -5,7 +5,9 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'ad_config.dart';
 
 class FeedBannerAd extends StatefulWidget {
-  const FeedBannerAd({super.key});
+  const FeedBannerAd({super.key, this.enabled = true});
+
+  final bool enabled;
 
   @override
   State<FeedBannerAd> createState() => _FeedBannerAdState();
@@ -18,7 +20,9 @@ class _FeedBannerAdState extends State<FeedBannerAd> {
   double _bannerHeight = 60;
 
   bool get _supportsAds =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+      widget.enabled &&
+      !kIsWeb &&
+      defaultTargetPlatform == TargetPlatform.android;
 
   @override
   void didChangeDependencies() {
@@ -45,7 +49,8 @@ class _FeedBannerAdState extends State<FeedBannerAd> {
     _requestedWidth = width;
     _loading = true;
 
-    final adSize = await AdSize.getCurrentOrientationAnchoredAdaptiveBannerAdSize(width);
+    final adSize =
+        await AdSize.getCurrentOrientationAnchoredAdaptiveBannerAdSize(width);
     if (!mounted) {
       return;
     }
@@ -103,9 +108,7 @@ class _FeedBannerAdState extends State<FeedBannerAd> {
       width: double.infinity,
       height: _bannerHeight,
       child: DecoratedBox(
-        decoration: const BoxDecoration(
-          color: Color(0xFF0B1626),
-        ),
+        decoration: const BoxDecoration(color: Color(0xFF0B1626)),
         child: ad == null
             ? const SizedBox.shrink()
             : Align(

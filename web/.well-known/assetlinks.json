@@ -1,0 +1,15 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls",
+      "delegate_permission/common.get_login_creds"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.Aifootballprediction.app",
+      "sha256_cert_fingerprints": [
+        "98:92:67:E4:9F:2C:A7:3D:C3:4B:1E:42:1E:CA:1E:90:E9:CD:0B:22:B1:38:97:2C:48:E3:70:4A:1B:48:94:70"
+      ]
+    }
+  }
+]
