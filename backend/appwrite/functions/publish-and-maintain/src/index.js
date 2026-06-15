@@ -35,6 +35,84 @@ function buildAppwriteLogger(context) {
   return { log, error };
 }
 
+const NOTIFICATION_CALL_TO_ACTIONS = [
+  'Open the app now and check this one.',
+  'Tap in and see the latest high-confidence pick.',
+  'Check it now before kickoff starts.',
+  'Jump in now and review the new prediction.',
+  'Open the app and take a quick look.',
+  'See the pick now while it is fresh.',
+  'Tap to view this strong betting angle.',
+  'Check the app now for the full breakdown.',
+  'Open now and get the latest insight.',
+  'See why this one stands out right now.',
+  'Tap now and review the new market.',
+  'Jump to the app and catch this pick early.',
+  'Open the app and lock in the update.',
+  'Take a look now before the line moves.',
+  'Check this one out right now.',
+  'Open now and view the fresh prediction.',
+  'Tap in now and spot the edge.',
+  'Go to the app now and review the call.',
+  'See the latest read now.',
+  'Open the app and study this pick now.',
+  'Tap now and grab the update.',
+  'Check it immediately and stay ahead.',
+  'Open now and don’t miss this signal.',
+  'Tap to see what just landed.',
+  'Jump in now and review the model’s read.',
+  'Open the app now for the latest call.',
+  'Take a quick look now before it goes live.',
+  'Check this prediction now and stay ready.',
+  'Open now and see the new opportunity.',
+  'Tap in and inspect this one now.',
+  'See the update now and act fast.',
+  'Open the app now and review the angle.',
+  'Check now and keep ahead of kickoff.',
+  'Tap to see the fresh pick now.',
+  'Open now and view the latest edge.',
+  'Take a look and move quickly.',
+  'Check the latest prediction now.',
+  'Open the app and see the live call.',
+  'Tap in now and don’t miss the update.',
+  'See the new pick now and stay sharp.',
+  'Open now and review the strong signal.',
+  'Check it out now while it is hot.',
+  'Tap now and see the next move.',
+  'Open the app and inspect this read.',
+  'Jump in and see the latest value now.',
+  'Take a look now and stay ahead.',
+  'Open now and catch the fresh angle.',
+  'Tap to review the latest call.',
+  'See the pick now and keep moving.',
+  'Open the app now and follow the signal.',
+];
+
+function shouldSendPredictionNotification(confidence) {
+  return Number.isFinite(confidence) && confidence >= 0.85;
+}
+
+function selectNotificationCTA(seedValue) {
+  const seed = String(seedValue || '0');
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = (hash * 31 + seed.charCodeAt(index)) >>> 0;
+  }
+  return NOTIFICATION_CALL_TO_ACTIONS[hash % NOTIFICATION_CALL_TO_ACTIONS.length];
+}
+
+function buildNotificationCopy({ fixtureName, market, confidence, seedValue }) {
+  const cta = selectNotificationCTA(seedValue);
+  const marketName = String(market || 'prediction').trim();
+  const confidenceLabel = Number.isFinite(confidence)
+    ? `${Math.round(confidence * 100)}%`
+    : 'high';
+  const title = `High-confidence pick: ${marketName}`;
+  const body = `${cta} ${fixtureName ? `${fixtureName}: ` : ''}${marketName} is live with ${confidenceLabel} confidence.`;
+
+  return { title, body };
+}
+
 function isoNow() {
   return new Date().toISOString();
 }
@@ -341,6 +419,11 @@ async function publishPredictionRow({
   const now = isoNow();
   const primarySelection = typeof row.primary_selection === 'string' ? row.primary_selection.trim() : '';
   const primaryReason = typeof row.primary_reason === 'string' ? row.primary_reason.trim() : '';
+  const primaryConfidence = Number.isFinite(Number(row.primary_confidence))
+    ? Number(row.primary_confidence)
+    : Number.isFinite(Number(row.confidence))
+      ? Number(row.confidence)
+      : 0;
 
   if (typeof logFn === 'function') {
     logFn(JSON.stringify({
@@ -383,7 +466,7 @@ async function publishPredictionRow({
     updated_at: now,
   });
 
-  if (row.notification_sent) {
+  if (row.notification_sent || !shouldSendPredictionNotification(primaryConfidence)) {
     return { published: true, notified: false };
   }
 
@@ -398,15 +481,24 @@ async function publishPredictionRow({
       }));
     }
 
+    const notificationCopy = buildNotificationCopy({
+      fixtureName: `${row.home_team_name || 'Home'} vs ${row.away_team_name || 'Away'}`,
+      market: primarySelection,
+      confidence: primaryConfidence,
+      seedValue: row.fixture_api_id || row.$id || primarySelection,
+    });
+
     await messaging.createPush({
       messageId: ID.unique(),
-      title: 'New prediction is live',
-      body: primaryReason,
+      title: notificationCopy.title,
+      body: notificationCopy.body,
       topics: [topicId],
       data: {
         fixture_api_id: String(row.fixture_api_id || ''),
         prediction_id: row.$id,
         release_status: 'published',
+        market: primarySelection,
+        confidence: String(primaryConfidence),
       },
       draft: false,
     });

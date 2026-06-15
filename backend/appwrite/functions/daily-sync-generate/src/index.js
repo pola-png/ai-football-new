@@ -28,6 +28,84 @@ function buildAppwriteLogger(context) {
   return { log, error };
 }
 
+const NOTIFICATION_CALL_TO_ACTIONS = [
+  'Open the app now and check this one.',
+  'Tap in and see the latest high-confidence pick.',
+  'Check it now before kickoff starts.',
+  'Jump in now and review the new prediction.',
+  'Open the app and take a quick look.',
+  'See the pick now while it is fresh.',
+  'Tap to view this strong betting angle.',
+  'Check the app now for the full breakdown.',
+  'Open now and get the latest insight.',
+  'See why this one stands out right now.',
+  'Tap now and review the new market.',
+  'Jump to the app and catch this pick early.',
+  'Open the app and lock in the update.',
+  'Take a look now before the line moves.',
+  'Check this one out right now.',
+  'Open now and view the fresh prediction.',
+  'Tap in now and spot the edge.',
+  'Go to the app now and review the call.',
+  'See the latest read now.',
+  'Open the app and study this pick now.',
+  'Tap now and grab the update.',
+  'Check it immediately and stay ahead.',
+  'Open now and don’t miss this signal.',
+  'Tap to see what just landed.',
+  'Jump in now and review the model’s read.',
+  'Open the app now for the latest call.',
+  'Take a quick look now before it goes live.',
+  'Check this prediction now and stay ready.',
+  'Open now and see the new opportunity.',
+  'Tap in and inspect this one now.',
+  'See the update now and act fast.',
+  'Open the app now and review the angle.',
+  'Check now and keep ahead of kickoff.',
+  'Tap to see the fresh pick now.',
+  'Open now and view the latest edge.',
+  'Take a look and move quickly.',
+  'Check the latest prediction now.',
+  'Open the app and see the live call.',
+  'Tap in now and don’t miss the update.',
+  'See the new pick now and stay sharp.',
+  'Open now and review the strong signal.',
+  'Check it out now while it is hot.',
+  'Tap now and see the next move.',
+  'Open the app and inspect this read.',
+  'Jump in and see the latest value now.',
+  'Take a look now and stay ahead.',
+  'Open now and catch the fresh angle.',
+  'Tap to review the latest call.',
+  'See the pick now and keep moving.',
+  'Open the app now and follow the signal.',
+];
+
+function shouldSendPredictionNotification(confidence) {
+  return Number.isFinite(confidence) && confidence >= 0.85;
+}
+
+function selectNotificationCTA(seedValue) {
+  const seed = String(seedValue || '0');
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = (hash * 31 + seed.charCodeAt(index)) >>> 0;
+  }
+  return NOTIFICATION_CALL_TO_ACTIONS[hash % NOTIFICATION_CALL_TO_ACTIONS.length];
+}
+
+function buildNotificationCopy({ fixtureName, market, confidence, seedValue }) {
+  const cta = selectNotificationCTA(seedValue);
+  const marketName = String(market || 'prediction').trim();
+  const confidenceLabel = Number.isFinite(confidence)
+    ? `${Math.round(confidence * 100)}%`
+    : 'high';
+  const title = `High-confidence pick: ${marketName}`;
+  const body = `${cta} ${fixtureName ? `${fixtureName}: ` : ''}${marketName} is live with ${confidenceLabel} confidence.`;
+
+  return { title, body };
+}
+
 function buildApiFootballHeaders() {
   return {
     'x-apisports-key': required('API_FOOTBALL_KEY'),
@@ -340,9 +418,6 @@ async function saveFixtureH2HHistory({
   if (leagueId) {
     requestQuery.league = leagueId;
   }
-  if (season) {
-    requestQuery.season = season;
-  }
   requestQuery.last = '20';
 
   const requestUrl = buildApiFootballUrl('/fixtures/headtohead', requestQuery).toString();
@@ -624,6 +699,14 @@ function parseConcurrency(value) {
     return 1;
   }
   return Math.min(parsed, 10);
+}
+
+function parseMinimumH2hRows(value) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return 2;
+  }
+  return parsed;
 }
 
 async function runWithConcurrency(items, concurrency, handler) {
@@ -1046,7 +1129,7 @@ async function savePredictionAndMaybePublish({
     );
   }
 
-  if (!messaging || !topicId) {
+  if (!messaging || !topicId || !shouldSendPredictionNotification(primaryConfidence)) {
     return { saved: true, published: true, notified: false };
   }
 
@@ -1063,15 +1146,24 @@ async function savePredictionAndMaybePublish({
       );
     }
 
+    const notificationCopy = buildNotificationCopy({
+      fixtureName: `${fixture.home_team_name || 'Home'} vs ${fixture.away_team_name || 'Away'}`,
+      market: primarySelection,
+      confidence: primaryConfidence,
+      seedValue: fixtureApiId,
+    });
+
     await messaging.createPush({
       messageId: ID.unique(),
-      title: 'New prediction is live',
-      body: primaryReason,
+      title: notificationCopy.title,
+      body: notificationCopy.body,
       topics: [topicId],
       data: {
         fixture_api_id: fixtureApiId,
         prediction_id: `prediction_${fixtureApiId}`,
         release_status: 'published',
+        market: primarySelection,
+        confidence: String(primaryConfidence),
       },
       draft: false,
     });
@@ -1139,6 +1231,7 @@ async function generatePredictionsForBatch({
   let published = 0;
   let notified = 0;
   const concurrency = parseConcurrency(process.env.APPWRITE_PREDICTION_CONCURRENCY || 10);
+  const minimumH2hRows = parseMinimumH2hRows(process.env.H2H_MIN_ROWS || 2);
   const logger = typeof logFn === 'function' ? logFn : console.log;
 
   logger(
@@ -1218,15 +1311,17 @@ async function generatePredictionsForBatch({
         }
       }
 
-      if (workingH2hRows.length === 0) {
+      if (workingH2hRows.length < minimumH2hRows) {
         skipped += 1;
         logger(
           JSON.stringify({
             job: 'daily-sync-generate',
             fixture_api_id: fixtureApiId,
             stage: 'ai-skip',
-            reason: 'missing-h2h',
-            message: 'Skipping AI prediction because the fixture has no H2H data.',
+            reason: 'insufficient-h2h-history',
+            minimum_h2h_rows: minimumH2hRows,
+            h2h_rows: workingH2hRows.length,
+            message: 'Skipping AI prediction because the fixture does not have enough H2H data.',
           }),
         );
         return;
