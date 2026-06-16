@@ -107,8 +107,12 @@ function buildNotificationCopy({ fixtureName, market, confidence, seedValue }) {
   const confidenceLabel = Number.isFinite(confidence)
     ? `${Math.round(confidence * 100)}%`
     : 'high';
-  const title = `High-confidence pick: ${marketName}`;
-  const body = `${cta} ${fixtureName ? `${fixtureName}: ` : ''}${marketName} is live with ${confidenceLabel} confidence.`;
+  const title = marketName === 'prediction'
+    ? 'New prediction is live'
+    : `High-confidence pick: ${marketName}`;
+  const body = marketName === 'prediction'
+    ? `${cta} ${fixtureName || 'A prediction'} is live with ${confidenceLabel} confidence.`
+    : `${cta} ${fixtureName ? `${fixtureName}: ` : ''}${marketName} is live with ${confidenceLabel} confidence.`;
 
   return { title, body };
 }
@@ -230,18 +234,13 @@ function shouldPublishPrediction(row, now) {
     return false;
   }
 
-  const releaseAt = parseDate(row.release_at);
-  if (releaseAt && releaseAt.getTime() <= now.getTime()) {
-    return true;
-  }
-
   const kickoffAt = parseDate(row.kickoff_at);
   if (!kickoffAt) {
     return false;
   }
 
-  const fourHoursFromNow = new Date(now.getTime() + 4 * 60 * 60 * 1000);
-  return kickoffAt.getTime() <= fourHoursFromNow.getTime();
+  const eightHoursFromNow = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+  return kickoffAt.getTime() <= eightHoursFromNow.getTime();
 }
 
 function needsOutcomeRefresh(row, now) {
@@ -417,8 +416,6 @@ async function publishPredictionRow({
   logFn,
 }) {
   const now = isoNow();
-  const primarySelection = typeof row.primary_selection === 'string' ? row.primary_selection.trim() : '';
-  const primaryReason = typeof row.primary_reason === 'string' ? row.primary_reason.trim() : '';
   const primaryConfidence = Number.isFinite(Number(row.primary_confidence))
     ? Number(row.primary_confidence)
     : Number.isFinite(Number(row.confidence))
@@ -431,23 +428,10 @@ async function publishPredictionRow({
       fixture_api_id: row.fixture_api_id || null,
       prediction_id: row.$id || null,
       stage: 'publish-check',
-      primary_selection: primarySelection || null,
-      has_reason: Boolean(primaryReason),
+      primary_selection: typeof row.primary_selection === 'string' ? row.primary_selection.trim() : null,
+      has_reason: Boolean(row.primary_reason),
       notification_sent: Boolean(row.notification_sent),
     }));
-  }
-
-  if (!primarySelection || !primaryReason) {
-    if (typeof logFn === 'function') {
-      logFn(JSON.stringify({
-        job: 'publish-and-maintain',
-        fixture_api_id: row.fixture_api_id || null,
-        prediction_id: row.$id || null,
-        stage: 'publish-skip',
-        reason: 'missing-primary-selection-or-reason',
-      }));
-    }
-    return { published: false, skipped: true };
   }
 
   if (typeof logFn === 'function') {
@@ -483,9 +467,9 @@ async function publishPredictionRow({
 
     const notificationCopy = buildNotificationCopy({
       fixtureName: `${row.home_team_name || 'Home'} vs ${row.away_team_name || 'Away'}`,
-      market: primarySelection,
+      market: null,
       confidence: primaryConfidence,
-      seedValue: row.fixture_api_id || row.$id || primarySelection,
+      seedValue: row.fixture_api_id || row.$id || row.home_team_name || 'prediction',
     });
 
     await messaging.createPush({
@@ -497,7 +481,6 @@ async function publishPredictionRow({
         fixture_api_id: String(row.fixture_api_id || ''),
         prediction_id: row.$id,
         release_status: 'published',
-        market: primarySelection,
         confidence: String(primaryConfidence),
       },
       draft: false,

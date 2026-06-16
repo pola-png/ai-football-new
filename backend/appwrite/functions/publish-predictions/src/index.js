@@ -123,7 +123,7 @@ async function main() {
         await messaging.createPush({
           messageId: ID.unique(),
           title: 'New prediction is live',
-          body: row.prediction_text || 'Your football prediction is ready.',
+          body: 'Your football prediction is ready.',
           topics: [topicId],
           data: {
             fixture_api_id: String(row.fixture_api_id),
