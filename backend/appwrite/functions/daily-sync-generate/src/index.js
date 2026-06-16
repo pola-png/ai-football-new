@@ -1785,7 +1785,7 @@ export default async function main(context) {
     );
 
     const h2hFetchLimit = Number.parseInt(
-      process.env.H2H_FETCH_FIXTURE_LIMIT || String(Math.min(25, Math.max(1, syncedFixtures.length))),
+      process.env.H2H_FETCH_FIXTURE_LIMIT || String(Math.max(1, syncedFixtures.length)),
       10,
     );
     const h2hFetchResult = await fetchAndSaveH2HForFixtures({
