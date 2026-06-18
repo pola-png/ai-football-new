@@ -287,6 +287,75 @@ async function deleteAllRows(tablesdb, databaseId, tableId) {
   });
 }
 
+function toLagosDateKey(value) {
+  const parsed = parseFixtureKickoff(value);
+  if (!parsed) {
+    return null;
+  }
+
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Lagos',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(parsed);
+
+  const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${map.year}-${map.month}-${map.day}`;
+}
+
+async function deletePredictionRowsOutsideWindow(tablesdb, databaseId, predictionsTable, logger) {
+  const keepDates = new Set([lagosDate(-1), lagosDate(0), lagosDate(1)]);
+  const rows = await fetchAllRows(tablesdb, databaseId, predictionsTable, [
+    Query.orderAsc('kickoff_at'),
+  ]);
+  const rowsToDelete = rows.filter((row) => !keepDates.has(toLagosDateKey(row.kickoff_at)));
+  let deleted = 0;
+
+  if (typeof logger === 'function') {
+    logger(
+      JSON.stringify({
+        job: 'daily-sync-generate',
+        stage: 'prediction-cleanup-start',
+        total_predictions: rows.length,
+        keep_dates: [...keepDates],
+        delete_candidates: rowsToDelete.length,
+      }),
+    );
+  }
+
+  for (const row of rowsToDelete) {
+    if (!row?.$id) {
+      continue;
+    }
+
+    await tablesdb.deleteRow({
+      databaseId,
+      tableId: predictionsTable,
+      rowId: row.$id,
+    });
+    deleted += 1;
+  }
+
+  if (typeof logger === 'function') {
+    logger(
+      JSON.stringify({
+        job: 'daily-sync-generate',
+        stage: 'prediction-cleanup-complete',
+        total_predictions: rows.length,
+        deleted_predictions: deleted,
+        kept_dates: [...keepDates],
+      }),
+    );
+  }
+
+  return {
+    total: rows.length,
+    deleted,
+    keptDates: [...keepDates],
+  };
+}
+
 function pickTeam(team) {
   return {
     api_team_id: String(team.id),
@@ -1632,15 +1701,22 @@ export default async function main(context) {
     );
 
     if (fixtures.length === 0) {
+      const predictionsCleanup = await deletePredictionRowsOutsideWindow(
+        tablesdb,
+        databaseId,
+        predictionsTable,
+        appwriteLog,
+      );
+
       await createRun(tablesdb, databaseId, syncRunsTable, {
-        job_name: 'sync-fixtures',
+        job_name: 'cleanup-raw-fetch',
         sync_run_id: syncRunId,
         status: 'success',
         started_at: startedAt,
         finished_at: isoNow(),
         items_seen: '0',
         items_saved: '0',
-        message: `API-Football returned no fixtures for ${fetchDate}. Raw tables were not cleared.`,
+        message: `API-Football returned no fixtures for ${fetchDate}. Predictions were pruned to yesterday, today, and tomorrow.`,
         created_at: isoNow(),
         updated_at: isoNow(),
       });
@@ -1662,6 +1738,7 @@ export default async function main(context) {
           leagues: null,
           fixtures: null,
           h2h: null,
+          predictions: predictionsCleanup?.deleted ?? null,
         },
         items_seen: '0',
         items_saved: '0',
@@ -1670,6 +1747,7 @@ export default async function main(context) {
         notified: '0',
         h2h_fixtures_processed: '0',
         h2h_rows_saved: '0',
+        predictions_deleted: String(predictionsCleanup?.deleted ?? 0),
         sync_run_id: syncRunId,
       });
     }
@@ -1690,8 +1768,9 @@ export default async function main(context) {
       }),
     );
 
-    const [fixturesDelete] = await Promise.all([
+    const [fixturesDelete, predictionsCleanup] = await Promise.all([
       deleteAllRows(tablesdb, databaseId, fixturesTable),
+      deletePredictionRowsOutsideWindow(tablesdb, databaseId, predictionsTable, appwriteLog),
     ]);
 
     await createRun(tablesdb, databaseId, syncRunsTable, {
@@ -1702,7 +1781,7 @@ export default async function main(context) {
       finished_at: isoNow(),
       items_seen: '0',
       items_saved: '0',
-      message: 'Deleted existing fixtures before the next sync cycle. Preserved teams, leagues, and h2h history.',
+      message: `Deleted existing fixtures before the next sync cycle and pruned predictions outside ${predictionsCleanup.keptDates.join(', ')}. Preserved teams, leagues, and h2h history.`,
       created_at: isoNow(),
       updated_at: isoNow(),
     });
@@ -1864,6 +1943,7 @@ export default async function main(context) {
         ok: true,
         cleaned: {
           fixtures: fixturesDelete?.total ?? null,
+          predictions: predictionsCleanup?.deleted ?? null,
           teams: 0,
           leagues: 0,
           h2h: 0,
@@ -1876,6 +1956,7 @@ export default async function main(context) {
       notified: String(generationResult.notified),
       h2h_fixtures_processed: String(h2hFetchResult.h2hFetchedFixtures),
       h2h_rows_saved: String(h2hFetchResult.totalSaved),
+      predictions_deleted: String(predictionsCleanup?.deleted ?? 0),
       sync_run_id: syncRunId,
     });
   } catch (error) {

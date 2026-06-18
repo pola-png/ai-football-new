@@ -175,6 +175,10 @@ Suggested values for `release_status`:
 - `published`
 - `archived`
 
+Retention note:
+
+- The cleanup job should keep only prediction rows whose `kickoff_at` falls on yesterday, today, or tomorrow in `Africa/Lagos` time.
+
 ## `results`
 
 Stores final match outcomes after API-Football confirms the result.

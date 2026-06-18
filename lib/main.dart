@@ -827,21 +827,8 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
         final isAdmin = widget.isAdmin;
         final activePlan = billing.activePlan;
         final hasAccess = widget.adFree || isAdmin || activePlan != null;
-        final selectedPlan = isAdmin
-            ? (_selectedPlanOverride ??
-                  activePlan ??
-                  SubscriptionPlanId.premium)
-            : (_subscriptionFocusPlan != null &&
-                  billing.isOwned(_subscriptionFocusPlan!))
-            ? _subscriptionFocusPlan!
-            : (_selectedPlanOverride ??
-                  activePlan ??
-                  SubscriptionPlanId.premium);
-        final shouldShowHub =
-            !hasAccess ||
-            (_subscriptionFocusPlan != null &&
-                !isAdmin &&
-                !billing.isOwned(_subscriptionFocusPlan!));
+        final selectedPlan = _selectedPlanOverride ?? activePlan ?? SubscriptionPlanId.premium;
+        final headerTitle = activePlan == null ? selectedPlan.title : activePlan.title;
 
         return Container(
           decoration: BoxDecoration(
@@ -852,109 +839,133 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
             ),
           ),
           child: SafeArea(
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Premium Plans',
-                        style: TextStyle(
-                          color: _primaryText(context),
-                          fontSize: 28,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ),
-                    if (hasAccess)
-                      PopupMenuButton<SubscriptionPlanId>(
-                        tooltip: 'Switch plan',
-                        onSelected: (plan) {
-                          if (isAdmin || billing.isOwned(plan)) {
-                            setState(() {
-                              _selectedPlanOverride = plan;
-                              _subscriptionFocusPlan = null;
-                            });
-                            return;
-                          }
-
-                          setState(() {
-                            _subscriptionFocusPlan = plan;
-                          });
-                        },
-                        itemBuilder: (context) {
-                          return widget.currentPlans.map((plan) {
-                            final owned = isAdmin || billing.isOwned(plan);
-                            return PopupMenuItem<SubscriptionPlanId>(
-                              value: plan,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    owned
-                                        ? Icons.verified
-                                        : Icons.workspace_premium_outlined,
-                                    size: 18,
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(child: Text(plan.title)),
-                                ],
+            child: hasAccess
+                ? Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 10),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                headerTitle,
+                                style: TextStyle(
+                                  color: _primaryText(context),
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.w900,
+                                ),
                               ),
-                            );
-                          }).toList();
-                        },
-                        child: Icon(
-                          Icons.menu_open,
-                          color: _accentText(context),
+                            ),
+                            PopupMenuButton<SubscriptionPlanId>(
+                              tooltip: 'Switch plan',
+                              onSelected: (plan) {
+                                if (isAdmin || billing.isOwned(plan)) {
+                                  setState(() {
+                                    _selectedPlanOverride = plan;
+                                    _subscriptionFocusPlan = null;
+                                  });
+                                }
+                              },
+                              itemBuilder: (context) {
+                                return widget.currentPlans.map((plan) {
+                                  final owned = isAdmin || billing.isOwned(plan);
+                                  return PopupMenuItem<SubscriptionPlanId>(
+                                    value: plan,
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          owned
+                                              ? Icons.verified
+                                              : Icons.workspace_premium_outlined,
+                                          size: 18,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(child: Text(plan.title)),
+                                      ],
+                                    ),
+                                  );
+                                }).toList();
+                              },
+                              child: Icon(
+                                Icons.menu_open,
+                                color: _accentText(context),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  !hasAccess
-                      ? 'Choose a plan to subscribe. Each plan opens its own dedicated prediction screen after activation.'
-                      : shouldShowHub
-                      ? 'Select a plan from the menu to switch or subscribe to another plan.'
-                      : 'Your account is unlocked. Open your dedicated plan screen below.',
-                  style: TextStyle(
-                    color: _secondaryText(context),
-                    fontSize: 14,
-                    height: 1.5,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                if (shouldShowHub)
-                  _SubscriptionHub(
-                    plans: widget.currentPlans,
-                    billing: billing,
-                    focusPlan: _subscriptionFocusPlan,
-                    onBuyPlan: (plan) => _buyPlan(context, plan),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: Text(
+                          'Accuracy: ${_planConfidenceLabel(selectedPlan)}',
+                          style: TextStyle(
+                            color: _secondaryText(context),
+                            fontSize: 14,
+                            height: 1.5,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Expanded(
+                        child: _DedicatedPlanScreen(
+                          plan: selectedPlan,
+                          billing: billing,
+                          futurePredictions: _futurePredictions,
+                          isAdmin: isAdmin,
+                          onRefresh: _reload,
+                          plans: widget.currentPlans,
+                          showSummaryCard: false,
+                          onSelectPlan: (plan) {
+                            if (isAdmin || billing.isOwned(plan)) {
+                              setState(() {
+                                _selectedPlanOverride = plan;
+                                _subscriptionFocusPlan = null;
+                              });
+                            }
+                          },
+                        ),
+                      ),
+                    ],
                   )
-                else ...[
-                  _DedicatedPlanScreen(
-                    plan: selectedPlan,
-                    billing: billing,
-                    futurePredictions: _futurePredictions,
-                    isAdmin: isAdmin,
-                    onRefresh: _reload,
-                    plans: widget.currentPlans,
-                    onSelectPlan: (plan) {
-                      if (isAdmin || billing.isOwned(plan)) {
-                        setState(() {
-                          _selectedPlanOverride = plan;
-                          _subscriptionFocusPlan = null;
-                        });
-                      } else {
-                        setState(() {
-                          _subscriptionFocusPlan = plan;
-                        });
-                      }
-                    },
+                : SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Premium Plans',
+                                style: TextStyle(
+                                  color: _primaryText(context),
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Choose a plan to subscribe. Each plan opens its own dedicated prediction screen after activation.',
+                          style: TextStyle(
+                            color: _secondaryText(context),
+                            fontSize: 14,
+                            height: 1.5,
+                          ),
+                        ),
+                        const SizedBox(height: 18),
+                        _SubscriptionHub(
+                          plans: widget.currentPlans,
+                          billing: billing,
+                          focusPlan: _subscriptionFocusPlan,
+                          onBuyPlan: (plan) => _buyPlan(context, plan),
+                        ),
+                      ],
+                    ),
                   ),
-                ],
-              ],
-            ),
           ),
         );
       },
@@ -977,35 +988,38 @@ class _SubscriptionHub extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
+        return AnimatedBuilder(
       animation: billing,
       builder: (context, _) {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            ...plans.map((plan) {
-              final product = billing.productFor(plan);
-              final price = product?.price ?? plan.fallbackPrice;
-              final isOwned = billing.isOwned(plan);
-              final isFocused = plan == focusPlan;
+            for (var index = 0; index < plans.length; index++) ...[
+              if (index > 0) const SizedBox(height: 14),
+              Builder(
+                builder: (context) {
+                  final plan = plans[index];
+                  final product = billing.productFor(plan);
+                  final price = product?.price ?? plan.fallbackPrice;
+                  final isOwned = billing.isOwned(plan);
+                  final isFocused = plan == focusPlan;
 
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 14),
-                child: _SubscriptionPlanCard(
-                  title: plan.title,
-                  price: price,
-                  subtitle: 'Accuracy: ${_planConfidenceLabel(plan)}',
-                  highlight: isOwned || isFocused,
-                  featureLines: const [
-                    'Remove all ads',
-                    'Unlock a cleaner experience',
-                    'Dedicated prediction screen',
-                  ],
-                  buttonLabel: isOwned ? 'Active' : 'Subscribe',
-                  onPressed: isOwned ? null : () => onBuyPlan(plan),
-                ),
-              );
-            }),
+                  return _SubscriptionPlanCard(
+                    title: plan.title,
+                    price: isOwned ? 'Active' : price,
+                    subtitle: 'Accuracy: ${_planConfidenceLabel(plan)}',
+                    highlight: isOwned || isFocused,
+                    featureLines: const [
+                      'Remove all ads',
+                      'Unlock a cleaner experience',
+                      'Dedicated prediction screen',
+                    ],
+                    buttonLabel: isOwned ? 'Active' : 'Subscribe',
+                    onPressed: isOwned ? null : () => onBuyPlan(plan),
+                  );
+                },
+              ),
+            ],
             if (!billing.isAvailable) ...[
               const SizedBox(height: 4),
               _planNotice(
@@ -1036,7 +1050,7 @@ class _SubscriptionHub extends StatelessWidget {
   }
 }
 
-class _DedicatedPlanScreen extends StatelessWidget {
+class _DedicatedPlanScreen extends StatefulWidget {
   const _DedicatedPlanScreen({
     required this.plan,
     required this.billing,
@@ -1044,6 +1058,7 @@ class _DedicatedPlanScreen extends StatelessWidget {
     required this.isAdmin,
     required this.onRefresh,
     required this.plans,
+    required this.showSummaryCard,
     required this.onSelectPlan,
   });
 
@@ -1053,176 +1068,106 @@ class _DedicatedPlanScreen extends StatelessWidget {
   final bool isAdmin;
   final Future<void> Function() onRefresh;
   final List<SubscriptionPlanId> plans;
+  final bool showSummaryCard;
   final void Function(SubscriptionPlanId plan) onSelectPlan;
 
   @override
+  State<_DedicatedPlanScreen> createState() => _DedicatedPlanScreenState();
+}
+
+class _DedicatedPlanScreenState extends State<_DedicatedPlanScreen> {
+  final Set<String> _expandedSectionKeys = <String>{};
+
+  void _toggleSection(String key) {
+    setState(() {
+      if (_expandedSectionKeys.contains(key)) {
+        _expandedSectionKeys.remove(key);
+      } else {
+        _expandedSectionKeys.add(key);
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final product = billing.productFor(plan);
-    final price = product?.price ?? plan.fallbackPrice;
-    final hasAccess = isAdmin || billing.isOwned(plan);
-    final surface = _screenSurface(context, elevated: true);
-    final border = _screenBorder(context);
     final primaryText = _primaryText(context);
     final secondaryText = _secondaryText(context);
     final accentText = _accentText(context);
 
     return FutureBuilder<List<PredictionRecord>>(
-      future: futurePredictions,
+      future: widget.futurePredictions,
       builder: (context, snapshot) {
         final predictions = snapshot.data ?? const <PredictionRecord>[];
         final filteredPredictions = predictions
-            .where((prediction) => _predictionMatchesPlan(prediction, plan))
+            .where((prediction) => _predictionMatchesPlan(prediction, widget.plan))
             .toList();
 
         return RefreshIndicator(
-          onRefresh: onRefresh,
+          onRefresh: widget.onRefresh,
           color: const Color(0xFF00D4AA),
           child: ListView(
-            shrinkWrap: true,
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: EdgeInsets.zero,
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
             children: [
-              Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: surface,
-                  borderRadius: BorderRadius.circular(22),
-                  border: Border.all(
-                    color: hasAccess ? const Color(0xFF00D4AA) : border,
+              if (widget.showSummaryCard) ...[
+                Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: _screenSurface(context, elevated: true),
+                    borderRadius: BorderRadius.circular(22),
+                    border: Border.all(color: _screenBorder(context)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              widget.plan.title,
+                              style: TextStyle(
+                                color: primaryText,
+                                fontSize: 22,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                          PopupMenuButton<SubscriptionPlanId>(
+                            tooltip: 'Switch plan',
+                            onSelected: widget.onSelectPlan,
+                            itemBuilder: (context) => widget.plans
+                                .map(
+                                  (item) => PopupMenuItem<SubscriptionPlanId>(
+                                    value: item,
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          item == widget.plan
+                                              ? Icons.check_circle
+                                              : Icons.swap_horiz,
+                                          size: 18,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(child: Text(item.title)),
+                                      ],
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                            child: Icon(Icons.more_vert, color: accentText),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Accuracy: ${_planConfidenceLabel(widget.plan)}',
+                        style: TextStyle(color: secondaryText, fontSize: 13),
+                      ),
+                    ],
                   ),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            plan.title,
-                            style: TextStyle(
-                              color: primaryText,
-                              fontSize: 22,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                        ),
-                        PopupMenuButton<SubscriptionPlanId>(
-                          tooltip: 'Switch plan',
-                          onSelected: onSelectPlan,
-                          itemBuilder: (context) => plans
-                              .map(
-                                (item) => PopupMenuItem<SubscriptionPlanId>(
-                                  value: item,
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        item == plan
-                                            ? Icons.check_circle
-                                            : Icons.swap_horiz,
-                                        size: 18,
-                                      ),
-                                      const SizedBox(width: 10),
-                                      Expanded(child: Text(item.title)),
-                                    ],
-                                  ),
-                                ),
-                              )
-                              .toList(),
-                          child: Icon(Icons.more_vert, color: accentText),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      hasAccess
-                          ? 'Accuracy: ${_planConfidenceLabel(plan)}'
-                          : 'This plan is locked.',
-                      style: TextStyle(color: secondaryText, fontSize: 13),
-                    ),
-                    const SizedBox(height: 14),
-                    Row(
-                      children: [
-                        Text(
-                          price,
-                          style: TextStyle(
-                            color: accentText,
-                            fontSize: 22,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                        const Spacer(),
-                        if (hasAccess)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF00D4AA).withAlpha(28),
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Text(
-                              'Active',
-                              style: TextStyle(
-                                color: accentText,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          )
-                        else
-                          FilledButton(
-                            onPressed: null,
-                            child: const Text('Subscribe'),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    ...const [
-                      'Remove all ads',
-                      'Unlock a cleaner experience',
-                      'Dedicated prediction screen',
-                    ].map(
-                      (line) => Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
-                        child: Row(
-                          children: [
-                            const Icon(
-                              Icons.check_circle,
-                              size: 16,
-                              color: Color(0xFF00D4AA),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                line,
-                                style: TextStyle(
-                                  color: primaryText,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 18),
-              Text(
-                '${plan.title} predictions',
-                style: TextStyle(
-                  color: primaryText,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Showing ${_planConfidenceLabel(plan)} picks only.',
-                style: TextStyle(color: secondaryText, fontSize: 13),
-              ),
-              const SizedBox(height: 12),
+                const SizedBox(height: 18),
+              ],
               if (snapshot.connectionState == ConnectionState.waiting &&
                   predictions.isEmpty)
                 const Padding(
@@ -1240,10 +1185,14 @@ class _DedicatedPlanScreen extends StatelessWidget {
                   context,
                   title: 'No predictions in this band',
                   body:
-                      'There are no published picks that match ${_planConfidenceLabel(plan)} right now.',
+                      'There are no published picks that match ${_planConfidenceLabel(widget.plan)} right now.',
                 )
               else
-                ..._buildPlanPredictionWidgets(filteredPredictions),
+                ..._buildPlanPredictionWidgets(
+                  filteredPredictions,
+                  _expandedSectionKeys,
+                  _toggleSection,
+                ),
             ],
           ),
         );
@@ -1268,6 +1217,7 @@ class PickedMatchesPage extends StatelessWidget {
     final surface = _screenSurface(context);
     final border = _screenBorder(context);
     final headerSurface = _screenSurface(context, elevated: true);
+    final screenWidth = MediaQuery.sizeOf(context).width;
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -1278,135 +1228,158 @@ class PickedMatchesPage extends StatelessWidget {
       ),
       child: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          padding: const EdgeInsets.fromLTRB(0, 12, 0, 20),
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Picked Matches',
-                    style: TextStyle(
-                      color: _primaryText(context),
-                      fontSize: 28,
-                      fontWeight: FontWeight.w900,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Picked Matches',
+                      style: TextStyle(
+                        color: _primaryText(context),
+                        fontSize: 28,
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
                   ),
-                ),
-                if (onClearAll != null)
-                  TextButton.icon(
-                    onPressed: onClearAll,
-                    icon: const Icon(Icons.delete_outline),
-                    label: const Text('Clear'),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'All selected matches are arranged below in table form.',
-              style: TextStyle(
-                color: _secondaryText(context),
-                fontSize: 14,
-                height: 1.5,
+                  if (onClearAll != null)
+                    TextButton.icon(
+                      onPressed: onClearAll,
+                      icon: const Icon(Icons.delete_outline),
+                      label: const Text('Clear'),
+                    ),
+                ],
               ),
             ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Text(
+                'All selected matches are arranged below in table form.',
+                style: TextStyle(
+                  color: _secondaryText(context),
+                  fontSize: 13,
+                  height: 1.4,
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
             if (selectedPredictions.isEmpty)
-              _EmptyState(
-                icon: Icons.fact_check_outlined,
-                title: 'No picked matches yet',
-                message: 'Select an unlocked match from Home to see it here.',
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: _EmptyState(
+                  icon: Icons.fact_check_outlined,
+                  title: 'No picked matches yet',
+                  message: 'Select an unlocked match from Home to see it here.',
+                ),
               )
             else
-              Container(
-                decoration: BoxDecoration(
-                  color: surface,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: border),
-                ),
-                padding: const EdgeInsets.all(12),
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 0),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: surface,
+                    borderRadius: BorderRadius.zero,
+                    border: Border.symmetric(
+                      vertical: BorderSide(color: border),
+                    ),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 8),
                   child: DataTable(
-                    headingRowColor: WidgetStatePropertyAll(headerSurface),
-                    dataRowColor: WidgetStatePropertyAll(surface),
-                    columns: [
-                      DataColumn(
-                        label: Text(
-                          'Match',
-                          style: TextStyle(color: primaryText),
-                        ),
-                      ),
-                      DataColumn(
-                        label: Text(
-                          'Time',
-                          style: TextStyle(color: primaryText),
-                        ),
-                      ),
-                      DataColumn(
-                        label: Text(
-                          'Confidence',
-                          style: TextStyle(color: primaryText),
-                        ),
-                      ),
-                      DataColumn(
-                        label: Text(
-                          'Selection',
-                          style: TextStyle(color: primaryText),
-                        ),
-                      ),
-                      DataColumn(
-                        label: Text(
-                          'Status',
-                          style: TextStyle(color: primaryText),
-                        ),
-                      ),
-                    ],
-                    rows: selectedPredictions.map((prediction) {
-                      return DataRow(
-                        cells: [
-                          DataCell(
-                            Text(
-                              '${prediction.homeTeamName ?? 'Home'} vs ${prediction.awayTeamName ?? 'Away'}',
-                              style: TextStyle(color: primaryText),
+                        columnSpacing: 8,
+                        horizontalMargin: 12,
+                        headingRowHeight: 38,
+                        dataRowMinHeight: 40,
+                        dataRowMaxHeight: 56,
+                        headingRowColor: WidgetStatePropertyAll(headerSurface),
+                        dataRowColor: WidgetStatePropertyAll(surface),
+                        columns: [
+                          DataColumn(
+                            label: Text(
+                              'Time',
+                              style: TextStyle(color: primaryText, fontSize: 11, fontWeight: FontWeight.w700),
                             ),
                           ),
-                          DataCell(
-                            Text(
-                              _formatTimeOnly(
-                                prediction.kickoffAt ?? prediction.releaseAt,
-                              ),
-                              style: TextStyle(color: primaryText),
+                          DataColumn(
+                            label: Text(
+                              'Match',
+                              style: TextStyle(color: primaryText, fontSize: 11, fontWeight: FontWeight.w700),
                             ),
                           ),
-                          DataCell(
-                            Text(
-                              _confidenceBadgeLabel(prediction).toUpperCase(),
-                              style: TextStyle(color: primaryText),
+                          DataColumn(
+                            label: Text(
+                              'Conf',
+                              style: TextStyle(color: primaryText, fontSize: 11, fontWeight: FontWeight.w700),
                             ),
                           ),
-                          DataCell(
-                            Text(
-                              finalSelection(
-                                _PickCardData.fromPick(
-                                  'Primary pick',
-                                  prediction.primaryPick,
-                                  const Color(0xFF00D4AA),
-                                  prediction,
-                                ),
-                              ),
-                              style: TextStyle(color: primaryText),
-                            ),
-                          ),
-                          DataCell(
-                            Text(
-                              _matchStatusLabel(prediction),
-                              style: TextStyle(color: primaryText),
+                          DataColumn(
+                            label: Text(
+                              'Pick',
+                              style: TextStyle(color: primaryText, fontSize: 11, fontWeight: FontWeight.w700),
                             ),
                           ),
                         ],
-                      );
-                    }).toList(),
-                  ),
+                        rows: selectedPredictions.map((prediction) {
+                          final cellStyle = TextStyle(
+                            color: primaryText,
+                            fontSize: 11,
+                            height: 1.2,
+                          );
+                          return DataRow(
+                            cells: [
+                              DataCell(
+                                Text(
+                                  _formatTimeOnly(
+                                    prediction.kickoffAt ?? prediction.releaseAt,
+                                  ),
+                                  style: cellStyle,
+                                ),
+                              ),
+                              DataCell(
+                                ConstrainedBox(
+                                  constraints: BoxConstraints(
+                                    maxWidth: screenWidth * 0.28,
+                                  ),
+                                  child: Text(
+                                    '${prediction.homeTeamName ?? 'Home'} v ${prediction.awayTeamName ?? 'Away'}',
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: cellStyle,
+                                  ),
+                                ),
+                              ),
+                              DataCell(
+                                Text(
+                                  _confidenceBadgeLabel(prediction)[0].toUpperCase(),
+                                  style: cellStyle,
+                                ),
+                              ),
+                              DataCell(
+                                ConstrainedBox(
+                                  constraints: BoxConstraints(
+                                    maxWidth: screenWidth * 0.26,
+                                  ),
+                                  child: Text(
+                                    finalSelection(
+                                      _PickCardData.fromPick(
+                                        'Primary pick',
+                                        prediction.primaryPick,
+                                        const Color(0xFF00D4AA),
+                                        prediction,
+                                      ),
+                                    ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: cellStyle,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          );
+                        }).toList(),
+                      ),
                 ),
               ),
           ],
@@ -1486,48 +1459,39 @@ class _SelectedMatchesBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final surface = _screenSurface(context);
     final border = _screenBorder(context);
-    final primaryText = _primaryText(context);
-    final accentText = _accentText(context);
     return Material(
       color: surface,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          border: Border(top: BorderSide(color: border)),
-        ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
         child: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
           children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: const Color(0xFF00D4AA).withAlpha(36),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                '$count selected',
-                style: TextStyle(
-                  color: accentText,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w800,
+            TextButton(
+              onPressed: onClear,
+              child: const Text('Clear'),
+            ),
+            const SizedBox(width: 10),
+            InkWell(
+              onTap: onOpenPicked,
+              borderRadius: BorderRadius.circular(999),
+              child: Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF00D4AA),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: border),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  '$count',
+                  style: TextStyle(
+                    color: const Color(0xFF07111F),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'Selected matches are ready to save.',
-                style: TextStyle(
-                  color: primaryText.withAlpha(220),
-                  fontSize: 13,
-                ),
-              ),
-            ),
-            TextButton(onPressed: onClear, child: const Text('Clear')),
-            FilledButton.icon(
-              onPressed: onOpenPicked,
-              icon: const Icon(Icons.arrow_forward),
-              label: const Text('Picked'),
             ),
           ],
         ),
@@ -1587,8 +1551,8 @@ class _SubscriptionPlanCard extends StatelessWidget {
               Text(
                 price,
                 style: TextStyle(
-                  color: accentText,
-                  fontSize: 22,
+                  color: price == 'Active' ? const Color(0xFF00D4AA) : accentText,
+                  fontSize: price == 'Active' ? 18 : 22,
                   fontWeight: FontWeight.w900,
                 ),
               ),
@@ -1903,10 +1867,16 @@ class _PolicyPageStatefulState extends State<_PolicyPageStateful> {
                   shape: BoxShape.circle,
                   border: Border.all(color: border),
                 ),
-                child: Icon(
-                  Icons.admin_panel_settings,
-                  size: 18,
-                  color: accentText,
+                child: Center(
+                  child: Text(
+                    'thgir llA',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: accentText.withAlpha(150),
+                      fontSize: 8,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -2044,7 +2014,7 @@ List<Widget> _buildGroupedPredictionWidgets(
       continue;
     }
 
-    widgets.add(const SizedBox(height: 12));
+    widgets.add(SizedBox(height: isTodaySection ? 8 : 12));
 
     if (isTodaySection) {
       widgets.addAll(
@@ -2139,7 +2109,7 @@ List<Widget> _buildTodayStatusWidgets(
       ),
     ),
   );
-  widgets.add(const SizedBox(height: 14));
+  widgets.add(const SizedBox(height: 10));
 
   if (selectedItems.isEmpty) {
     widgets.add(
@@ -2186,13 +2156,19 @@ List<Widget> _buildTodayStatusWidgets(
   return widgets;
 }
 
-List<Widget> _buildPlanPredictionWidgets(List<PredictionRecord> predictions) {
+List<Widget> _buildPlanPredictionWidgets(
+  List<PredictionRecord> predictions,
+  Set<String> expandedSectionKeys,
+  void Function(String key) onToggleSection,
+) {
   final sections = _groupPredictionsByDate(predictions);
   final widgets = <Widget>[];
-  const horizontalPadding = EdgeInsets.symmetric(horizontal: 0);
 
   for (var sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
     final section = sections[sectionIndex];
+    final isTodaySection = section.label == 'Today';
+    final isExpanded =
+        isTodaySection || expandedSectionKeys.contains(section.keyValue);
     if (sectionIndex > 0) {
       widgets.add(const SizedBox(height: 20));
     }
@@ -2201,18 +2177,22 @@ List<Widget> _buildPlanPredictionWidgets(List<PredictionRecord> predictions) {
       _DateSectionHeader(
         label: section.label,
         count: section.predictions.length,
-        isExpanded: true,
-        canToggle: false,
-        onTap: () {},
+        isExpanded: isExpanded,
+        canToggle: !isTodaySection,
+        onTap: () => onToggleSection(section.keyValue),
       ),
     );
+    if (!isExpanded) {
+      continue;
+    }
+
     widgets.add(const SizedBox(height: 12));
 
     for (var i = 0; i < section.predictions.length; i++) {
       final prediction = section.predictions[i];
       widgets.add(
         Padding(
-          padding: horizontalPadding,
+          padding: const EdgeInsets.symmetric(horizontal: 0),
           child: PredictionGroupCard(
             prediction: prediction,
             isLocked: false,
@@ -2350,7 +2330,7 @@ class _TodayCategorySelector extends StatelessWidget {
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 180),
             curve: Curves.easeOut,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             margin: const EdgeInsets.only(right: 8),
             decoration: BoxDecoration(
               color: isSelected ? const Color(0xFF00D4AA) : surface,
@@ -3633,8 +3613,7 @@ bool _predictionMatchesPlan(
   return switch (plan) {
     SubscriptionPlanId.basic => confidence == 85,
     SubscriptionPlanId.standard => confidence >= 85 && confidence <= 87,
-    SubscriptionPlanId.premium =>
-      confidenceExact >= 88.0 && confidenceExact <= 99.99,
+    SubscriptionPlanId.premium => confidenceExact >= 88.0 && confidenceExact <= 99.99,
   };
 }
 

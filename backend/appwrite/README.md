@@ -91,6 +91,7 @@ Do not deploy `sync-fixtures`, `generate-predictions`, `publish-predictions`, or
 `daily-sync-generate` is responsible for:
 
 - deleting old raw rows first
+- keeping only prediction rows for yesterday, today, and tomorrow
 - fetching upcoming matches
 - saving or updating teams
 - saving or updating leagues

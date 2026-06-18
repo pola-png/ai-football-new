@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AdminAccessService extends ChangeNotifier {
@@ -33,13 +34,17 @@ class AdminAccessService extends ChangeNotifier {
 
     _isAdmin = true;
     await _preferences?.setBool(_adminAccessKey, true);
-    notifyListeners();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      notifyListeners();
+    });
     return true;
   }
 
   Future<void> revoke() async {
     _isAdmin = false;
     await _preferences?.setBool(_adminAccessKey, false);
-    notifyListeners();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      notifyListeners();
+    });
   }
 }

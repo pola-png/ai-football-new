@@ -360,8 +360,7 @@ DateTime? _asDateTime(Object? value) {
 
 bool _hasRenderablePrimaryPick(PredictionRecord prediction) {
   final selection = prediction.primaryPick?.selection?.trim() ?? '';
-  final reason = prediction.primaryPick?.reason?.trim() ?? '';
-  return selection.isNotEmpty && reason.isNotEmpty;
+  return selection.isNotEmpty;
 }
 
 int _comparePredictionsForDisplay(
