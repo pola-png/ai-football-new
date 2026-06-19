@@ -227,6 +227,7 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
   final Map<String, PredictionRecord> _selectedPredictions =
       <String, PredictionRecord>{};
   int _currentIndex = 0;
+  bool _adFreeUpsellShown = false;
 
   List<PredictionRecord> get _selectedItems {
     final items = _selectedPredictions.values.toList();
@@ -273,6 +274,157 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
     _setIndex(2);
   }
 
+  void _maybeShowAdFreeUpsell(bool adFree) {
+    if (adFree || _adFreeUpsellShown) {
+      return;
+    }
+
+    _adFreeUpsellShown = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) {
+        return;
+      }
+
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (sheetContext) {
+          final primaryText = _primaryText(sheetContext);
+          final secondaryText = _secondaryText(sheetContext);
+          final surface = _screenSurface(sheetContext, elevated: true);
+          final border = _screenBorder(sheetContext);
+          final accentText = _accentText(sheetContext);
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: _isDarkContext(sheetContext)
+                      ? const [
+                          Color(0xFF07111F),
+                          Color(0xFF0E2238),
+                          Color(0xFF163B57),
+                        ]
+                      : const [
+                          Color(0xFFFDFEFF),
+                          Color(0xFFEAF5FF),
+                          Color(0xFFDCEEFF),
+                        ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(32),
+                border: Border.all(color: border),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x26000000),
+                    blurRadius: 28,
+                    offset: Offset(0, 18),
+                  ),
+                ],
+              ),
+              child: SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.all(22),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF00D4AA).withAlpha(28),
+                              borderRadius: BorderRadius.circular(18),
+                            ),
+                            child: Icon(
+                              Icons.workspace_premium,
+                              color: accentText,
+                              size: 28,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Text(
+                              'Go ad free for 7 days',
+                              style: TextStyle(
+                                color: primaryText,
+                                fontSize: 22,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      Text(
+                        'Unlock a cleaner experience, keep the app flowing, and remove banner interruptions for a full week.',
+                        style: TextStyle(
+                          color: secondaryText,
+                          fontSize: 14,
+                          height: 1.5,
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: surface,
+                          borderRadius: BorderRadius.circular(22),
+                          border: Border.all(color: border),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: const [
+                            _PlanBenefitLine(text: '7-day ad-free access'),
+                            SizedBox(height: 10),
+                            _PlanBenefitLine(text: 'Fresh, distraction-free layout'),
+                            SizedBox(height: 10),
+                            _PlanBenefitLine(text: 'Perfect short-term upgrade'),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: FilledButton(
+                              onPressed: () {
+                                Navigator.of(sheetContext).pop();
+                                _setIndex(1);
+                              },
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF00D4AA),
+                                foregroundColor: const Color(0xFF07111F),
+                                padding: const EdgeInsets.symmetric(vertical: 15),
+                              ),
+                              child: const Text(
+                                'See plans',
+                                style: TextStyle(fontWeight: FontWeight.w900),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          TextButton(
+                            onPressed: () => Navigator.of(sheetContext).pop(),
+                            child: const Text('Maybe later'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -284,14 +436,17 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
             final isAdmin = AdminAccessService.instance.isAdmin;
             final adFree =
                 GooglePlayBillingService.instance.hasAdFreeAccess || isAdmin;
+            final rewardedAdFree =
+                GooglePlayBillingService.instance.hasRewardedAdFreeAccess || isAdmin;
             final activePlan = GooglePlayBillingService.instance.activePlan;
+            _maybeShowAdFreeUpsell(adFree);
 
             return Scaffold(
               body: IndexedStack(
                 index: _currentIndex,
                 children: [
                   _PredictionHomeTab(
-                    adFree: adFree,
+                    adFree: rewardedAdFree,
                     isAdmin: isAdmin,
                     isPremiumUser:
                         activePlan == SubscriptionPlanId.premium || isAdmin,
@@ -590,6 +745,60 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
                       ),
                     ),
                     actions: [
+                      Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          IconButton(
+                            tooltip: 'Search',
+                            onPressed: () async {
+                              final result = await showGeneralDialog<_SearchResult>(
+                                context: context,
+                                barrierDismissible: true,
+                                barrierLabel: 'Search',
+                                barrierColor: Colors.black54,
+                                transitionDuration: const Duration(milliseconds: 220),
+                                transitionBuilder: (ctx, anim, _, child) {
+                                  return SlideTransition(
+                                    position: Tween<Offset>(
+                                      begin: const Offset(0, -1),
+                                      end: Offset.zero,
+                                    ).animate(CurvedAnimation(
+                                      parent: anim,
+                                      curve: Curves.easeOut,
+                                    )),
+                                    child: child,
+                                  );
+                                },
+                                pageBuilder: (ctx, _, __) => _SearchModal(
+                                  initialQuery: _searchQuery,
+                                  initialFilter: _confidenceFilter,
+                                ),
+                              );
+                              if (result != null) {
+                                setState(() {
+                                  _searchQuery = result.query;
+                                  _confidenceFilter = result.filter;
+                                });
+                              }
+                            },
+                            icon: const Icon(Icons.search),
+                            color: _accentText(context),
+                          ),
+                          if (_searchQuery.isNotEmpty)
+                            Positioned(
+                              top: 10,
+                              right: 10,
+                              child: Container(
+                                width: 8,
+                                height: 8,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF00D4AA),
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
                       Padding(
                         padding: const EdgeInsets.only(right: 12),
                         child: IconButton(
@@ -608,72 +817,7 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
                     ],
                   ),
                   SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          TextField(
-                            onChanged: (value) {
-                              setState(() {
-                                _searchQuery = value;
-                              });
-                            },
-                            style: TextStyle(color: primaryText),
-                            decoration: InputDecoration(
-                              hintText: 'Search teams, status, time',
-                              hintStyle: TextStyle(color: secondaryText),
-                              prefixIcon: Icon(
-                                Icons.search,
-                                color: secondaryText,
-                              ),
-                              filled: true,
-                              fillColor: inputFill,
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(18),
-                                borderSide: BorderSide.none,
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(18),
-                                borderSide: BorderSide(color: border),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(18),
-                                borderSide: const BorderSide(
-                                  color: Color(0xFF00D4AA),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: _ConfidenceFilter.values.map((filter) {
-                              final isSelected = filter == _confidenceFilter;
-                              return ChoiceChip(
-                                label: Text(filter.label),
-                                selected: isSelected,
-                                onSelected: (_) {
-                                  setState(() {
-                                    _confidenceFilter = filter;
-                                  });
-                                },
-                                selectedColor: const Color(0xFF00D4AA),
-                                labelStyle: TextStyle(
-                                  color: isSelected
-                                      ? const Color(0xFF07111F)
-                                      : primaryText,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                                backgroundColor: inputFill,
-                                side: BorderSide(color: border),
-                              );
-                            }).toList(),
-                          ),
-                        ],
-                      ),
-                    ),
+                    child: SizedBox(height: 10),
                   ),
                   if (_isHighFilterSelected)
                     SliverToBoxAdapter(
@@ -905,7 +1049,17 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        height: 212,
+                        child: _PlanCarousel(
+                          plans: widget.currentPlans,
+                          billing: billing,
+                          compact: true,
+                          onBuyPlan: (plan) => _buyPlan(context, plan),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
                       Expanded(
                         child: _DedicatedPlanScreen(
                           plan: selectedPlan,
@@ -957,12 +1111,45 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
                           ),
                         ),
                         const SizedBox(height: 18),
-                        _SubscriptionHub(
-                          plans: widget.currentPlans,
-                          billing: billing,
-                          focusPlan: _subscriptionFocusPlan,
-                          onBuyPlan: (plan) => _buyPlan(context, plan),
+                        SizedBox(
+                          height: 396,
+                          child: _PlanCarousel(
+                            plans: widget.currentPlans,
+                            billing: billing,
+                            compact: false,
+                            onBuyPlan: (plan) => _buyPlan(context, plan),
+                          ),
                         ),
+                        const SizedBox(height: 18),
+                        _planNotice(
+                          context,
+                          title: 'What you get',
+                          body:
+                              'The \$1.20 plan gives you 7 days of ad-free viewing, while the larger plans give you ongoing access tiers that match your confidence appetite.',
+                        ),
+                        const SizedBox(height: 16),
+                        FilledButton.tonalIcon(
+                          onPressed: billing.restorePurchases,
+                          icon: const Icon(Icons.restore),
+                          label: const Text('Restore purchases'),
+                        ),
+                        if (!billing.isAvailable) ...[
+                          const SizedBox(height: 14),
+                          _planNotice(
+                            context,
+                            title: 'Billing unavailable',
+                            body:
+                                'Google Play Billing is not available on this device or the store connection has not been configured yet.',
+                          ),
+                        ],
+                        if (billing.errorMessage != null) ...[
+                          const SizedBox(height: 14),
+                          _planNotice(
+                            context,
+                            title: 'Billing setup note',
+                            body: billing.errorMessage!,
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -1653,6 +1840,19 @@ class _StickyHeader extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: const Color(0xFF00D4AA).withAlpha(24),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Icon(
+            Icons.sports_soccer,
+            color: _accentText(context),
+            size: 20,
+          ),
+        ),
+        const SizedBox(width: 12),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1668,7 +1868,628 @@ class _StickyHeader extends StatelessWidget {
                   letterSpacing: 0.2,
                 ),
               ),
+              const SizedBox(height: 2),
+              Text(
+                'Search live picks and upgrade the vibe',
+                style: TextStyle(
+                  color: _secondaryText(context),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  height: 1.0,
+                ),
+              ),
             ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _HeaderSearchPanel extends StatelessWidget {
+  const _HeaderSearchPanel({
+    required this.searchQuery,
+    required this.confidenceFilter,
+    required this.primaryText,
+    required this.secondaryText,
+    required this.inputFill,
+    required this.border,
+    required this.onSearchChanged,
+    required this.onConfidenceFilterChanged,
+  });
+
+  final String searchQuery;
+  final _ConfidenceFilter confidenceFilter;
+  final Color primaryText;
+  final Color secondaryText;
+  final Color inputFill;
+  final Color border;
+  final ValueChanged<String> onSearchChanged;
+  final ValueChanged<_ConfidenceFilter> onConfidenceFilterChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _screenSurface(context, elevated: true).withAlpha(240),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: border),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x12000000),
+            blurRadius: 20,
+            offset: Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            searchQuery.trim().isEmpty
+                ? 'Search live matches'
+                : 'Filtering: ${searchQuery.trim()}',
+            style: TextStyle(
+              color: secondaryText,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            onChanged: onSearchChanged,
+            style: TextStyle(color: primaryText, fontSize: 15),
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              hintText: 'Search teams, status, time',
+              hintStyle: TextStyle(color: secondaryText),
+              prefixIcon: Icon(Icons.search, color: secondaryText),
+              filled: true,
+              fillColor: inputFill,
+              contentPadding: const EdgeInsets.symmetric(vertical: 14),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
+                borderSide: BorderSide.none,
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
+                borderSide: BorderSide(color: border),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
+                borderSide: const BorderSide(
+                  color: Color(0xFF00D4AA),
+                  width: 1.2,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _ConfidenceFilter.values.map((filter) {
+              final isSelected = filter == confidenceFilter;
+              return ChoiceChip(
+                label: Text(filter.label),
+                selected: isSelected,
+                onSelected: (_) => onConfidenceFilterChanged(filter),
+                selectedColor: const Color(0xFF00D4AA),
+                labelStyle: TextStyle(
+                  color: isSelected
+                      ? const Color(0xFF07111F)
+                      : primaryText,
+                  fontWeight: FontWeight.w700,
+                ),
+                backgroundColor: inputFill,
+                side: BorderSide(color: border),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SearchResult {
+  const _SearchResult({required this.query, required this.filter});
+  final String query;
+  final _ConfidenceFilter filter;
+}
+
+class _SearchModal extends StatefulWidget {
+  const _SearchModal({
+    required this.initialQuery,
+    required this.initialFilter,
+  });
+
+  final String initialQuery;
+  final _ConfidenceFilter initialFilter;
+
+  @override
+  State<_SearchModal> createState() => _SearchModalState();
+}
+
+class _SearchModalState extends State<_SearchModal> {
+  late final TextEditingController _controller;
+  late _ConfidenceFilter _filter;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialQuery);
+    _filter = widget.initialFilter;
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _apply() {
+    Navigator.of(context).pop(
+      _SearchResult(query: _controller.text, filter: _filter),
+    );
+  }
+
+  void _clear() {
+    _controller.clear();
+    setState(() => _filter = _ConfidenceFilter.all);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = _isDarkContext(context);
+    final primaryText = _primaryText(context);
+    final secondaryText = _secondaryText(context);
+    final inputFill = _inputFill(context);
+    final border = _screenBorder(context);
+    final surface = _screenSurface(context, elevated: true);
+
+    return Align(
+      alignment: Alignment.topCenter,
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          margin: EdgeInsets.only(
+            top: MediaQuery.of(context).padding.top,
+            left: 12,
+            right: 12,
+          ),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF0D1B2D) : Colors.white,
+            borderRadius: const BorderRadius.vertical(
+              bottom: Radius.circular(28),
+            ),
+            border: Border.all(color: border),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x33000000),
+                blurRadius: 24,
+                offset: Offset(0, 12),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.search, color: _accentText(context), size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Search & Filter',
+                    style: TextStyle(
+                      color: primaryText,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    onPressed: _clear,
+                    icon: Icon(Icons.clear_all, color: secondaryText, size: 20),
+                    tooltip: 'Clear',
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: Icon(Icons.close, color: secondaryText, size: 20),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _controller,
+                autofocus: true,
+                onSubmitted: (_) => _apply(),
+                style: TextStyle(color: primaryText),
+                textInputAction: TextInputAction.search,
+                decoration: InputDecoration(
+                  hintText: 'Teams, time...',
+                  hintStyle: TextStyle(color: secondaryText),
+                  prefixIcon: Icon(Icons.search, color: secondaryText),
+                  filled: true,
+                  fillColor: inputFill,
+                  isDense: true,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide(color: border),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: Color(0xFF00D4AA)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: _ConfidenceFilter.values.map((f) {
+                  final selected = f == _filter;
+                  return ChoiceChip(
+                    label: Text(f.label),
+                    selected: selected,
+                    onSelected: (_) => setState(() => _filter = f),
+                    selectedColor: const Color(0xFF00D4AA),
+                    labelStyle: TextStyle(
+                      color: selected ? const Color(0xFF07111F) : primaryText,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    backgroundColor: inputFill,
+                    side: BorderSide(color: border),
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: _apply,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF00D4AA),
+                    foregroundColor: const Color(0xFF07111F),
+                  ),
+                  child: const Text(
+                    'Apply',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PlanCarousel extends StatefulWidget {
+  const _PlanCarousel({
+    required this.plans,
+    required this.billing,
+    required this.compact,
+    required this.onBuyPlan,
+  });
+
+  final List<SubscriptionPlanId> plans;
+  final GooglePlayBillingService billing;
+  final bool compact;
+  final void Function(SubscriptionPlanId plan) onBuyPlan;
+
+  @override
+  State<_PlanCarousel> createState() => _PlanCarouselState();
+}
+
+class _PlanCarouselState extends State<_PlanCarousel> {
+  late final PageController _controller;
+  int _pageIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = PageController(
+      viewportFraction: widget.compact ? 0.9 : 0.84,
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: widget.billing,
+      builder: (context, _) {
+        return Column(
+          children: [
+            Expanded(
+              child: PageView.builder(
+                controller: _controller,
+                itemCount: widget.plans.length,
+                onPageChanged: (value) {
+                  setState(() {
+                    _pageIndex = value;
+                  });
+                },
+                itemBuilder: (context, index) {
+                  final plan = widget.plans[index];
+                  final product = widget.billing.productFor(plan);
+                  final isOwned = widget.billing.isOwned(plan);
+                  final canPurchase = widget.billing.isAvailable && !isOwned;
+                  final price = isOwned ? 'Active' : product?.price ?? plan.fallbackPrice;
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: _CarouselPlanCard(
+                      plan: plan,
+                      price: price,
+                      isOwned: isOwned,
+                      compact: widget.compact,
+                      onPressed: canPurchase ? () => widget.onBuyPlan(plan) : null,
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(widget.plans.length, (index) {
+                final selected = index == _pageIndex;
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  width: selected ? 18 : 7,
+                  height: 7,
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? const Color(0xFF00D4AA)
+                        : _screenBorder(context).withAlpha(180),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                );
+              }),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _CarouselPlanCard extends StatelessWidget {
+  const _CarouselPlanCard({
+    required this.plan,
+    required this.price,
+    required this.isOwned,
+    required this.compact,
+    required this.onPressed,
+  });
+
+  final SubscriptionPlanId plan;
+  final String price;
+  final bool isOwned;
+  final bool compact;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final primaryText = _primaryText(context);
+    final secondaryText = _secondaryText(context);
+    final border = _screenBorder(context);
+    final colors = _planGradientColors(plan, context);
+    final accent = _planAccentColor(plan);
+    final benefits = _planBenefitLines(plan);
+    final badge = switch (plan) {
+      SubscriptionPlanId.weeklyAdFree => 'Best quick win',
+      SubscriptionPlanId.basic => 'Starter access',
+      SubscriptionPlanId.standard => 'Balanced pick',
+      SubscriptionPlanId.premium => 'Full access',
+    };
+
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: colors,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: border.withAlpha(120)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x18000000),
+            blurRadius: 20,
+            offset: Offset(0, 12),
+          ),
+        ],
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            right: -26,
+            top: -18,
+            child: Container(
+              width: 110,
+              height: 110,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withAlpha(16),
+              ),
+            ),
+          ),
+          Positioned(
+            right: 10,
+            bottom: 8,
+            child: Container(
+              width: 74,
+              height: 74,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withAlpha(10),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withAlpha(22),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        badge,
+                        style: TextStyle(
+                          color: primaryText,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    Icon(
+                      isOwned ? Icons.verified : Icons.auto_awesome,
+                      color: accent,
+                      size: 20,
+                    ),
+                  ],
+                ),
+                const Spacer(),
+                Text(
+                  plan.title,
+                  style: TextStyle(
+                    color: primaryText,
+                    fontSize: compact ? 22 : 26,
+                    fontWeight: FontWeight.w900,
+                    height: 1.0,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  plan.subtitle,
+                  style: TextStyle(
+                    color: secondaryText.withAlpha(230),
+                    fontSize: compact ? 13 : 14,
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: benefits
+                      .take(compact ? 2 : 3)
+                      .map((benefit) => _PlanBenefitLine(text: benefit))
+                      .toList(),
+                ),
+                const Spacer(),
+                Row(
+                  children: [
+                    Flexible(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            price,
+                            style: TextStyle(
+                              color: primaryText,
+                              fontSize: compact ? 18 : 22,
+                              fontWeight: FontWeight.w900,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          Text(
+                            isOwned ? 'Active' : 'One tap',
+                            style: TextStyle(
+                              color: secondaryText.withAlpha(235),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton(
+                      onPressed: onPressed,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF00D4AA),
+                        foregroundColor: const Color(0xFF07111F),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                      ),
+                      child: Text(
+                        isOwned
+                            ? 'Active'
+                            : onPressed == null
+                                ? 'Unavailable'
+                                : plan == SubscriptionPlanId.weeklyAdFree
+                                    ? '7 Days'
+                                    : 'Subscribe',
+                        style: const TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PlanBenefitLine extends StatelessWidget {
+  const _PlanBenefitLine({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final primaryText = _primaryText(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 18,
+          height: 18,
+          decoration: BoxDecoration(
+            color: const Color(0xFF00D4AA).withAlpha(28),
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: const Icon(Icons.check, size: 12, color: Color(0xFF00D4AA)),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          text,
+          style: TextStyle(
+            color: primaryText,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            height: 1.3,
           ),
         ),
       ],
@@ -3611,6 +4432,7 @@ bool _predictionMatchesPlan(
   final confidence = _predictionConfidencePercent(prediction);
   final confidenceExact = _predictionConfidencePercentExact(prediction);
   return switch (plan) {
+    SubscriptionPlanId.weeklyAdFree => true,
     SubscriptionPlanId.basic => confidence == 85,
     SubscriptionPlanId.standard => confidence >= 85 && confidence <= 87,
     SubscriptionPlanId.premium => confidenceExact >= 88.0 && confidenceExact <= 99.99,
@@ -3619,9 +4441,65 @@ bool _predictionMatchesPlan(
 
 String _planConfidenceLabel(SubscriptionPlanId plan) {
   return switch (plan) {
+    SubscriptionPlanId.weeklyAdFree => 'Ad free for 7 days',
     SubscriptionPlanId.basic => '85%',
     SubscriptionPlanId.standard => '85% - 87%',
     SubscriptionPlanId.premium => '88% - 99.99%',
+  };
+}
+
+Color _planAccentColor(SubscriptionPlanId plan) {
+  return switch (plan) {
+    SubscriptionPlanId.weeklyAdFree => const Color(0xFF00D4AA),
+    SubscriptionPlanId.basic => const Color(0xFF4A8DFF),
+    SubscriptionPlanId.standard => const Color(0xFF28C58F),
+    SubscriptionPlanId.premium => const Color(0xFFF4C15D),
+  };
+}
+
+List<Color> _planGradientColors(
+  SubscriptionPlanId plan,
+  BuildContext context,
+) {
+  final isDark = _isDarkContext(context);
+  return switch (plan) {
+    SubscriptionPlanId.weeklyAdFree => isDark
+        ? const [Color(0xFF063B36), Color(0xFF0E2238), Color(0xFF123652)]
+        : const [Color(0xFFDDFBF4), Color(0xFFCDEAFF), Color(0xFFF7FFFB)],
+    SubscriptionPlanId.basic => isDark
+        ? const [Color(0xFF0E2B63), Color(0xFF123A88), Color(0xFF2A5AE8)]
+        : const [Color(0xFFE4EEFF), Color(0xFFD6E7FF), Color(0xFFF5FAFF)],
+    SubscriptionPlanId.standard => isDark
+        ? const [Color(0xFF0E3F35), Color(0xFF134F45), Color(0xFF1B705D)]
+        : const [Color(0xFFE3FFF7), Color(0xFFD8F8EE), Color(0xFFF5FFFC)],
+    SubscriptionPlanId.premium => isDark
+        ? const [Color(0xFF4A3109), Color(0xFF754C10), Color(0xFFAD751E)]
+        : const [Color(0xFFFFF4D8), Color(0xFFFFEBC0), Color(0xFFFFFAF0)],
+  };
+}
+
+List<String> _planBenefitLines(SubscriptionPlanId plan) {
+  return switch (plan) {
+    SubscriptionPlanId.weeklyAdFree => const [
+      '7 days without ads',
+      'Cleaner match browsing',
+      'Perfect short-term upgrade',
+    ],
+    SubscriptionPlanId.basic => const [
+      'Budget-friendly access',
+      'Stay close to the feed',
+      'Great starter tier',
+    ],
+    SubscriptionPlanId.standard => const [
+      'Balanced access level',
+      'More prediction depth',
+      'Built for regular users',
+    ],
+    SubscriptionPlanId.premium => const [
+      'Top-tier access focus',
+      'Best for heavy usage',
+      'Unlock the strongest tier',
+    ],
   };
 }
 

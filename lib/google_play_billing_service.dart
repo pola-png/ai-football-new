@@ -4,28 +4,32 @@ import 'package:flutter/foundation.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-enum SubscriptionPlanId { basic, standard, premium }
+enum SubscriptionPlanId { weeklyAdFree, basic, standard, premium }
 
 extension SubscriptionPlanIdX on SubscriptionPlanId {
   String get productId => switch (this) {
+    SubscriptionPlanId.weeklyAdFree => 'ad_free_7_days',
     SubscriptionPlanId.basic => 'basic_monthly',
     SubscriptionPlanId.standard => 'standard_monthly',
     SubscriptionPlanId.premium => 'premium_monthly',
   };
 
   String get title => switch (this) {
+    SubscriptionPlanId.weeklyAdFree => 'Ad Free 7 Days',
     SubscriptionPlanId.basic => 'Basic',
     SubscriptionPlanId.standard => 'Standard',
     SubscriptionPlanId.premium => 'Premium',
   };
 
   String get fallbackPrice => switch (this) {
+    SubscriptionPlanId.weeklyAdFree => r'$1.20',
     SubscriptionPlanId.basic => r'$2.99',
     SubscriptionPlanId.standard => r'$9.99',
     SubscriptionPlanId.premium => r'$50.00',
   };
 
   String get subtitle => switch (this) {
+    SubscriptionPlanId.weeklyAdFree => 'Ad free for 7 days',
     SubscriptionPlanId.basic => 'For casual followers',
     SubscriptionPlanId.standard => 'For regular users',
     SubscriptionPlanId.premium => 'For full access and priority',
@@ -38,10 +42,12 @@ class GooglePlayBillingService extends ChangeNotifier {
   static final GooglePlayBillingService instance = GooglePlayBillingService._();
 
   static const String _ownedProductsKey = 'owned_subscription_products';
+  static const String _weeklyAdFreeExpiresAtKey = 'weekly_ad_free_expires_at';
 
   final InAppPurchase _inAppPurchase = InAppPurchase.instance;
   final Set<String> _ownedProductIds = <String>{};
   final Set<String> _availableProductIds = <String>{
+    SubscriptionPlanId.weeklyAdFree.productId,
     SubscriptionPlanId.basic.productId,
     SubscriptionPlanId.standard.productId,
     SubscriptionPlanId.premium.productId,
@@ -58,9 +64,25 @@ class GooglePlayBillingService extends ChangeNotifier {
   bool get isAvailable => _available;
   bool get isLoading => _loading;
   String? get errorMessage => _errorMessage;
-  bool get hasAdFreeAccess => _ownedProductIds.isNotEmpty;
+  // Only non-weeklyAdFree plans suppress rewarded ads (banner ads always show).
+  bool get hasAdFreeAccess {
+    _refreshWeeklyAdFreeState();
+    return _ownedProductIds.any(
+      (id) => id != SubscriptionPlanId.weeklyAdFree.productId,
+    );
+  }
+
+  // weeklyAdFree plan only removes the rewarded-ad gate, not banner ads.
+  bool get hasRewardedAdFreeAccess {
+    _refreshWeeklyAdFreeState();
+    return _ownedProductIds.isNotEmpty;
+  }
 
   SubscriptionPlanId? get activePlan {
+    _refreshWeeklyAdFreeState();
+    if (_ownedProductIds.contains(SubscriptionPlanId.weeklyAdFree.productId)) {
+      return SubscriptionPlanId.weeklyAdFree;
+    }
     if (_ownedProductIds.contains(SubscriptionPlanId.premium.productId)) {
       return SubscriptionPlanId.premium;
     }
@@ -80,6 +102,10 @@ class GooglePlayBillingService extends ChangeNotifier {
   }
 
   bool isOwned(SubscriptionPlanId plan) {
+    _refreshWeeklyAdFreeState();
+    if (plan == SubscriptionPlanId.weeklyAdFree) {
+      return _ownedProductIds.contains(plan.productId);
+    }
     return _ownedProductIds.contains(plan.productId);
   }
 
@@ -181,11 +207,17 @@ class GooglePlayBillingService extends ChangeNotifier {
     }
 
     final didAdd = _ownedProductIds.add(productId);
-    if (didAdd) {
-      _preferences?.setStringList(
-        _ownedProductsKey,
-        _ownedProductIds.toList()..sort(),
+    if (productId == SubscriptionPlanId.weeklyAdFree.productId && didAdd) {
+      _preferences?.setString(
+        _weeklyAdFreeExpiresAtKey,
+        DateTime.now()
+            .add(const Duration(days: 7))
+            .toUtc()
+            .toIso8601String(),
       );
+    }
+    if (didAdd) {
+      _persistOwnedProducts();
     }
   }
 
@@ -195,5 +227,29 @@ class GooglePlayBillingService extends ChangeNotifier {
     _ownedProductIds
       ..clear()
       ..addAll(saved.where(_availableProductIds.contains));
+    _refreshWeeklyAdFreeState();
+  }
+
+  void _persistOwnedProducts() {
+    _preferences?.setStringList(
+      _ownedProductsKey,
+      _ownedProductIds.toList()..sort(),
+    );
+  }
+
+  void _refreshWeeklyAdFreeState() {
+    if (!_ownedProductIds.contains(SubscriptionPlanId.weeklyAdFree.productId)) {
+      return;
+    }
+
+    final expiryText = _preferences?.getString(_weeklyAdFreeExpiresAtKey);
+    final expiry = expiryText == null ? null : DateTime.tryParse(expiryText);
+    final now = DateTime.now().toUtc();
+
+    if (expiry == null || !expiry.isAfter(now)) {
+      _ownedProductIds.remove(SubscriptionPlanId.weeklyAdFree.productId);
+      _preferences?.remove(_weeklyAdFreeExpiresAtKey);
+      _persistOwnedProducts();
+    }
   }
 }
