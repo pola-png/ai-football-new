@@ -226,92 +226,89 @@ function getTimeZoneHour(value, timeZone = 'Africa/Lagos') {
   return Number.parseInt(map.hour, 10);
 }
 
-function compareSelectedFixtureItems(left, right) {
-  const leftKickoff = left.kickoff || new Date(0);
-  const rightKickoff = right.kickoff || new Date(0);
-  const comparison = leftKickoff.getTime() - rightKickoff.getTime();
-  if (comparison !== 0) {
-    return comparison;
+function selectFixturesByHourSpread(scoredFixtures, maxTotal, timeZone = 'Africa/Lagos') {
+  // scoredFixtures is already sorted best-score-first
+  // Step 1: separate popular league fixtures from the rest
+  const popularItems = [];
+  const regularItems = [];
+  for (const item of scoredFixtures) {
+    const kickoff = parseFixtureKickoff(item.fixture?.fixture?.date || null);
+    if (!kickoff) continue;
+    const hour = getTimeZoneHour(kickoff, timeZone);
+    const enriched = { ...item, kickoff, hour };
+    if (popularityBonus(item.fixture?.league?.id) > 0) {
+      popularItems.push(enriched);
+    } else {
+      regularItems.push(enriched);
+    }
   }
 
-  return String(left.fixture?.fixture?.id ?? '').localeCompare(String(right.fixture?.fixture?.id ?? ''));
-}
+  const usedIds = new Set();
+  const selected = [];
 
-function selectFixturesBySession(fixtures, amLimit, pmLimit, timeZone = 'Africa/Lagos') {
-  const decorated = (Array.isArray(fixtures) ? fixtures : [])
-    .map((fixture, index) => {
-      const kickoff = parseFixtureKickoff(fixture?.fixture?.date || null);
-      if (!kickoff) {
-        return null;
+  // Step 2: always include ALL popular league matches first
+  for (const item of popularItems) {
+    const id = String(item.fixture?.fixture?.id ?? '');
+    if (!id || usedIds.has(id)) continue;
+    usedIds.add(id);
+    selected.push(item);
+  }
+
+  // Step 3: fill remaining slots from regular fixtures using hour-spread
+  // group regular fixtures by hour
+  const byHour = new Map();
+  for (const item of regularItems) {
+    if (!byHour.has(item.hour)) byHour.set(item.hour, []);
+    byHour.get(item.hour).push(item);
+  }
+
+  const hours = [...byHour.keys()].sort((a, b) => a - b);
+  const perHourMin = 4; // pick this many per hour per round before cycling
+
+  // Keep cycling rounds until cap is hit or all hours exhausted.
+  // Every hour that still has fixtures gets its picks BEFORE any hour
+  // gets an extra pick in the next round — no hour is ever skipped.
+  let round = 0;
+  while (selected.length < maxTotal) {
+    let addedThisRound = 0;
+    for (const hour of hours) {
+      const pool = byHour.get(hour);
+      const startIdx = round * perHourMin;
+      if (startIdx >= pool.length) continue; // this hour is exhausted
+      const endIdx = Math.min(startIdx + perHourMin, pool.length);
+      for (let i = startIdx; i < endIdx; i++) {
+        const item = pool[i];
+        const id = String(item.fixture?.fixture?.id ?? '');
+        if (!id || usedIds.has(id)) continue;
+        usedIds.add(id);
+        selected.push(item);
+        addedThisRound += 1;
+        // do NOT break on cap here — finish the full hour slice first
       }
-
-      const localHour = getTimeZoneHour(kickoff, timeZone);
-      return {
-        fixture,
-        kickoff,
-        localHour,
-        bucket: localHour < 12 ? 'am' : 'pm',
-        index,
-      };
-    })
-    .filter(Boolean)
-    .sort((left, right) => {
-      const comparison = left.kickoff.getTime() - right.kickoff.getTime();
-      if (comparison !== 0) {
-        return comparison;
-      }
-      return left.index - right.index;
-    });
-
-  const bucketSelect = (bucket, limit) => {
-    const bucketItems = decorated.filter((item) => item.bucket === bucket);
-    const chosen = [];
-    const chosenIndexes = new Set();
-    const seenHours = new Set();
-
-    for (const item of bucketItems) {
-      if (chosen.length >= limit) {
-        break;
-      }
-
-      if (seenHours.has(item.localHour)) {
-        continue;
-      }
-
-      seenHours.add(item.localHour);
-      chosen.push(item);
-      chosenIndexes.add(item.index);
     }
+    round += 1;
+    if (addedThisRound === 0) break; // every hour is exhausted
+    // trim to cap only after completing a full round across all hours
+    if (selected.length >= maxTotal) break;
+  }
 
-    for (const item of bucketItems) {
-      if (chosen.length >= limit) {
-        break;
-      }
+  // Sort final list by kickoff time
+  selected.sort((a, b) => a.kickoff.getTime() - b.kickoff.getTime());
 
-      if (chosenIndexes.has(item.index)) {
-        continue;
-      }
-
-      chosen.push(item);
-      chosenIndexes.add(item.index);
-    }
-
-    return chosen.sort(compareSelectedFixtureItems);
-  };
-
-  const amSelected = bucketSelect('am', amLimit);
-  const pmSelected = bucketSelect('pm', pmLimit);
-  const selected = [...amSelected, ...pmSelected].sort(compareSelectedFixtureItems);
+  const hourCounts = {};
+  for (const item of selected) {
+    hourCounts[item.hour] = (hourCounts[item.hour] || 0) + 1;
+  }
 
   return {
-    selectedFixtures: selected.map((item) => item.fixture),
+    selectedFixtures: selected.map((s) => s.fixture),
+    prefetchedH2HMap: new Map(selected.map((s) => [String(s.fixture?.fixture?.id ?? ''), s.h2hFixtures])),
     stats: {
-      totalAvailable: decorated.length,
-      amAvailable: decorated.filter((item) => item.bucket === 'am').length,
-      pmAvailable: decorated.filter((item) => item.bucket === 'pm').length,
-      amSelected: amSelected.length,
-      pmSelected: pmSelected.length,
+      totalScored: scoredFixtures.length,
+      popularIncluded: popularItems.filter((i) => usedIds.has(String(i.fixture?.fixture?.id ?? ''))).length,
       totalSelected: selected.length,
+      hoursRepresented: Object.keys(hourCounts).length,
+      hourCounts,
     },
   };
 }
@@ -1829,36 +1826,22 @@ export default async function main(context) {
     scoredFixtures.sort((a, b) =>
       (b.score - a.score) || String(a.fixture?.fixture?.id ?? '').localeCompare(String(b.fixture?.fixture?.id ?? '')),
     );
-    const topFixtures = scoredFixtures.slice(0, maxFixtures);
-    const selectedFixtures = topFixtures.map((s) => s.fixture);
-    // Keep pre-fetched h2h data keyed by fixture id to avoid re-fetching
-    const prefetchedH2HMap = new Map(
-      topFixtures.map((s) => [String(s.fixture?.fixture?.id ?? ''), s.h2hFixtures]),
-    );
+
+    const spreadResult = selectFixturesByHourSpread(scoredFixtures, maxFixtures, 'Africa/Lagos');
+    const selectedFixtures = spreadResult.selectedFixtures;
+    const prefetchedH2HMap = spreadResult.prefetchedH2HMap;
 
     appwriteLog(JSON.stringify({
       job: 'daily-sync-generate',
       stage: 'fixtures-scored-and-selected',
       total_fetched: fixtures.length,
       qualified: scoredFixtures.length,
+      popular_included: spreadResult.stats.popularIncluded,
       selected: selectedFixtures.length,
+      hours_represented: spreadResult.stats.hoursRepresented,
+      hour_counts: spreadResult.stats.hourCounts,
       max_cap: maxFixtures,
     }));
-
-    const selectedFixturesResult = selectFixturesBySession(selectedFixtures, selectedFixtures.length, selectedFixtures.length, 'Africa/Lagos');
-
-    appwriteLog(
-      JSON.stringify({
-        job: 'daily-sync-generate',
-        stage: 'fixtures-selected',
-        total_available: selectedFixturesResult.stats.totalAvailable,
-        am_available: selectedFixturesResult.stats.amAvailable,
-        pm_available: selectedFixturesResult.stats.pmAvailable,
-        am_selected: selectedFixturesResult.stats.amSelected,
-        pm_selected: selectedFixturesResult.stats.pmSelected,
-        total_selected: selectedFixturesResult.stats.totalSelected,
-      }),
-    );
 
     const [fixturesDelete, predictionsCleanup] = await Promise.all([
       deleteAllRows(tablesdb, databaseId, fixturesTable),
