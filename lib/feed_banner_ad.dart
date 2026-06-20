@@ -64,7 +64,7 @@ class _FeedBannerAdState extends State<FeedBannerAd> {
 
     late final BannerAd bannerAd;
     bannerAd = BannerAd(
-      adUnitId: kBannerAdUnitId,
+      adUnitId: kDebugMode ? kTestBannerAdUnitId : kBannerAdUnitId,
       size: adSize,
       request: const AdRequest(),
       listener: BannerAdListener(

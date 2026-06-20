@@ -24,6 +24,11 @@ class AdGateService {
 
     _initialized = true;
     await MobileAds.instance.initialize();
+    if (kDebugMode) {
+      await MobileAds.instance.updateRequestConfiguration(
+        RequestConfiguration(testDeviceIds: [kTestDeviceId]),
+      );
+    }
     _loadRewardedAd();
   }
 
@@ -34,7 +39,7 @@ class AdGateService {
 
     _loadingRewardedAd = true;
     RewardedAd.load(
-      adUnitId: kRewardedAdUnitId,
+      adUnitId: kDebugMode ? kTestRewardedAdUnitId : kRewardedAdUnitId,
       request: const AdRequest(),
       rewardedAdLoadCallback: RewardedAdLoadCallback(
         onAdLoaded: (ad) {

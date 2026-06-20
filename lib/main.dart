@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -39,12 +40,12 @@ class MyApp extends StatelessWidget {
 
   ThemeData _buildTheme(Brightness brightness) {
     final isDark = brightness == Brightness.dark;
-    final surface = isDark ? const Color(0xFF07111F) : const Color(0xFFF4F8FC);
-    final card = isDark ? const Color(0xFF0D1B2D) : Colors.white;
-    final textColor = isDark ? Colors.white : const Color(0xFF0B1626);
+    final surface = isDark ? const Color(0xFF0A0F1E) : const Color(0xFFF5F7FB);
+    final card = isDark ? const Color(0xFF121B2E) : Colors.white;
+    final textColor = isDark ? Colors.white : const Color(0xFF0F1A2C);
     final mutedText = isDark
-        ? const Color(0xFFB8D5FF)
-        : const Color(0xFF52657A);
+        ? const Color(0xFF8C9FB8)
+        : const Color(0xFF5A6E85);
     final accent = const Color(0xFF00D4AA);
 
     return ThemeData(
@@ -78,16 +79,16 @@ class MyApp extends StatelessWidget {
       ),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: card,
-        indicatorColor: accent.withAlpha(40),
+        indicatorColor: accent.withAlpha(35),
         labelTextStyle: WidgetStatePropertyAll(
           TextStyle(
-            fontSize: 14,
+            fontSize: 12,
             fontWeight: FontWeight.w700,
             color: mutedText,
           ),
         ),
         iconTheme: WidgetStatePropertyAll(
-          IconThemeData(size: 28, color: textColor),
+          IconThemeData(size: 24, color: textColor),
         ),
       ),
     );
@@ -103,13 +104,23 @@ class MyApp extends StatelessWidget {
         return MediaQuery(
           data: MediaQuery.of(
             context,
-          ).copyWith(textScaler: const TextScaler.linear(1.3)),
+          ).copyWith(textScaler: const TextScaler.linear(1.15)),
           child: scaledChild,
         );
       },
       theme: _buildTheme(Brightness.light),
       darkTheme: _buildTheme(Brightness.dark),
       home: const NotificationBootstrapPage(),
+      routes: {
+        '/popular': (context) {
+          final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+          return PopularMatchesPage(
+            predictions: args?['predictions'] as List<PredictionRecord>? ?? const [],
+            adFree: args?['adFree'] as bool? ?? false,
+            isAdmin: args?['isAdmin'] as bool? ?? false,
+          );
+        },
+      },
     );
   }
 }
@@ -120,45 +131,45 @@ bool _isDarkContext(BuildContext context) {
 
 List<Color> _screenGradient(BuildContext context) {
   return _isDarkContext(context)
-      ? const [Color(0xFF07111F), Color(0xFF0B1D35), Color(0xFF122B4A)]
-      : const [Color(0xFFF8FBFF), Color(0xFFEAF2FA), Color(0xFFDCEAF7)];
+      ? const [Color(0xFF0A0F1E), Color(0xFF10172A), Color(0xFF17233E)]
+      : const [Color(0xFFF5F7FB), Color(0xFFE9EDF5), Color(0xFFDEE5EE)];
 }
 
 Color _screenSurface(BuildContext context, {bool elevated = false}) {
   if (_isDarkContext(context)) {
-    return elevated ? const Color(0xFF10253E) : const Color(0xFF0D1B2D);
+    return elevated ? const Color(0xFF1E293B) : const Color(0xFF121B2E);
   }
-  return elevated ? const Color(0xFFF1F6FC) : Colors.white;
+  return elevated ? const Color(0xFFE8EEF5) : Colors.white;
 }
 
 Color _screenBorder(BuildContext context) {
   return _isDarkContext(context)
-      ? const Color(0xFF20364E)
-      : const Color(0xFFD5E0EA);
+      ? const Color(0xFF1E2B4C)
+      : const Color(0xFFE2EAF2);
 }
 
 Color _primaryText(BuildContext context) {
-  return _isDarkContext(context) ? Colors.white : const Color(0xFF0B1626);
+  return _isDarkContext(context) ? Colors.white : const Color(0xFF0F1A2C);
 }
 
 Color _secondaryText(BuildContext context) {
   return _isDarkContext(context)
-      ? const Color(0xFFB8D5FF)
-      : const Color(0xFF52657A);
+      ? const Color(0xFF8C9FB8)
+      : const Color(0xFF5A6E85);
 }
 
 Color _accentText(BuildContext context) {
   return _isDarkContext(context)
       ? const Color(0xFF75F7D7)
-      : const Color(0xFF008D79);
+      : const Color(0xFF009680);
 }
 
 Color _navBackground(BuildContext context) {
-  return _isDarkContext(context) ? const Color(0xFF081221) : Colors.white;
+  return _isDarkContext(context) ? const Color(0xFF0A0F1E) : Colors.white;
 }
 
 Color _inputFill(BuildContext context) {
-  return _isDarkContext(context) ? const Color(0xFF0D1B2D) : Colors.white;
+  return _isDarkContext(context) ? const Color(0xFF121B2E) : Colors.white;
 }
 
 class NotificationBootstrapPage extends StatefulWidget {
@@ -479,28 +490,54 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
                       onOpenPicked: _openPickedTab,
                       onClear: _clearSelections,
                     ),
-                  NavigationBar(
-                    selectedIndex: _currentIndex,
-                    onDestinationSelected: _setIndex,
-                    backgroundColor: _navBackground(context),
-                    indicatorColor: const Color(0xFF00D4AA).withAlpha(40),
-                    destinations: const [
-                      NavigationDestination(
-                        icon: Icon(Icons.home_outlined),
-                        selectedIcon: Icon(Icons.home),
-                        label: 'Home',
+                  ClipRect(
+                    child: BackdropFilter(
+                      filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: _navBackground(context).withValues(alpha: 0.72),
+                          border: Border(
+                            top: BorderSide(
+                              color: _screenBorder(context).withValues(alpha: 0.5),
+                              width: 1.0,
+                            ),
+                          ),
+                        ),
+                        child: NavigationBar(
+                          selectedIndex: _currentIndex,
+                          onDestinationSelected: _setIndex,
+                          backgroundColor: Colors.transparent,
+                          elevation: 0,
+                          indicatorColor: const Color(0xFF00D4AA).withAlpha(40),
+                          destinations: [
+                            NavigationDestination(
+                              icon: const Icon(Icons.home_outlined),
+                              selectedIcon: _PulsingIcon(
+                                icon: Icons.home,
+                                isActive: _currentIndex == 0,
+                              ),
+                              label: 'Home',
+                            ),
+                            NavigationDestination(
+                              icon: const Icon(Icons.workspace_premium_outlined),
+                              selectedIcon: _PulsingIcon(
+                                icon: Icons.workspace_premium,
+                                isActive: _currentIndex == 1,
+                              ),
+                              label: 'Premium Plan',
+                            ),
+                            NavigationDestination(
+                              icon: const Icon(Icons.fact_check_outlined),
+                              selectedIcon: _PulsingIcon(
+                                icon: Icons.fact_check,
+                                isActive: _currentIndex == 2,
+                              ),
+                              label: 'Picked',
+                            ),
+                          ],
+                        ),
                       ),
-                      NavigationDestination(
-                        icon: Icon(Icons.workspace_premium_outlined),
-                        selectedIcon: Icon(Icons.workspace_premium),
-                        label: 'Premium Plan',
-                      ),
-                      NavigationDestination(
-                        icon: Icon(Icons.fact_check_outlined),
-                        selectedIcon: Icon(Icons.fact_check),
-                        label: 'Picked',
-                      ),
-                    ],
+                    ),
                   ),
                 ],
               ),
@@ -685,10 +722,7 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
     final isDark = _isDarkContext(context);
     final pageGradient = _screenGradient(context);
     final surface = _screenSurface(context);
-    final border = _screenBorder(context);
-    final primaryText = _primaryText(context);
-    final secondaryText = _secondaryText(context);
-    final inputFill = _inputFill(context);
+
 
     return Container(
       decoration: BoxDecoration(
@@ -714,33 +748,28 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
               child: CustomScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 slivers: [
-                  SliverAppBar(
+                   SliverAppBar(
                     pinned: true,
                     floating: false,
                     toolbarHeight: 72,
-                    backgroundColor:
-                        (isDark ? const Color(0xFF0A1220) : Colors.white)
-                            .withAlpha(isDark ? 248 : 252),
+                    backgroundColor: Colors.transparent,
                     surfaceTintColor: Colors.transparent,
                     elevation: 0,
                     titleSpacing: 20,
                     title: const _StickyHeader(),
-                    flexibleSpace: Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: isDark
-                              ? const [
-                                  Color(0xFF07111F),
-                                  Color(0xFF0D223A),
-                                  Color(0xFF123652),
-                                ]
-                              : const [
-                                  Color(0xFFF8FBFF),
-                                  Color(0xFFE8F1FA),
-                                  Color(0xFFD7E4F2),
-                                ],
-                          begin: Alignment.centerLeft,
-                          end: Alignment.centerRight,
+                    flexibleSpace: ClipRect(
+                      child: BackdropFilter(
+                        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: (isDark ? const Color(0xFF0A0F1E) : Colors.white).withValues(alpha: 0.72),
+                            border: Border(
+                              bottom: BorderSide(
+                                color: _screenBorder(context).withValues(alpha: 0.5),
+                                width: 1.0,
+                              ),
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -817,7 +846,24 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
                     ],
                   ),
                   SliverToBoxAdapter(
-                    child: SizedBox(height: 10),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 10, 20, 12),
+                      child: _HeaderInfoCarousel(
+                        predictions: predictions,
+                        onOpenPremium: widget.onOpenPremium,
+                        onOpenPopularMatches: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => PopularMatchesPage(
+                                predictions: predictions,
+                                adFree: widget.adFree,
+                                isAdmin: widget.isAdmin,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
                   ),
                   if (_isHighFilterSelected)
                     SliverToBoxAdapter(
@@ -1160,82 +1206,6 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
   }
 }
 
-class _SubscriptionHub extends StatelessWidget {
-  const _SubscriptionHub({
-    required this.plans,
-    required this.billing,
-    required this.focusPlan,
-    required this.onBuyPlan,
-  });
-
-  final List<SubscriptionPlanId> plans;
-  final GooglePlayBillingService billing;
-  final SubscriptionPlanId? focusPlan;
-  final void Function(SubscriptionPlanId plan) onBuyPlan;
-
-  @override
-  Widget build(BuildContext context) {
-        return AnimatedBuilder(
-      animation: billing,
-      builder: (context, _) {
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (var index = 0; index < plans.length; index++) ...[
-              if (index > 0) const SizedBox(height: 14),
-              Builder(
-                builder: (context) {
-                  final plan = plans[index];
-                  final product = billing.productFor(plan);
-                  final price = product?.price ?? plan.fallbackPrice;
-                  final isOwned = billing.isOwned(plan);
-                  final isFocused = plan == focusPlan;
-
-                  return _SubscriptionPlanCard(
-                    title: plan.title,
-                    price: isOwned ? 'Active' : price,
-                    subtitle: 'Accuracy: ${_planConfidenceLabel(plan)}',
-                    highlight: isOwned || isFocused,
-                    featureLines: const [
-                      'Remove all ads',
-                      'Unlock a cleaner experience',
-                      'Dedicated prediction screen',
-                    ],
-                    buttonLabel: isOwned ? 'Active' : 'Subscribe',
-                    onPressed: isOwned ? null : () => onBuyPlan(plan),
-                  );
-                },
-              ),
-            ],
-            if (!billing.isAvailable) ...[
-              const SizedBox(height: 4),
-              _planNotice(
-                context,
-                title: 'Billing unavailable',
-                body:
-                    'Google Play Billing is not available on this device or the store connection has not been configured yet.',
-              ),
-            ],
-            if (billing.errorMessage != null) ...[
-              const SizedBox(height: 16),
-              _planNotice(
-                context,
-                title: 'Billing setup note',
-                body: billing.errorMessage!,
-              ),
-            ],
-            const SizedBox(height: 8),
-            FilledButton.tonalIcon(
-              onPressed: billing.restorePurchases,
-              icon: const Icon(Icons.restore),
-              label: const Text('Restore purchases'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
 
 class _DedicatedPlanScreen extends StatefulWidget {
   const _DedicatedPlanScreen({
@@ -1886,112 +1856,6 @@ class _StickyHeader extends StatelessWidget {
   }
 }
 
-class _HeaderSearchPanel extends StatelessWidget {
-  const _HeaderSearchPanel({
-    required this.searchQuery,
-    required this.confidenceFilter,
-    required this.primaryText,
-    required this.secondaryText,
-    required this.inputFill,
-    required this.border,
-    required this.onSearchChanged,
-    required this.onConfidenceFilterChanged,
-  });
-
-  final String searchQuery;
-  final _ConfidenceFilter confidenceFilter;
-  final Color primaryText;
-  final Color secondaryText;
-  final Color inputFill;
-  final Color border;
-  final ValueChanged<String> onSearchChanged;
-  final ValueChanged<_ConfidenceFilter> onConfidenceFilterChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: _screenSurface(context, elevated: true).withAlpha(240),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: border),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x12000000),
-            blurRadius: 20,
-            offset: Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            searchQuery.trim().isEmpty
-                ? 'Search live matches'
-                : 'Filtering: ${searchQuery.trim()}',
-            style: TextStyle(
-              color: secondaryText,
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 10),
-          TextField(
-            onChanged: onSearchChanged,
-            style: TextStyle(color: primaryText, fontSize: 15),
-            textInputAction: TextInputAction.search,
-            decoration: InputDecoration(
-              hintText: 'Search teams, status, time',
-              hintStyle: TextStyle(color: secondaryText),
-              prefixIcon: Icon(Icons.search, color: secondaryText),
-              filled: true,
-              fillColor: inputFill,
-              contentPadding: const EdgeInsets.symmetric(vertical: 14),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(18),
-                borderSide: BorderSide.none,
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(18),
-                borderSide: BorderSide(color: border),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(18),
-                borderSide: const BorderSide(
-                  color: Color(0xFF00D4AA),
-                  width: 1.2,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _ConfidenceFilter.values.map((filter) {
-              final isSelected = filter == confidenceFilter;
-              return ChoiceChip(
-                label: Text(filter.label),
-                selected: isSelected,
-                onSelected: (_) => onConfidenceFilterChanged(filter),
-                selectedColor: const Color(0xFF00D4AA),
-                labelStyle: TextStyle(
-                  color: isSelected
-                      ? const Color(0xFF07111F)
-                      : primaryText,
-                  fontWeight: FontWeight.w700,
-                ),
-                backgroundColor: inputFill,
-                side: BorderSide(color: border),
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 class _SearchResult {
   const _SearchResult({required this.query, required this.filter});
@@ -2047,8 +1911,6 @@ class _SearchModalState extends State<_SearchModal> {
     final secondaryText = _secondaryText(context);
     final inputFill = _inputFill(context);
     final border = _screenBorder(context);
-    final surface = _screenSurface(context, elevated: true);
-
     return Align(
       alignment: Alignment.topCenter,
       child: Material(
@@ -3138,10 +3000,12 @@ class _TodayCategorySelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final surface = _screenSurface(context);
+    final isDark = _isDarkContext(context);
+    final barBg = isDark ? const Color(0xFF121B2E) : const Color(0xFFE8EEF5);
     final border = _screenBorder(context);
     final primaryText = _primaryText(context);
     final secondaryText = _secondaryText(context);
+
     final items = _TodayBucket.values.map((bucket) {
       final isSelected = bucket == selectedBucket;
       final count = counts[bucket] ?? 0;
@@ -3149,16 +3013,21 @@ class _TodayCategorySelector extends StatelessWidget {
         child: GestureDetector(
           onTap: () => onSelectBucket(bucket),
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOut,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            margin: const EdgeInsets.only(right: 8),
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeInOut,
+            padding: const EdgeInsets.symmetric(vertical: 8),
             decoration: BoxDecoration(
-              color: isSelected ? const Color(0xFF00D4AA) : surface,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(
-                color: isSelected ? const Color(0xFF00D4AA) : border,
-              ),
+              color: isSelected ? const Color(0xFF00D4AA) : Colors.transparent,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: isSelected
+                  ? [
+                      BoxShadow(
+                        color: const Color(0xFF00D4AA).withAlpha(60),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      )
+                    ]
+                  : null,
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -3167,18 +3036,27 @@ class _TodayCategorySelector extends StatelessWidget {
                   _todayBucketLabel(bucket),
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: isSelected ? const Color(0xFF07111F) : primaryText,
+                    color: isSelected ? const Color(0xFF0A0F1E) : primaryText,
                     fontSize: 12,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  '$count',
-                  style: TextStyle(
-                    color: isSelected ? const Color(0xFF07111F) : secondaryText,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
+                const SizedBox(height: 3),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? const Color(0xFF0A0F1E).withAlpha(30)
+                        : (isDark ? const Color(0xFF1E293B) : const Color(0xFFDFE6F0)),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '$count',
+                    style: TextStyle(
+                      color: isSelected ? const Color(0xFF0A0F1E) : secondaryText,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
                 ),
               ],
@@ -3188,7 +3066,15 @@ class _TodayCategorySelector extends StatelessWidget {
       );
     }).toList();
 
-    return Row(children: items);
+    return Container(
+      padding: const EdgeInsets.all(5),
+      decoration: BoxDecoration(
+        color: barBg,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: border),
+      ),
+      child: Row(children: items),
+    );
   }
 }
 
@@ -3386,26 +3272,36 @@ class _DateSectionHeader extends StatelessWidget {
     final accentText = _accentText(context);
     return Container(
       width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 2),
       child: Material(
         color: surface,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         child: InkWell(
           onTap: canToggle ? onTap : null,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(16),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: BorderRadius.circular(16),
               border: Border.all(color: border),
             ),
             child: Row(
               children: [
+                Container(
+                  width: 4,
+                  height: 18,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF00D4AA),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     label,
                     style: TextStyle(
                       color: primaryText,
-                      fontSize: 18,
+                      fontSize: 16,
                       fontWeight: FontWeight.w800,
                     ),
                   ),
@@ -3413,17 +3309,18 @@ class _DateSectionHeader extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 10,
-                    vertical: 6,
+                    vertical: 5,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF00D4AA).withAlpha(31),
+                    color: const Color(0xFF00D4AA).withAlpha(24),
                     borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: const Color(0xFF00D4AA).withAlpha(50)),
                   ),
                   child: Text(
                     '$count',
                     style: TextStyle(
                       color: accentText,
-                      fontSize: 12,
+                      fontSize: 11,
                       fontWeight: FontWeight.w800,
                     ),
                   ),
@@ -3433,9 +3330,10 @@ class _DateSectionHeader extends StatelessWidget {
                   Icon(
                     isExpanded ? Icons.expand_less : Icons.expand_more,
                     color: accentText,
+                    size: 20,
                   )
                 else
-                  Icon(Icons.push_pin, color: accentText),
+                  Icon(Icons.push_pin, color: accentText, size: 16),
               ],
             ),
           ),
@@ -3455,6 +3353,7 @@ class PredictionGroupCard extends StatelessWidget {
     required this.isSelected,
     required this.canSelect,
     required this.onSelectionPressed,
+    this.isPopular,
   });
 
   final PredictionRecord prediction;
@@ -3464,11 +3363,13 @@ class PredictionGroupCard extends StatelessWidget {
   final bool isSelected;
   final bool canSelect;
   final VoidCallback onSelectionPressed;
+  final bool? isPopular;
 
   @override
   Widget build(BuildContext context) {
     final surface = _screenSurface(context);
     final border = _screenBorder(context);
+    final popular = isPopular ?? _isPopularPrediction(prediction);
     final primaryPick = _PickCardData.fromPick(
       'Primary pick',
       prediction.primaryPick,
@@ -3476,90 +3377,150 @@ class PredictionGroupCard extends StatelessWidget {
       prediction,
     );
 
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(26),
+        borderRadius: BorderRadius.circular(24),
         color: surface,
-        border: Border.all(color: border),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x33000000),
-            blurRadius: 20,
-            offset: Offset(0, 10),
-          ),
+        border: Border.all(
+          color: isSelected
+              ? const Color(0xFF00D4AA)
+              : popular
+                  ? const Color(0xFF00D4AA)
+                  : border,
+          width: isSelected || popular ? 1.5 : 1.0,
+        ),
+        boxShadow: [
+          if (popular)
+            BoxShadow(
+              color: const Color(0xFF00D4AA).withValues(alpha: 0.12),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
+            )
+          else
+            const BoxShadow(
+              color: Color(0x1A000000),
+              blurRadius: 16,
+              offset: Offset(0, 8),
+            ),
         ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _MatchHeader(
-              homeTeamLogoUrl: prediction.homeTeamLogoUrl,
-              homeTeamName: prediction.homeTeamName,
-              awayTeamLogoUrl: prediction.awayTeamLogoUrl,
-              awayTeamName: prediction.awayTeamName,
-              homeScore: _teamScoreLabel(
-                prediction.currentHomeGoals,
-                prediction.fulltimeHomeGoals,
-              ),
-              awayScore: _teamScoreLabel(
-                prediction.currentAwayGoals,
-                prediction.fulltimeAwayGoals,
-              ),
-              confidenceLabel: _confidenceBadgeLabel(prediction),
-            ),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
+      child: Stack(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _MetaChip(
-                  icon: Icons.schedule,
-                  label: _formatTimeOnly(
-                    prediction.kickoffAt ?? prediction.releaseAt,
+                _MatchHeader(
+                  prediction: prediction,
+                  isPopularOverride: popular,
+                  homeScore: _teamScoreLabel(
+                    prediction.currentHomeGoals,
+                    prediction.fulltimeHomeGoals,
                   ),
-                ),
-                _MetaChip(
-                  icon: _matchStatusIcon(prediction),
-                  label: _matchStatusLabel(prediction),
-                ),
-                if (prediction.predictedWinner != null)
-                  _MetaChip(
-                    icon: Icons.flag,
-                    label: prediction.predictedWinner!,
+                  awayScore: _teamScoreLabel(
+                    prediction.currentAwayGoals,
+                    prediction.fulltimeAwayGoals,
                   ),
+                  confidenceLabel: _confidenceBadgeLabel(prediction),
+                ),
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _MetaChip(
+                      icon: Icons.schedule,
+                      iconColor: Colors.blueAccent,
+                      label: _formatTimeOnly(
+                        prediction.kickoffAt ?? prediction.releaseAt,
+                      ),
+                    ),
+                    _MetaChip(
+                      icon: _matchStatusIcon(prediction),
+                      iconColor: _matchStatusLabel(prediction) == 'Live' ? Colors.redAccent : Colors.orangeAccent,
+                      label: _matchStatusLabel(prediction),
+                    ),
+                    if (prediction.predictedWinner != null)
+                      _MetaChip(
+                        icon: Icons.flag,
+                        iconColor: const Color(0xFF00D4AA),
+                        label: prediction.predictedWinner!,
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 220),
+                  child: isLocked
+                      ? _LockedPickGate(
+                          key: const ValueKey('locked'),
+                          isUnlocking: isUnlocking,
+                          onUnlockPressed: onUnlockPressed,
+                        )
+                      : _PickCard(
+                          key: const ValueKey('unlocked'),
+                          data: primaryPick,
+                        ),
+                ),
+                if (canSelect) ...[
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FilledButton.tonalIcon(
+                      onPressed: onSelectionPressed,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: isSelected
+                            ? const Color(0xFF00D4AA).withAlpha(35)
+                            : null,
+                        foregroundColor: isSelected
+                            ? const Color(0xFF00D4AA)
+                            : null,
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      icon: Icon(
+                        isSelected ? Icons.check_circle : Icons.add_circle_outline,
+                        size: 18,
+                      ),
+                      label: Text(
+                        isSelected ? 'Selected' : 'Select Match',
+                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
-            const SizedBox(height: 10),
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 220),
-              child: isLocked
-                  ? _LockedPickGate(
-                      key: const ValueKey('locked'),
-                      isUnlocking: isUnlocking,
-                      onUnlockPressed: onUnlockPressed,
-                    )
-                  : _PickCard(
-                      key: const ValueKey('unlocked'),
-                      data: primaryPick,
+          ),
+          if (popular)
+            Positioned(
+              right: 14,
+              top: 14,
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF00D4AA).withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF00D4AA).withValues(alpha: 0.4),
+                      blurRadius: 8,
+                      spreadRadius: 2,
                     ),
-            ),
-            if (canSelect) ...[
-              const SizedBox(height: 12),
-              Align(
-                alignment: Alignment.centerRight,
-                child: FilledButton.tonalIcon(
-                  onPressed: onSelectionPressed,
-                  icon: Icon(
-                    isSelected ? Icons.check_circle : Icons.add_circle_outline,
-                  ),
-                  label: Text(isSelected ? 'Selected' : 'Select'),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.whatshot,
+                  color: Color(0xFF00D4AA),
+                  size: 16,
                 ),
               ),
-            ],
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -3584,65 +3545,121 @@ Widget _teamBadge({
       .join()
       .toUpperCase();
 
-  final surface = _screenSurface(context);
+  final isDark = _isDarkContext(context);
+  final avatarBg = isDark
+      ? const Color(0xFF1E293B)
+      : const Color(0xFFE2E8F0);
   final primaryText = _primaryText(context);
 
   return Column(
     mainAxisSize: MainAxisSize.min,
     children: [
       Container(
-        width: 44,
-        height: 44,
+        width: 46,
+        height: 46,
         decoration: BoxDecoration(
-          color: surface.withAlpha(35),
+          color: avatarBg,
           shape: BoxShape.circle,
+          border: Border.all(color: _screenBorder(context).withAlpha(120), width: 1),
         ),
         clipBehavior: Clip.antiAlias,
         child: (logoUrl != null && logoUrl.isNotEmpty)
             ? Image.network(
                 logoUrl,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Center(
-                  child: Text(
-                    initials.isEmpty ? (isHome ? 'H' : 'A') : initials,
-                    style: TextStyle(
-                      color: primaryText,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
+                loadingBuilder: (context, child, loadingProgress) {
+                  if (loadingProgress == null) return child;
+                  return Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: isDark
+                            ? const [Color(0xFF1E293B), Color(0xFF0F172A)]
+                            : const [Color(0xFFE2E8F0), Color(0xFFCBD5E1)],
+                      ),
+                    ),
+                    child: Center(
+                      child: Text(
+                        initials.isEmpty ? (isHome ? 'H' : 'A') : initials,
+                        style: TextStyle(
+                          color: primaryText.withValues(alpha: 0.55),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+                errorBuilder: (_, __, ___) => Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: isDark
+                          ? const [Color(0xFF1E293B), Color(0xFF0F172A)]
+                          : const [Color(0xFFE2E8F0), Color(0xFFCBD5E1)],
+                    ),
+                  ),
+                  child: Center(
+                    child: Text(
+                      initials.isEmpty ? (isHome ? 'H' : 'A') : initials,
+                      style: TextStyle(
+                        color: primaryText,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
                 ),
               )
-            : Center(
-                child: Text(
-                  initials.isEmpty ? (isHome ? 'H' : 'A') : initials,
-                  style: TextStyle(
-                    color: primaryText,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
+            : Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: isDark
+                        ? const [Color(0xFF1E293B), Color(0xFF0F172A)]
+                        : const [Color(0xFFE2E8F0), Color(0xFFCBD5E1)],
+                  ),
+                ),
+                child: Center(
+                  child: Text(
+                    initials.isEmpty ? (isHome ? 'H' : 'A') : initials,
+                    style: TextStyle(
+                      color: primaryText,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
               ),
       ),
       const SizedBox(height: 8),
       SizedBox(
-        width: 110,
+        width: 105,
         child: Text(
           displayName,
           maxLines: 2,
           textAlign: TextAlign.center,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontWeight: FontWeight.w700, height: 1.1),
+          style: const TextStyle(
+            fontWeight: FontWeight.w800, 
+            fontSize: 13,
+            height: 1.15
+          ),
         ),
       ),
       if (scoreText != null) ...[
-        const SizedBox(height: 4),
-        Text(
-          scoreText,
-          style: TextStyle(
-            color: _secondaryText(context),
-            fontSize: 12,
-            fontWeight: FontWeight.w800,
+        const SizedBox(height: 6),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: _screenBorder(context).withAlpha(100)),
+          ),
+          child: Text(
+            scoreText,
+            style: TextStyle(
+              color: primaryText,
+              fontSize: 13,
+              fontWeight: FontWeight.w900,
+            ),
           ),
         ),
       ],
@@ -3652,63 +3669,97 @@ Widget _teamBadge({
 
 class _MatchHeader extends StatelessWidget {
   const _MatchHeader({
-    required this.homeTeamLogoUrl,
-    required this.homeTeamName,
-    required this.awayTeamLogoUrl,
-    required this.awayTeamName,
+    required this.prediction,
     required this.homeScore,
     required this.awayScore,
     required this.confidenceLabel,
+    this.isPopularOverride,
   });
 
-  final String? homeTeamLogoUrl;
-  final String? homeTeamName;
-  final String? awayTeamLogoUrl;
-  final String? awayTeamName;
+  final PredictionRecord prediction;
   final String? homeScore;
   final String? awayScore;
   final String confidenceLabel;
+  final bool? isPopularOverride;
 
   @override
   Widget build(BuildContext context) {
+    final isPopular = isPopularOverride ?? _isPopularPrediction(prediction);
+    final isDark = _isDarkContext(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (isPopular) ...[
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF6D00).withAlpha(28),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFFF6D00).withAlpha(80)),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.whatshot, size: 14, color: Color(0xFFFF6D00)),
+                    SizedBox(width: 4),
+                    Text(
+                      'POPULAR MATCH',
+                      style: TextStyle(
+                        color: Color(0xFFFF6D00),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              _StatusChip(label: confidenceLabel),
+            ],
+          ),
+          const SizedBox(height: 12),
+        ],
         Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Expanded(
               child: _teamBadge(
                 context: context,
-                logoUrl: homeTeamLogoUrl,
-                teamName: homeTeamName,
+                logoUrl: prediction.homeTeamLogoUrl,
+                teamName: prediction.homeTeamName,
                 isHome: true,
                 scoreText: homeScore,
               ),
             ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
               child: Container(
-                width: 46,
-                height: 46,
+                width: 42,
+                height: 42,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: RadialGradient(
-                    colors: _isDarkContext(context)
-                        ? const [Color(0xFF183B5B), Color(0xFF0E1E33)]
-                        : const [Color(0xFFD9E7F3), Color(0xFFBFD1E4)],
+                    colors: isDark
+                        ? const [Color(0xFF1E293B), Color(0xFF0F172A)]
+                        : const [Color(0xFFE2E8F0), Color(0xFFCBD5E1)],
                     radius: 0.95,
                   ),
                   border: Border.all(
-                    color: _isDarkContext(context)
-                        ? const Color(0xFF2D5A86)
-                        : const Color(0xFFAEC3D8),
+                    color: isDark
+                        ? const Color(0xFF334155)
+                        : const Color(0xFF94A3B8),
+                    width: 1,
                   ),
-                  boxShadow: const [
+                  boxShadow: [
                     BoxShadow(
-                      color: Color(0x3300D4AA),
-                      blurRadius: 14,
-                      offset: Offset(0, 6),
+                      color: isPopular
+                          ? const Color(0xFFFF6D00).withAlpha(35)
+                          : const Color(0xFF00D4AA).withAlpha(25),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
                     ),
                   ],
                 ),
@@ -3716,17 +3767,17 @@ class _MatchHeader extends StatelessWidget {
                   child: Text(
                     'VS',
                     style: TextStyle(
-                      color: _isDarkContext(context)
-                          ? const Color(0xFFF4F8FC)
-                          : const Color(0xFF0B1626),
-                      fontSize: 15,
+                      color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
+                      fontSize: 14,
                       fontWeight: FontWeight.w900,
-                      letterSpacing: 1.1,
+                      letterSpacing: 0.8,
                       shadows: [
                         Shadow(
-                          color: Color(0x6600D4AA),
-                          blurRadius: 8,
-                          offset: Offset(0, 2),
+                          color: isPopular
+                              ? const Color(0xFFFF6D00).withAlpha(40)
+                              : const Color(0xFF00D4AA).withAlpha(40),
+                          blurRadius: 6,
+                          offset: const Offset(0, 1),
                         ),
                       ],
                     ),
@@ -3737,19 +3788,21 @@ class _MatchHeader extends StatelessWidget {
             Expanded(
               child: _teamBadge(
                 context: context,
-                logoUrl: awayTeamLogoUrl,
-                teamName: awayTeamName,
+                logoUrl: prediction.awayTeamLogoUrl,
+                teamName: prediction.awayTeamName,
                 isHome: false,
                 scoreText: awayScore,
               ),
             ),
           ],
         ),
-        const SizedBox(height: 12),
-        Align(
-          alignment: Alignment.centerRight,
-          child: _StatusChip(label: confidenceLabel),
-        ),
+        if (!isPopular) ...[
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerRight,
+            child: _StatusChip(label: confidenceLabel),
+          ),
+        ],
       ],
     );
   }
@@ -3766,68 +3819,81 @@ class _PickCard extends StatelessWidget {
     final border = _screenBorder(context);
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(16),
         color: surface,
         border: Border.all(color: border),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (data.verdictLabel != null) ...[
-                _TinyVerdictChip(
-                  label: data.verdictLabel!,
-                  color: data.verdictColor!,
-                ),
-                const SizedBox(width: 8),
-              ],
               Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  color: data.accent,
-                  shape: BoxShape.circle,
-                ),
+                width: 4,
+                color: data.accent,
               ),
-              const SizedBox(width: 8),
               Expanded(
-                child: Text(
-                  data.label,
-                  style: TextStyle(
-                    color: _primaryText(context),
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          if (data.verdictLabel != null) ...[
+                            _TinyVerdictChip(
+                              label: data.verdictLabel!,
+                              color: data.verdictColor!,
+                            ),
+                            const SizedBox(width: 8),
+                          ],
+                          Expanded(
+                            child: Text(
+                              data.label.toUpperCase(),
+                              style: TextStyle(
+                                color: _secondaryText(context),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.8,
+                              ),
+                            ),
+                          ),
+                          if (data.confidence != null) ...[
+                            const SizedBox(width: 8),
+                            _ConfidencePill(value: data.confidence!),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        finalSelection(data),
+                        style: TextStyle(
+                          color: _primaryText(context),
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      if (data.reason != null && data.reason!.trim().isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          data.reason!,
+                          style: TextStyle(
+                            color: _secondaryText(context),
+                            fontSize: 13,
+                            height: 1.4,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               ),
-              if (data.confidence != null) ...[
-                const SizedBox(width: 8),
-                _ConfidencePill(value: data.confidence!),
-              ],
             ],
           ),
-          const SizedBox(height: 10),
-          Text(
-            finalSelection(data),
-            style: TextStyle(
-              color: _secondaryText(context),
-              fontSize: 17,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            data.reason ?? 'No reason provided.',
-            style: TextStyle(
-              color: _secondaryText(context).withAlpha(189),
-              fontSize: 15,
-              height: 1.45,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -3845,65 +3911,100 @@ class _LockedPickGate extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final surface = _screenSurface(context, elevated: true);
+    final isDark = _isDarkContext(context);
     final border = _screenBorder(context);
     final primaryText = _primaryText(context);
     final secondaryText = _secondaryText(context);
-    final accentText = _accentText(context);
+
+    final cardBg = isDark
+        ? const [Color(0xFF131E31), Color(0xFF0F1626)]
+        : const [Color(0xFFEBEFF5), Color(0xFFDFE6EE)];
+
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        color: surface,
-        border: Border.all(color: border),
+        borderRadius: BorderRadius.circular(18),
+        gradient: LinearGradient(
+          colors: cardBg,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        border: Border.all(color: border, width: 1.2),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Row(
-            children: [
-              Icon(Icons.lock_outline, color: accentText, size: 18),
-              const SizedBox(width: 8),
-              Text(
-                'Pick locked',
-                style: TextStyle(
-                  color: primaryText,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ],
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF00D4AA).withAlpha(15),
+              shape: BoxShape.circle,
+              border: Border.all(color: const Color(0xFF00D4AA).withAlpha(35), width: 1.5),
+            ),
+            child: const Icon(
+              Icons.lock_person,
+              color: Color(0xFF00D4AA),
+              size: 28,
+            ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           Text(
-            'Watch an ad to open this pick for this session.',
-            style: TextStyle(color: secondaryText, fontSize: 14, height: 1.4),
+            'PREDICTION LOCKED',
+            style: TextStyle(
+              color: primaryText,
+              fontSize: 14,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0.8,
+            ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 6),
+          Text(
+            'Unlock this primary pick by watching a quick sponsor video.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: secondaryText,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
             child: FilledButton(
               onPressed: isUnlocking ? null : onUnlockPressed,
               style: FilledButton.styleFrom(
                 backgroundColor: const Color(0xFF00D4AA),
-                foregroundColor: const Color(0xFF07111F),
+                foregroundColor: const Color(0xFF0A0F1E),
+                elevation: 4,
+                shadowColor: const Color(0xFF00D4AA).withAlpha(60),
                 padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
               child: isUnlocking
                   ? const SizedBox(
                       height: 18,
                       width: 18,
                       child: CircularProgressIndicator(
-                        strokeWidth: 2.2,
+                        strokeWidth: 2.5,
                         valueColor: AlwaysStoppedAnimation<Color>(
-                          Color(0xFF07111F),
+                          Color(0xFF0A0F1E),
                         ),
                       ),
                     )
-                  : const Text(
-                      'Watch ad to unlock',
-                      style: TextStyle(fontWeight: FontWeight.w800),
+                  : const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.play_circle_fill, size: 18, color: Color(0xFF0A0F1D)),
+                        SizedBox(width: 8),
+                        Text(
+                          'Watch Ad to Unlock',
+                          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13),
+                        ),
+                      ],
                     ),
             ),
           ),
@@ -3954,54 +4055,6 @@ String? _teamScoreLabel(String? currentGoals, String? fulltimeGoals) {
 
 enum _PickVerdict { pending, correct, wrong }
 
-class _MiniStatusChip extends StatelessWidget {
-  const _MiniStatusChip({
-    required this.label,
-    required this.color,
-    required this.icon,
-  });
-
-  final String label;
-  final Color color;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-      decoration: BoxDecoration(
-        color: color.withAlpha(28),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withAlpha(80)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 13, color: color),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(
-              color: color,
-              fontSize: 12,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-String _scoreLabel(PredictionRecord prediction) {
-  final home = prediction.fulltimeHomeGoals ?? prediction.currentHomeGoals;
-  final away = prediction.fulltimeAwayGoals ?? prediction.currentAwayGoals;
-  if (home == null && away == null) {
-    return 'Score pending';
-  }
-
-  return '${home ?? '-'}-${away ?? '-'}';
-}
 
 _PickVerdict _pickVerdict(PredictionRecord prediction) {
   final outcome = prediction.matchOutcome?.trim().toLowerCase();
@@ -4179,28 +4232,31 @@ class _StatusChip extends StatelessWidget {
 }
 
 class _MetaChip extends StatelessWidget {
-  const _MetaChip({required this.icon, required this.label});
+  const _MetaChip({required this.icon, required this.label, this.iconColor});
 
   final IconData icon;
   final String label;
+  final Color? iconColor;
 
   @override
   Widget build(BuildContext context) {
-    final surface = _screenSurface(context, elevated: true);
-    final border = _screenBorder(context);
-    final accentText = _accentText(context);
+    final isDark = _isDarkContext(context);
+    final effectiveIconColor = iconColor ?? _accentText(context);
+    final surface = effectiveIconColor.withValues(alpha: isDark ? 0.12 : 0.08);
+    final border = effectiveIconColor.withValues(alpha: isDark ? 0.25 : 0.15);
     final primaryText = _primaryText(context);
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: surface,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: border),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: accentText),
+          Icon(icon, size: 14, color: effectiveIconColor),
           const SizedBox(width: 6),
           Text(
             label,
@@ -4343,7 +4399,6 @@ String _formatDate(DateTime? value) {
   if (local == null) {
     return 'unknown time';
   }
-
   final month = local.month.toString().padLeft(2, '0');
   final day = local.day.toString().padLeft(2, '0');
   final hour = local.hour.toString().padLeft(2, '0');
@@ -4356,7 +4411,6 @@ String _formatDateTime(DateTime? value) {
   if (local == null) {
     return 'unknown time';
   }
-
   final month = local.month.toString().padLeft(2, '0');
   final day = local.day.toString().padLeft(2, '0');
   final hour = local.hour.toString().padLeft(2, '0');
@@ -4439,6 +4493,21 @@ bool _predictionMatchesPlan(
   };
 }
 
+bool _isPopularPrediction(PredictionRecord prediction) {
+  final home = prediction.homeTeamName?.toLowerCase() ?? '';
+  final away = prediction.awayTeamName?.toLowerCase() ?? '';
+  final popularClubs = [
+    'madrid', 'barcelona', 'bayern', 'united', 'city', 'arsenal', 'liverpool',
+    'chelsea', 'psg', 'juventus', 'milan', 'inter', 'dortmund', 'tottenham',
+    'atletico', 'napoli', 'porto', 'benfica', 'ajax'
+  ];
+  final matchesPopularClub = popularClubs.any((club) => home.contains(club) || away.contains(club));
+  final isHighConfidence = _predictionConfidencePercent(prediction) >= 83;
+  final isPremium = _predictionMatchesPlan(prediction, SubscriptionPlanId.premium);
+  // Exclude premium matches from popular list
+  return (matchesPopularClub || isHighConfidence) && !isPremium;
+}
+
 String _planConfidenceLabel(SubscriptionPlanId plan) {
   return switch (plan) {
     SubscriptionPlanId.weeklyAdFree => 'Ad free for 7 days',
@@ -4509,4 +4578,529 @@ IconData _matchStatusIcon(PredictionRecord prediction) {
     return Icons.play_circle;
   }
   return Icons.schedule;
+}
+
+class _HeaderInfoCarousel extends StatefulWidget {
+  const _HeaderInfoCarousel({
+    required this.predictions,
+    required this.onOpenPremium,
+    required this.onOpenPopularMatches,
+  });
+
+  final List<PredictionRecord> predictions;
+  final VoidCallback onOpenPremium;
+  final VoidCallback onOpenPopularMatches;
+
+  @override
+  State<_HeaderInfoCarousel> createState() => _HeaderInfoCarouselState();
+}
+
+class _HeaderInfoCarouselState extends State<_HeaderInfoCarousel> {
+  late final PageController _controller;
+  int _currentPage = 0;
+  Timer? _autoPlayTimer;
+  late final Future<Map<String, dynamic>> _todayStatsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = PageController();
+    _todayStatsFuture = PredictionRepository().getTodayStats();
+    _autoPlayTimer = Timer.periodic(const Duration(seconds: 6), (timer) {
+      if (!mounted) return;
+      final nextPage = (_currentPage + 1) % 3;
+      _controller.animateToPage(
+        nextPage,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeInOut,
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _autoPlayTimer?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Widget _buildSubscriptionSlide(BuildContext context, bool isDark) {
+    final primaryText = _primaryText(context);
+    final secondaryText = _secondaryText(context);
+    final border = isDark ? const Color(0xFF6B4E1A) : const Color(0xFFFCDCA2);
+    final gradientColors = isDark
+        ? [const Color(0xFF3B2A0F), const Color(0xFF0A0F1E)]
+        : [const Color(0xFFFFF7E6), Colors.white];
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 2),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: gradientColors,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: border.withAlpha(120), width: 1.2),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0F000000),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: widget.onOpenPremium,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFB300).withAlpha(20),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: const Color(0xFFFFB300).withAlpha(40)),
+                  ),
+                  child: const Icon(Icons.workspace_premium, color: Color(0xFFFFB300), size: 24),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        "Unlock Premium Plans",
+                        style: TextStyle(
+                          color: primaryText,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        "Ad-Free • Exclusive Predictions • Early Access",
+                        style: TextStyle(
+                          color: secondaryText,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: widget.onOpenPremium,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFFFFB300),
+                    foregroundColor: const Color(0xFF0A0F1E),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: const Text(
+                    "Subscribe",
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = _isDarkContext(context);
+
+    return Column(
+      children: [
+        SizedBox(
+          height: 122,
+          child: PageView(
+            controller: _controller,
+            onPageChanged: (page) {
+              setState(() {
+                _currentPage = page;
+              });
+            },
+            children: [
+              FutureBuilder<Map<String, dynamic>>(
+                future: _todayStatsFuture,
+                builder: (context, snapshot) {
+                  final stats = snapshot.data;
+                  final totalCorrect = stats?['totalCorrect'] ?? 0;
+                  final totalChecked = stats?['totalChecked'] ?? 0;
+                  final accuracy = stats?['accuracy'] ?? 86;
+
+                  return _buildCarouselCard(
+                    context,
+                    gradientColors: isDark
+                        ? [const Color(0xFF0F1E36), const Color(0xFF0A0F1E)]
+                        : [const Color(0xFFE6F4F1), Colors.white],
+                    border: isDark ? const Color(0xFF233554) : const Color(0xFFBFE3DC),
+                    icon: Icons.analytics,
+                    iconColor: const Color(0xFF00D4AA),
+                    title: "Today's Dynamic Stats",
+                    body: snapshot.connectionState == ConnectionState.waiting
+                        ? "Calculating today's statistics..."
+                        : "Win Rate: $accuracy% Accuracy today.\nMatches solved: $totalCorrect won out of $totalChecked completed matches today.",
+                    onTap: null,
+                  );
+                },
+              ),
+              _buildSubscriptionSlide(context, isDark),
+              _buildCarouselCard(
+                context,
+                gradientColors: isDark
+                    ? [const Color(0xFF361810), const Color(0xFF0A0F1E)]
+                    : [const Color(0xFFFFEBE5), Colors.white],
+                border: isDark ? const Color(0xFF662F20) : const Color(0xFFFFC4B3),
+                icon: Icons.whatshot,
+                iconColor: const Color(0xFFFF5252),
+                title: "Popular Matches Feed",
+                body: "Chelsea, Arsenal, Barca & Real Madrid. Tap to view today's hottest fixtures.",
+                onTap: widget.onOpenPopularMatches,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: List.generate(3, (index) {
+            final active = index == _currentPage;
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              margin: const EdgeInsets.symmetric(horizontal: 4),
+              width: active ? 16 : 6,
+              height: 6,
+              decoration: BoxDecoration(
+                color: active
+                    ? const Color(0xFF00D4AA)
+                    : _screenBorder(context).withAlpha(150),
+                borderRadius: BorderRadius.circular(3),
+                boxShadow: active
+                    ? [
+                        BoxShadow(
+                          color: const Color(0xFF00D4AA).withValues(alpha: 0.6),
+                          blurRadius: 6,
+                          spreadRadius: 1.5,
+                        ),
+                      ]
+                    : null,
+              ),
+            );
+          }),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCarouselCard(
+    BuildContext context, {
+    required List<Color> gradientColors,
+    required Color border,
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String body,
+    required VoidCallback? onTap,
+  }) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 2),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: gradientColors,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: border.withAlpha(120), width: 1.2),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0F000000),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: iconColor.withAlpha(20),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: iconColor.withAlpha(40)),
+                  ),
+                  child: Icon(icon, color: iconColor, size: 24),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          color: _primaryText(context),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        body,
+                        style: TextStyle(
+                          color: _secondaryText(context),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          height: 1.35,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                if (onTap != null) ...[
+                  const SizedBox(width: 8),
+                  Icon(
+                    Icons.chevron_right,
+                    color: _secondaryText(context).withAlpha(150),
+                    size: 20,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class PopularMatchesPage extends StatefulWidget {
+  const PopularMatchesPage({
+    super.key,
+    required this.predictions,
+    required this.adFree,
+    required this.isAdmin,
+  });
+
+  final List<PredictionRecord> predictions;
+  final bool adFree;
+  final bool isAdmin;
+
+  @override
+  State<PopularMatchesPage> createState() => _PopularMatchesPageState();
+}
+
+class _PopularMatchesPageState extends State<PopularMatchesPage> {
+  final Set<String> _unlockedPickKeys = <String>{};
+  String? _unlockingPickKey;
+
+  bool _isPickUnlocked(PredictionRecord prediction) {
+    if (widget.adFree) return true;
+    final unlockKey = _predictionUnlockKey(prediction);
+    if (_unlockedPickKeys.contains(unlockKey)) return true;
+    // Check subscription plan access
+    final activePlan = GooglePlayBillingService.instance.activePlan;
+    if (activePlan != null && _predictionMatchesPlan(prediction, activePlan)) {
+      return true;
+    }
+    return false;
+  }
+
+  Future<void> _unlockPick(PredictionRecord prediction) async {
+    if (widget.adFree) return;
+    final unlockKey = _predictionUnlockKey(prediction);
+    if (unlockKey.isEmpty || _unlockedPickKeys.contains(unlockKey)) return;
+    if (_unlockingPickKey == unlockKey) return;
+
+    setState(() {
+      _unlockingPickKey = unlockKey;
+    });
+
+    try {
+      final didUnlock = await AdGateService.instance.showRewardedAd();
+      if (!mounted) return;
+      if (didUnlock) {
+        setState(() {
+          _unlockedPickKeys.add(unlockKey);
+        });
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Ad not ready yet. Please try again.')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _unlockingPickKey = null;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final popularList = widget.predictions.where(_isPopularPrediction).toList();
+    final isDark = _isDarkContext(context);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Popular Matches'),
+        backgroundColor: isDark ? const Color(0xFF0A0F1E) : const Color(0xFFF5F7FB),
+      ),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: _screenGradient(context),
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: SafeArea(
+          child: popularList.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: _EmptyState(
+                      icon: Icons.sports_soccer,
+                      title: 'No popular matches',
+                      message: 'There are no active matches flagged as popular right now.',
+                    ),
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                  itemCount: popularList.length,
+                  itemBuilder: (context, index) {
+                    final prediction = popularList[index];
+                    final unlockKey = _predictionUnlockKey(prediction);
+                    final isLocked = !_isPickUnlocked(prediction);
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: PredictionGroupCard(
+                        prediction: prediction,
+                        isLocked: isLocked,
+                        isUnlocking: _unlockingPickKey == unlockKey,
+                        onUnlockPressed: () => _unlockPick(prediction),
+                        isSelected: false,
+                        canSelect: false,
+                        onSelectionPressed: () {},
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PulsingIcon extends StatefulWidget {
+  const _PulsingIcon({required this.icon, required this.isActive});
+
+  final IconData icon;
+  final bool isActive;
+
+  @override
+  State<_PulsingIcon> createState() => _PulsingIconState();
+}
+
+class _PulsingIconState extends State<_PulsingIcon> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _scaleAnimation;
+  late Animation<double> _glowAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    );
+    _scaleAnimation = Tween<double>(begin: 1.0, end: 1.12).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+    _glowAnimation = Tween<double>(begin: 3.0, end: 11.0).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+    if (widget.isActive) {
+      _controller.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _PulsingIcon oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isActive != oldWidget.isActive) {
+      if (widget.isActive) {
+        _controller.repeat(reverse: true);
+      } else {
+        _controller.stop();
+        _controller.value = 0.0;
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.isActive) {
+      return Icon(widget.icon);
+    }
+
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return ScaleTransition(
+          scale: _scaleAnimation,
+          child: Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF00D4AA).withValues(alpha: 0.35),
+                  blurRadius: _glowAnimation.value,
+                  spreadRadius: _glowAnimation.value * 0.15,
+                ),
+              ],
+            ),
+            child: Icon(
+              widget.icon,
+              color: const Color(0xFF00D4AA),
+            ),
+          ),
+        );
+      },
+    );
+  }
 }

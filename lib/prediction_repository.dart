@@ -221,6 +221,80 @@ class PredictionRepository {
         .map((row) => PredictionRecord.fromMap(_normalizeRow(row)))
         .toList();
   }
+
+  Future<Map<String, dynamic>> getTodayStats() async {
+    final predictions = await fetchPublishedPredictions();
+    final now = DateTime.now().toLocal();
+    final todayFinished = predictions.where((p) {
+      if (p.kickoffAt == null) return false;
+      
+      final kickoffLocal = p.kickoffAt!.toLocal();
+      final isSameDay = kickoffLocal.year == now.year &&
+          kickoffLocal.month == now.month &&
+          kickoffLocal.day == now.day;
+
+      if (!isSameDay) return false;
+
+      final outcome = p.matchOutcome?.trim().toLowerCase();
+      return outcome != null && outcome.isNotEmpty;
+    }).toList();
+
+    var correctCount = 0;
+    for (final p in todayFinished) {
+      final outcome = p.matchOutcome?.trim().toLowerCase();
+      final selection = _normalizeSelectionLocal(p);
+      final homeTeam = _normalizeTextLocal(p.homeTeamName ?? '');
+      final awayTeam = _normalizeTextLocal(p.awayTeamName ?? '');
+      final homeGoals = _goalCountLocal(p.fulltimeHomeGoals ?? p.currentHomeGoals);
+      final awayGoals = _goalCountLocal(p.fulltimeAwayGoals ?? p.currentAwayGoals);
+
+      var isCorrect = false;
+
+      if (selection.contains('btts')) {
+        if (homeGoals != null && awayGoals != null) {
+          final yesPicked = selection.contains('yes');
+          final actualYes = homeGoals > 0 && awayGoals > 0;
+          isCorrect = yesPicked == actualYes;
+        }
+      } else {
+        final overUnder = _parseOverUnderSelectionLocal(selection);
+        if (overUnder != null) {
+          if (homeGoals != null && awayGoals != null) {
+            final totalGoals = homeGoals + awayGoals;
+            isCorrect = overUnder.isOver
+                ? totalGoals > overUnder.line
+                : totalGoals < overUnder.line;
+          }
+        } else if (selection.contains('home') || selection.contains('1') || selection.contains(homeTeam)) {
+          isCorrect = outcome == 'home';
+        } else if (selection.contains('away') || selection.contains('2') || selection.contains(awayTeam)) {
+          isCorrect = outcome == 'away';
+        } else if (selection.contains('draw') || selection == 'x') {
+          isCorrect = outcome == 'draw';
+        } else if (p.predictedWinner != null) {
+          final predictedWinner = _normalizeTextLocal(p.predictedWinner!);
+          if (predictedWinner.contains(homeTeam)) {
+            isCorrect = outcome == 'home';
+          } else if (predictedWinner.contains(awayTeam)) {
+            isCorrect = outcome == 'away';
+          } else if (predictedWinner.contains('draw')) {
+            isCorrect = outcome == 'draw';
+          }
+        }
+      }
+
+      if (isCorrect) {
+        correctCount++;
+      }
+    }
+
+    final overallAccuracy = todayFinished.isEmpty ? 0 : ((correctCount / todayFinished.length) * 100).round();
+    return {
+      'totalCorrect': correctCount,
+      'totalChecked': todayFinished.length,
+      'accuracy': overallAccuracy,
+    };
+  }
 }
 
 String _resolvePredictionText(
@@ -386,4 +460,47 @@ int _comparePredictionsForDisplay(
   }
 
   return left.fixtureApiId.compareTo(right.fixtureApiId);
+}
+
+bool isPopular(PredictionRecord p) {
+  const popularClubs = [
+    'Real Madrid', 'Manchester City', 'Liverpool',
+    'Barcelona', 'Bayern Munich', 'Paris Saint-Germain',
+    'Paris Saint‑Germain',
+  ];
+  final home = p.homeTeamName ?? '';
+  final away = p.awayTeamName ?? '';
+  final confidence = p.confidence ?? 0.0;
+  return popularClubs.any((c) => home.toLowerCase().contains(c.toLowerCase()) || away.toLowerCase().contains(c.toLowerCase()))
+      || confidence >= 0.85;
+}
+
+class _OverUnderSelectionLocal {
+  const _OverUnderSelectionLocal({required this.isOver, required this.line});
+  final bool isOver;
+  final double line;
+}
+
+String _normalizeSelectionLocal(PredictionRecord p) {
+  final selection = p.primaryPick?.selection?.trim() ?? '';
+  if (selection.isNotEmpty) return _normalizeTextLocal(selection);
+  final market = p.primaryPick?.market?.trim() ?? '';
+  return _normalizeTextLocal(market);
+}
+
+String _normalizeTextLocal(String value) {
+  return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9.]+'), ' ').trim();
+}
+
+double? _goalCountLocal(String? value) {
+  if (value == null || value.trim().isEmpty) return null;
+  return double.tryParse(value.trim());
+}
+
+_OverUnderSelectionLocal? _parseOverUnderSelectionLocal(String selection) {
+  final match = RegExp(r'(over|under)\s*(\d+(?:\.\d+)?)').firstMatch(selection);
+  if (match == null) return null;
+  final line = double.tryParse(match.group(2) ?? '');
+  if (line == null) return null;
+  return _OverUnderSelectionLocal(isOver: match.group(1) == 'over', line: line);
 }
