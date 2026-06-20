@@ -226,93 +226,6 @@ function getTimeZoneHour(value, timeZone = 'Africa/Lagos') {
   return Number.parseInt(map.hour, 10);
 }
 
-function selectFixturesByHourSpread(scoredFixtures, maxTotal, timeZone = 'Africa/Lagos') {
-  // scoredFixtures is already sorted best-score-first
-  // Step 1: separate popular league fixtures from the rest
-  const popularItems = [];
-  const regularItems = [];
-  for (const item of scoredFixtures) {
-    const kickoff = parseFixtureKickoff(item.fixture?.fixture?.date || null);
-    if (!kickoff) continue;
-    const hour = getTimeZoneHour(kickoff, timeZone);
-    const enriched = { ...item, kickoff, hour };
-    if (popularityBonus(item.fixture?.league?.id) > 0) {
-      popularItems.push(enriched);
-    } else {
-      regularItems.push(enriched);
-    }
-  }
-
-  const usedIds = new Set();
-  const selected = [];
-
-  // Step 2: always include ALL popular league matches first
-  for (const item of popularItems) {
-    const id = String(item.fixture?.fixture?.id ?? '');
-    if (!id || usedIds.has(id)) continue;
-    usedIds.add(id);
-    selected.push(item);
-  }
-
-  // Step 3: fill remaining slots from regular fixtures using hour-spread
-  // group regular fixtures by hour
-  const byHour = new Map();
-  for (const item of regularItems) {
-    if (!byHour.has(item.hour)) byHour.set(item.hour, []);
-    byHour.get(item.hour).push(item);
-  }
-
-  const hours = [...byHour.keys()].sort((a, b) => a - b);
-  const perHourMin = 4; // pick this many per hour per round before cycling
-
-  // Keep cycling rounds until cap is hit or all hours exhausted.
-  // Every hour that still has fixtures gets its picks BEFORE any hour
-  // gets an extra pick in the next round — no hour is ever skipped.
-  let round = 0;
-  while (selected.length < maxTotal) {
-    let addedThisRound = 0;
-    for (const hour of hours) {
-      const pool = byHour.get(hour);
-      const startIdx = round * perHourMin;
-      if (startIdx >= pool.length) continue; // this hour is exhausted
-      const endIdx = Math.min(startIdx + perHourMin, pool.length);
-      for (let i = startIdx; i < endIdx; i++) {
-        const item = pool[i];
-        const id = String(item.fixture?.fixture?.id ?? '');
-        if (!id || usedIds.has(id)) continue;
-        usedIds.add(id);
-        selected.push(item);
-        addedThisRound += 1;
-        // do NOT break on cap here — finish the full hour slice first
-      }
-    }
-    round += 1;
-    if (addedThisRound === 0) break; // every hour is exhausted
-    // trim to cap only after completing a full round across all hours
-    if (selected.length >= maxTotal) break;
-  }
-
-  // Sort final list by kickoff time
-  selected.sort((a, b) => a.kickoff.getTime() - b.kickoff.getTime());
-
-  const hourCounts = {};
-  for (const item of selected) {
-    hourCounts[item.hour] = (hourCounts[item.hour] || 0) + 1;
-  }
-
-  return {
-    selectedFixtures: selected.map((s) => s.fixture),
-    prefetchedH2HMap: new Map(selected.map((s) => [String(s.fixture?.fixture?.id ?? ''), s.h2hFixtures])),
-    stats: {
-      totalScored: scoredFixtures.length,
-      popularIncluded: popularItems.filter((i) => usedIds.has(String(i.fixture?.fixture?.id ?? ''))).length,
-      totalSelected: selected.length,
-      hoursRepresented: Object.keys(hourCounts).length,
-      hourCounts,
-    },
-  };
-}
-
 async function createRun(tablesdb, databaseId, tableId, data) {
   return tablesdb.createRow({
     databaseId,
@@ -755,10 +668,6 @@ async function fetchAndSaveH2HForFixtures({
   return { totalSaved, h2hFetchedFixtures: Math.min(fixtures.length, limit) };
 }
 
-async function fetchStoredH2HRowsForFixture(tablesdb, databaseId, h2hTable, fixtureApiId, homeTeamId, awayTeamId) {
-  return fetchH2hRowsForPair(tablesdb, databaseId, h2hTable, fixtureApiId, homeTeamId, awayTeamId);
-}
-
 function buildPrompt(fixture, h2hRows) {
   return [
     'You are a football prediction assistant.',
@@ -900,8 +809,8 @@ function parseConcurrency(value) {
 
 function parseMinimumH2hRows(value) {
   const parsed = Number.parseInt(String(value ?? ''), 10);
-  if (!Number.isFinite(parsed) || parsed < 1) {
-    return 2;
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 1;
   }
   return parsed;
 }
@@ -1457,7 +1366,6 @@ async function generatePredictionsForBatch({
   databaseId,
   fixtureContexts,
   fixturesTable,
-  h2hTable,
   predictionsTable,
   messaging,
   topicId,
@@ -1466,144 +1374,61 @@ async function generatePredictionsForBatch({
 }) {
   let saved = 0;
   let failed = 0;
-  let skipped = 0;
   let published = 0;
   let notified = 0;
-  const concurrency = parseConcurrency(process.env.APPWRITE_PREDICTION_CONCURRENCY || 10);
-  const minimumH2hRows = parseMinimumH2hRows(process.env.H2H_MIN_ROWS || 2);
+  const concurrency = parseConcurrency(process.env.APPWRITE_PREDICTION_CONCURRENCY || '10');
   const logger = typeof logFn === 'function' ? logFn : console.log;
 
-  logger(
-    JSON.stringify({
-      job: 'daily-sync-generate',
-      stage: 'prediction-batch-start',
-      total_fixtures: fixtureContexts.length,
-      concurrency,
-    }),
-  );
+  logger(JSON.stringify({
+    job: 'daily-sync-generate',
+    stage: 'prediction-batch-start',
+    total_fixtures: fixtureContexts.length,
+    concurrency,
+    message: 'Generating predictions for ALL fixtures in the fixture table — no filtering.',
+  }));
 
   await runWithConcurrency(fixtureContexts, concurrency, async (contextRow) => {
+    const fixture = contextRow?.fixture || null;
+    const fixtureApiId = contextRow?.fixtureApiId || fixture?.api_fixture_id || null;
+
     try {
-      const fixture = contextRow?.fixture || null;
-      const fixtureApiId = contextRow?.fixtureApiId || fixture?.api_fixture_id || null;
       if (!fixtureApiId) {
         failed += 1;
-        logger(
-          JSON.stringify({
-            job: 'daily-sync-generate',
-            message: 'Skipping fixture with missing api_fixture_id',
-            fixture_snapshot: fixture,
-          }),
-        );
-        return;
-      }
-
-      const h2hRows = Array.isArray(contextRow?.h2hRows) ? contextRow.h2hRows : [];
-      logger(
-        JSON.stringify({
+        logger(JSON.stringify({
           job: 'daily-sync-generate',
-          fixture_api_id: fixtureApiId,
-          stage: 'prediction-start',
-          h2h_rows: h2hRows.length,
-        }),
-      );
-
-      let workingH2hRows = h2hRows;
-      if (workingH2hRows.length === 0 && String(process.env.API_FOOTBALL_ON_DEMAND_H2H || 'true').toLowerCase() !== 'false') {
-        logger(
-          JSON.stringify({
-            job: 'daily-sync-generate',
-            fixture_api_id: fixtureApiId,
-            stage: 'h2h-on-demand-start',
-            message: 'No cached H2H rows found; fetching them for this fixture.',
-          }),
-        );
-
-        try {
-          await saveFixtureH2HHistory({
-            tablesdb,
-            databaseId,
-            h2hTable,
-            fixture,
-            prefetchedH2HFixtures: null,
-            logger,
-          });
-
-          workingH2hRows = await fetchStoredH2HRowsForFixture(
-            tablesdb,
-            databaseId,
-            h2hTable,
-            fixtureApiId,
-            fixture.home_team_api_id,
-            fixture.away_team_api_id,
-          );
-
-          logger(
-            JSON.stringify({
-              job: 'daily-sync-generate',
-              fixture_api_id: fixtureApiId,
-              stage: 'h2h-on-demand-complete',
-              h2h_rows: workingH2hRows.length,
-            }),
-          );
-      } catch (error) {
-          logger(
-            JSON.stringify({
-              job: 'daily-sync-generate',
-              fixture_api_id: fixtureApiId,
-              stage: 'h2h-on-demand-failed',
-              message: error instanceof Error ? error.message : String(error),
-            }),
-          );
-        }
-      }
-
-      if (workingH2hRows.length < minimumH2hRows) {
-        skipped += 1;
-        logger(
-          JSON.stringify({
-            job: 'daily-sync-generate',
-            fixture_api_id: fixtureApiId,
-            stage: 'ai-skip',
-            reason: 'insufficient-h2h-history',
-            minimum_h2h_rows: minimumH2hRows,
-            h2h_rows: workingH2hRows.length,
-            message: 'Skipping AI prediction because the fixture does not have enough H2H data.',
-          }),
-        );
+          stage: 'prediction-skip',
+          reason: 'missing-fixture-api-id',
+        }));
         return;
       }
 
-      const prompt = buildPrompt(fixture, workingH2hRows);
+      // Use whatever h2h rows are available — empty is fine, AI uses fixture context only
+      const h2hRows = Array.isArray(contextRow?.h2hRows) ? contextRow.h2hRows : [];
+
+      logger(JSON.stringify({
+        job: 'daily-sync-generate',
+        fixture_api_id: fixtureApiId,
+        stage: 'prediction-start',
+        h2h_rows: h2hRows.length,
+      }));
+
+      const prompt = buildPrompt(fixture, h2hRows);
       let aiResult;
       try {
         aiResult = await requestAiPrediction(fixtureApiId, prompt, fixture, logger);
       } catch (error) {
-        logger(
-          JSON.stringify({
-            job: 'daily-sync-generate',
-            fixture_api_id: fixtureApiId,
-            stage: 'ai',
-            message: error instanceof Error ? error.message : String(error),
-          }),
-        );
+        logger(JSON.stringify({
+          job: 'daily-sync-generate',
+          fixture_api_id: fixtureApiId,
+          stage: 'ai-error',
+          message: error instanceof Error ? error.message : String(error),
+        }));
         aiResult = {
           aiResponse: null,
           rawContent: '',
           parsed: normalizePredictionShape(null),
           parsedOk: false,
         };
-      }
-
-      if (!aiResult.parsedOk) {
-        logger(
-          JSON.stringify({
-            job: 'daily-sync-generate',
-            fixture_api_id: fixtureApiId,
-            stage: 'ai',
-            message: 'AI returned content that could not be parsed cleanly; using fallback normalization.',
-          }),
-        );
       }
 
       const result = await savePredictionAndMaybePublish({
@@ -1614,58 +1439,41 @@ async function generatePredictionsForBatch({
         messaging,
         topicId,
         fixture,
-        h2hRows: workingH2hRows,
+        h2hRows,
         aiResponse: aiResult.aiResponse,
         parsed: aiResult.parsed,
         startedAt,
-        logFn,
+        logFn: logger,
       });
 
-      if (!result.saved) {
+      if (result.saved) {
+        saved += 1;
+        if (result.published) published += 1;
+        if (result.notified) notified += 1;
+      } else {
         failed += 1;
-        logger(
-          JSON.stringify({
-            job: 'daily-sync-generate',
-            fixture_api_id: fixtureApiId,
-            message: 'Prediction save failed for this fixture.',
-          }),
-        );
-        return;
-      }
-
-      saved += 1;
-      if (result.published) {
-        published += 1;
-      }
-      if (result.notified) {
-        notified += 1;
       }
     } catch (error) {
       failed += 1;
-      logger(
-        JSON.stringify({
-          job: 'daily-sync-generate',
-          fixture_api_id: contextRow?.fixtureApiId || contextRow?.fixture?.api_fixture_id || null,
-          stage: 'prediction-worker',
-          message: error instanceof Error ? error.message : String(error),
-        }),
-      );
+      logger(JSON.stringify({
+        job: 'daily-sync-generate',
+        fixture_api_id: fixtureApiId,
+        stage: 'prediction-worker-error',
+        message: error instanceof Error ? error.message : String(error),
+      }));
     }
   });
 
-  logger(
-    JSON.stringify({
-      job: 'daily-sync-generate',
-      stage: 'prediction-batch-complete',
-      saved,
-      failed,
-      skipped,
-      published,
-      notified,
-    }),
-  );
+  logger(JSON.stringify({
+    job: 'daily-sync-generate',
+    stage: 'prediction-batch-complete',
+    saved,
+    failed,
+    published,
+    notified,
+  }));
 
-  return { saved, failed, skipped, published, notified };
+  return { saved, failed, skipped: 0, published, notified };
 }
 
 export default async function main(context) {
@@ -1779,30 +1587,69 @@ export default async function main(context) {
     }
 
     const maxFixtures = Number.parseInt(process.env.MAX_FIXTURES || '130', 10);
-    const minimumH2hRowsForSync = parseMinimumH2hRows(process.env.H2H_MIN_ROWS || '1');
+    const minH2hRows = parseMinimumH2hRows(process.env.H2H_MIN_ROWS || '1');
+    const minPerHour = 5; // minimum fixtures to pick from each hour before cycling
 
-    // Score every fixture: fetch h2h + odds in parallel, apply popularity + quality scoring
-    const scoredFixtures = [];
-    for (const fixture of fixtures) {
-      const fixtureApiId = fixture?.fixture?.id ?? null;
-      const homeTeamId = fixture?.teams?.home?.id ?? null;
-      const awayTeamId = fixture?.teams?.away?.id ?? null;
-      const leagueId = fixture?.league?.id ?? null;
-      if (!fixtureApiId || !homeTeamId || !awayTeamId) continue;
+    // ─── STEP 1: Pre-filter ───────────────────────────────────────────────────
+    // Drop finished / cancelled / postponed matches immediately — no API calls.
+    const FINISHED_STATUSES = new Set([
+      'FT', 'AET', 'PEN', 'ABD', 'AWD', 'WO', 'CANC', 'PST', 'SUSP', 'INT',
+    ]);
 
+    const upcomingFixtures = fixtures.filter((f) => {
+      const id = f?.fixture?.id ?? null;
+      const home = f?.teams?.home?.id ?? null;
+      const away = f?.teams?.away?.id ?? null;
+      const status = f?.fixture?.status?.short ?? 'NS';
+      return id != null && home != null && away != null && !FINISHED_STATUSES.has(status);
+    });
+
+    appwriteLog(JSON.stringify({
+      job: 'daily-sync-generate', stage: 'step-1-pre-filter',
+      total_from_api: fixtures.length,
+      upcoming: upcomingFixtures.length,
+      skipped_finished: fixtures.length - upcomingFixtures.length,
+    }));
+
+    // ─── STEP 2: Group by Lagos hour ──────────────────────────────────────────
+    // Group ALL upcoming fixtures by kickoff hour BEFORE scoring.
+    // This guarantees every hour is visible and gets scored independently.
+    const byHourMap = new Map(); // hour -> fixture[]
+    for (const f of upcomingFixtures) {
+      const kickoff = parseFixtureKickoff(f?.fixture?.date || null);
+      if (!kickoff) continue;
+      const hour = getTimeZoneHour(kickoff, 'Africa/Lagos');
+      if (!byHourMap.has(hour)) byHourMap.set(hour, []);
+      byHourMap.get(hour).push(f);
+    }
+
+    const allHours = [...byHourMap.keys()].sort((a, b) => a - b);
+    appwriteLog(JSON.stringify({
+      job: 'daily-sync-generate', stage: 'step-2-grouped-by-hour',
+      hours: allHours,
+      per_hour: Object.fromEntries(allHours.map((h) => [h, byHourMap.get(h).length])),
+    }));
+
+    // ─── STEP 3: Score each hour in parallel ─────────────────────────────────
+    // Each hour runs concurrently. Within each hour fixtures are scored in
+    // batches of 10 to keep API calls manageable.
+    // A fixture passes scoring only if it has >= minH2hRows h2h matches.
+    // Popular-league fixtures (POPULAR_LEAGUE_IDS) always get a +30 bonus.
+
+    async function scoreOneFixture(f) {
+      const fixtureId = String(f?.fixture?.id ?? '');
+      const homeId = String(f?.teams?.home?.id ?? '');
+      const awayId = String(f?.teams?.away?.id ?? '');
+      const leagueId = f?.league?.id ?? null;
       let oddsRows = [];
       let h2hFixtures = [];
       try {
         const [oddsPayload, h2hPayload] = await Promise.all([
-          fetchApiFootballJson('/odds', { fixture: String(fixtureApiId) }),
-          fetchApiFootballJson('/fixtures/headtohead', {
-            h2h: `${homeTeamId}-${awayTeamId}`,
-            last: '10',
-          }),
+          fetchApiFootballJson('/odds', { fixture: fixtureId }),
+          fetchApiFootballJson('/fixtures/headtohead', { h2h: `${homeId}-${awayId}`, last: '10' }),
         ]);
-
-        for (const of2 of (Array.isArray(oddsPayload?.response) ? oddsPayload.response : [])) {
-          for (const bk of (Array.isArray(of2?.bookmakers) ? of2.bookmakers : [])) {
+        for (const entry of (Array.isArray(oddsPayload?.response) ? oddsPayload.response : [])) {
+          for (const bk of (Array.isArray(entry?.bookmakers) ? entry.bookmakers : [])) {
             for (const bet of (Array.isArray(bk?.bets) ? bk.bets : [])) {
               for (const val of (Array.isArray(bet?.values) ? bet.values : [])) {
                 if (val?.value != null) oddsRows.push({ market_name: bet?.name, selection_name: String(val.value) });
@@ -1810,38 +1657,126 @@ export default async function main(context) {
             }
           }
         }
-
         h2hFixtures = Array.isArray(h2hPayload?.response) ? h2hPayload.response : [];
       } catch (_) {
-        continue;
+        return null; // API error — skip this fixture
       }
-
-      const h2hCount = h2hFixtures.length;
-      if (h2hCount < minimumH2hRowsForSync) continue;
-
-      const { score, reasons } = scoreFixture({ h2hCount, oddsRows, leagueId });
-      scoredFixtures.push({ fixture, score, reasons, oddsRows, h2hFixtures });
+      if (h2hFixtures.length < minH2hRows) return null; // not enough h2h history
+      const { score, reasons } = scoreFixture({ h2hCount: h2hFixtures.length, oddsRows, leagueId });
+      return { fixture: f, score, reasons, oddsRows, h2hFixtures };
     }
 
-    scoredFixtures.sort((a, b) =>
-      (b.score - a.score) || String(a.fixture?.fixture?.id ?? '').localeCompare(String(b.fixture?.fixture?.id ?? '')),
-    );
+    async function scoreHour(hourFixtures) {
+      const BATCH = 10;
+      const results = [];
+      for (let i = 0; i < hourFixtures.length; i += BATCH) {
+        const batch = hourFixtures.slice(i, i + BATCH);
+        const batchResults = await Promise.all(batch.map(scoreOneFixture));
+        for (const r of batchResults) if (r != null) results.push(r);
+      }
+      return results;
+    }
 
-    const spreadResult = selectFixturesByHourSpread(scoredFixtures, maxFixtures, 'Africa/Lagos');
-    const selectedFixtures = spreadResult.selectedFixtures;
-    const prefetchedH2HMap = spreadResult.prefetchedH2HMap;
+    // All hours scored simultaneously — no hour waits for another
+    const scoredByHour = new Map(); // hour -> scored[]
+    const hourScoringResults = await Promise.all(
+      allHours.map(async (hour) => ({ hour, results: await scoreHour(byHourMap.get(hour)) })),
+    );
+    for (const { hour, results } of hourScoringResults) {
+      // Sort each hour's pool best-score-first
+      results.sort((a, b) => (b.score - a.score) || String(a.fixture?.fixture?.id ?? '').localeCompare(String(b.fixture?.fixture?.id ?? '')));
+      scoredByHour.set(hour, results);
+    }
+
+    // For hours that produced zero scored fixtures (no h2h), fall back to
+    // picking up to 2 raw upcoming fixtures from that hour with score=0.
+    // This ensures no hour is ever completely skipped.
+    for (const hour of allHours) {
+      if ((scoredByHour.get(hour) ?? []).length === 0) {
+        const fallbacks = (byHourMap.get(hour) ?? [])
+          .slice(0, 2)
+          .map((f) => ({ fixture: f, score: 0, reasons: ['no-h2h-fallback'], oddsRows: [], h2hFixtures: [] }));
+        scoredByHour.set(hour, fallbacks);
+      }
+    }
+
+    const totalScored = [...scoredByHour.values()].reduce((s, arr) => s + arr.length, 0);
+    const fallbackHours = allHours.filter((h) => (scoredByHour.get(h) ?? []).some((s) => s.reasons?.includes('no-h2h-fallback')));
+    appwriteLog(JSON.stringify({
+      job: 'daily-sync-generate', stage: 'step-3-scored',
+      total_upcoming: upcomingFixtures.length,
+      total_scored: totalScored,
+      fallback_hours: fallbackHours,
+      scored_per_hour: Object.fromEntries(allHours.map((h) => [h, scoredByHour.get(h)?.length ?? 0])),
+    }));
+
+    // ─── STEP 4: Select with hour spread ──────────────────────────────────────
+    // Rule A: always include ALL popular-league fixtures first (no cap).
+    // Rule B: fill remaining slots by round-robin across hours,
+    //         picking minPerHour fixtures per hour per round before cycling.
+    //         No hour is skipped — every hour completes its slice before
+    //         any hour gets another slice.
+
+    const usedIds = new Set();
+    const selected = []; // { fixture, score, h2hFixtures, kickoff, hour }
+
+    // Rule A — popular leagues
+    for (const hour of allHours) {
+      for (const item of (scoredByHour.get(hour) ?? [])) {
+        if (popularityBonus(item.fixture?.league?.id) === 0) continue;
+        const id = String(item.fixture?.fixture?.id ?? '');
+        if (!id || usedIds.has(id)) continue;
+        const kickoff = parseFixtureKickoff(item.fixture?.fixture?.date || null);
+        usedIds.add(id);
+        selected.push({ ...item, kickoff, hour });
+      }
+    }
+
+    // Rule B — regular fixtures, round-robin by hour
+    let round = 0;
+    while (selected.length < maxFixtures) {
+      let addedThisRound = 0;
+      for (const hour of allHours) {
+        const pool = (scoredByHour.get(hour) ?? []).filter(
+          (item) => popularityBonus(item.fixture?.league?.id) === 0,
+        );
+        const startIdx = round * minPerHour;
+        if (startIdx >= pool.length) continue; // hour exhausted
+        const endIdx = Math.min(startIdx + minPerHour, pool.length);
+        for (let i = startIdx; i < endIdx; i++) {
+          const item = pool[i];
+          const id = String(item.fixture?.fixture?.id ?? '');
+          if (!id || usedIds.has(id)) continue;
+          const kickoff = parseFixtureKickoff(item.fixture?.fixture?.date || null);
+          usedIds.add(id);
+          selected.push({ ...item, kickoff, hour });
+          addedThisRound += 1;
+        }
+      }
+      round += 1;
+      if (addedThisRound === 0) break; // all hours exhausted
+    }
+
+    // Sort final list by kickoff time ascending
+    selected.sort((a, b) => (a.kickoff?.getTime() ?? 0) - (b.kickoff?.getTime() ?? 0));
+
+    const hourCounts = {};
+    for (const item of selected) hourCounts[item.hour] = (hourCounts[item.hour] || 0) + 1;
+    const popularCount = selected.filter((s) => popularityBonus(s.fixture?.league?.id) > 0).length;
 
     appwriteLog(JSON.stringify({
-      job: 'daily-sync-generate',
-      stage: 'fixtures-scored-and-selected',
-      total_fetched: fixtures.length,
-      qualified: scoredFixtures.length,
-      popular_included: spreadResult.stats.popularIncluded,
-      selected: selectedFixtures.length,
-      hours_represented: spreadResult.stats.hoursRepresented,
-      hour_counts: spreadResult.stats.hourCounts,
+      job: 'daily-sync-generate', stage: 'step-4-selected',
+      popular_included: popularCount,
+      total_selected: selected.length,
       max_cap: maxFixtures,
+      hours_represented: Object.keys(hourCounts).length,
+      hour_counts: hourCounts,
     }));
+
+    const selectedFixtures = selected.map((s) => s.fixture);
+    const prefetchedH2HMap = new Map(
+      selected.map((s) => [String(s.fixture?.fixture?.id ?? ''), s.h2hFixtures]),
+    );
 
     const [fixturesDelete, predictionsCleanup] = await Promise.all([
       deleteAllRows(tablesdb, databaseId, fixturesTable),
@@ -1976,7 +1911,6 @@ export default async function main(context) {
       databaseId,
       fixtureContexts,
       fixturesTable,
-      h2hTable,
       predictionsTable,
       messaging,
       topicId,
