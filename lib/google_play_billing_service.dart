@@ -146,9 +146,13 @@ class GooglePlayBillingService extends ChangeNotifier {
 
     final product = _productsById[plan.productId];
     if (product == null) {
-      throw StateError('Product details have not finished loading.');
+      throw StateError(
+        'Product "${plan.productId}" not found. Make sure it is published and active in Google Play Console.',
+      );
     }
 
+    // All plans are subscriptions — use buyNonConsumable which the
+    // in_app_purchase plugin maps to launchBillingFlow for subscriptions on Android.
     final purchaseParam = PurchaseParam(productDetails: product);
     await _inAppPurchase.buyNonConsumable(purchaseParam: purchaseParam);
   }
@@ -169,6 +173,20 @@ class GooglePlayBillingService extends ChangeNotifier {
     final response = await _inAppPurchase.queryProductDetails(
       _availableProductIds,
     );
+
+    // Log not-found products to help diagnose mismatched IDs
+    if (response.notFoundIDs.isNotEmpty) {
+      debugPrint(
+        'Play Store products NOT found: ${response.notFoundIDs.join(', ')}. '
+        'Check that the product IDs are Active in Play Console and the app '
+        'is published to at least the Internal Testing track.',
+      );
+      _errorMessage =
+          'Some products were not found in the Play Store: '
+          '${response.notFoundIDs.join(', ')}. '
+          'Make sure each product ID is Active in Play Console.';
+    }
+
     if (response.error != null) {
       throw StateError(response.error!.message);
     }
@@ -178,6 +196,8 @@ class GooglePlayBillingService extends ChangeNotifier {
       ..addEntries(
         response.productDetails.map((product) => MapEntry(product.id, product)),
       );
+
+    debugPrint('Play Store products loaded: ${_productsById.keys.join(', ')}');
   }
 
   void _handlePurchaseUpdates(List<PurchaseDetails> purchaseDetailsList) {
@@ -194,6 +214,19 @@ class GooglePlayBillingService extends ChangeNotifier {
         if (purchaseDetails.pendingCompletePurchase) {
           _inAppPurchase.completePurchase(purchaseDetails);
         }
+        continue;
+      }
+
+      if (purchaseDetails.status == PurchaseStatus.error) {
+        _errorMessage = purchaseDetails.error?.message ?? 'Purchase failed.';
+        debugPrint('Purchase error: $_errorMessage');
+        if (purchaseDetails.pendingCompletePurchase) {
+          _inAppPurchase.completePurchase(purchaseDetails);
+        }
+      }
+
+      if (purchaseDetails.status == PurchaseStatus.canceled) {
+        debugPrint('Purchase cancelled by user: ${purchaseDetails.productID}');
       }
     }
 

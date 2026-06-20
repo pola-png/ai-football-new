@@ -680,6 +680,7 @@ function buildPrompt(fixture, h2hRows) {
     'Never use phrases about limited data, small samples, missing history, insufficient evidence, or not enough matches as reason text for a 0.85+ confidence pick.',
     'The reason must be short, one sentence only, and should not include extra explanation.',
     'Prefer conservative non-straight-win markets such as Over/Under goals, Both Teams To Score, Double Chance, Draw, or No Bet.',
+    'When choosing an Over/Under goals market, pick the line that best matches the h2h average goals. Use Over 3.5 if average is near 4, Over 2.5 if near 3, Over 1.5 if near 2. For Under markets, use Under 1.5 if average is below 1, Under 2.5 if average is near 2, Under 3.5 if near 3. Never default to a fixed line — always derive it from the data.',
     "Don't generate straight-win selections like Home Win, Away Win, Team X to win, or bare team-name wins unless confidence is 0.99 or higher.",
     "Don't choose a straight-win pick unless you are extremely certain.",
     "Don't waste the response on straight-win markets when a conservative market is available.",
@@ -701,9 +702,9 @@ function buildPrompt(fixture, h2hRows) {
     '  "confidence_label": "high",',
     '  "picks": [',
     '    {',
-    '      "selection": "Over 1.5",',
+    '      "selection": "Over 2.5",',
     '      "confidence": 0.91,',
-    '      "reason": "Both teams create enough chances for at least two goals."',
+    '      "reason": "Both teams have averaged over 3 goals in recent h2h meetings."',
     '    }',
     '  ]',
     '}',
@@ -942,6 +943,7 @@ async function requestAiPrediction(fixtureApiId, prompt, fixture, logFn) {
     'If H2H data is empty, rely on any fallback H2H data already supplied by the backend.',
     'If no H2H data exists at all, do not invent H2H and stay conservative.',
     'Prefer non-straight-win selections such as Over/Under, Both Teams To Score, Double Chance, Draw, or No Bet.',
+    'When choosing Over/Under goals, pick the line that fits the h2h average goals: use Over 3.5 if average is near 4, Over 2.5 if near 3, Over 1.5 if near 2. For Under markets, use Under 1.5 if average is below 1, Under 2.5 if average is near 2, Under 3.5 if near 3. Never default to a fixed line — always derive it from the data.',
     "Don't use straight-win selections unless confidence is 0.99 or higher.",
     "Don't waste credits on straight-win picks when a safer market is available.",
   ].join(' ');
@@ -1158,7 +1160,15 @@ function buildFallbackPrimaryPick(fixture, h2hRows) {
       }, 0)
     : 0;
   const averageGoals = h2hCount > 0 ? totalGoals / h2hCount : 0;
-  const selection = averageGoals >= 2 ? 'Over 1.5 Goals' : 'Under 4.5 Goals';
+  const selection = averageGoals >= 3.5
+    ? 'Over 3.5 Goals'
+    : averageGoals >= 2.5
+      ? 'Over 2.5 Goals'
+      : averageGoals >= 1.5
+        ? 'Over 1.5 Goals'
+        : averageGoals >= 0.5
+          ? 'Under 1.5 Goals'
+          : 'Under 2.5 Goals';
 
   return {
     selection,
@@ -1493,7 +1503,7 @@ export default async function main(context) {
   const topicId = required('APPWRITE_TOPIC_PREDICTIONS');
 
   const league = process.env.API_FOOTBALL_LEAGUE ? Number(process.env.API_FOOTBALL_LEAGUE) : null;
-  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(0);
+  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(1);
   const syncRunId = `sync_${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}`;
   const startedAt = isoNow();
 

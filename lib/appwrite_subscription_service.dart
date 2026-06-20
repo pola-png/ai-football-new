@@ -42,23 +42,42 @@ class AppwriteSubscriptionService {
     await firebaseMessaging.requestPermission(alert: true, badge: true, sound: true);
 
     final fcmToken = await firebaseMessaging.getToken();
-
     if (fcmToken == null || fcmToken.trim().isEmpty) {
       throw StateError('FCM token was not available on this device.');
     }
 
-    final targetId = 'target-${DateTime.now().millisecondsSinceEpoch}';
-    final subscriberId = 'subscriber-${DateTime.now().millisecondsSinceEpoch}';
+    // Skip if already subscribed with the same token.
+    final savedToken = prefs.getString(_deviceFcmTokenKey);
+    final savedTargetId = prefs.getString(_deviceTargetKey);
+    if (savedToken == fcmToken && savedTargetId != null) {
+      return;
+    }
 
-    await account.createPushTarget(
-      targetId: targetId,
-      identifier: fcmToken,
-    );
-    await messaging.createSubscriber(
-      topicId: appwritePredictionTopicId,
-      subscriberId: subscriberId,
-      targetId: targetId,
-    );
+    final targetId = savedTargetId ?? 'target-${DateTime.now().millisecondsSinceEpoch}';
+    final subscriberId = prefs.getString(_deviceSubscriberKey) ??
+        'subscriber-${DateTime.now().millisecondsSinceEpoch}';
+
+    try {
+      await account.updatePushTarget(
+        targetId: targetId,
+        identifier: fcmToken,
+      );
+    } catch (_) {
+      // Target doesn't exist yet — create it.
+      await account.createPushTarget(
+        targetId: targetId,
+        identifier: fcmToken,
+      );
+      try {
+        await messaging.createSubscriber(
+          topicId: appwritePredictionTopicId,
+          subscriberId: subscriberId,
+          targetId: targetId,
+        );
+      } catch (_) {
+        // Subscriber may already exist — ignore.
+      }
+    }
 
     await prefs.setString(_deviceFcmTokenKey, fcmToken);
     await prefs.setString(_deviceTargetKey, targetId);

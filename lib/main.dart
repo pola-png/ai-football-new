@@ -1164,38 +1164,20 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
                             billing: billing,
                             compact: false,
                             onBuyPlan: (plan) => _buyPlan(context, plan),
+                            onPageChanged: (plan) {
+                              setState(() {
+                                _selectedPlanOverride = plan;
+                              });
+                            },
                           ),
                         ),
                         const SizedBox(height: 18),
                         _planNotice(
                           context,
                           title: 'What you get',
-                          body:
-                              'The \$1.20 plan gives you 7 days of ad-free viewing, while the larger plans give you ongoing access tiers that match your confidence appetite.',
+                          body: _planBenefitLines(selectedPlan).join('\n'),
                         ),
-                        const SizedBox(height: 16),
-                        FilledButton.tonalIcon(
-                          onPressed: billing.restorePurchases,
-                          icon: const Icon(Icons.restore),
-                          label: const Text('Restore purchases'),
-                        ),
-                        if (!billing.isAvailable) ...[
-                          const SizedBox(height: 14),
-                          _planNotice(
-                            context,
-                            title: 'Billing unavailable',
-                            body:
-                                'Google Play Billing is not available on this device or the store connection has not been configured yet.',
-                          ),
-                        ],
-                        if (billing.errorMessage != null) ...[
-                          const SizedBox(height: 14),
-                          _planNotice(
-                            context,
-                            title: 'Billing setup note',
-                            body: billing.errorMessage!,
-                          ),
-                        ],
+
                       ],
                     ),
                   ),
@@ -2046,12 +2028,14 @@ class _PlanCarousel extends StatefulWidget {
     required this.billing,
     required this.compact,
     required this.onBuyPlan,
+    this.onPageChanged,
   });
 
   final List<SubscriptionPlanId> plans;
   final GooglePlayBillingService billing;
   final bool compact;
   final void Function(SubscriptionPlanId plan) onBuyPlan;
+  final void Function(SubscriptionPlanId plan)? onPageChanged;
 
   @override
   State<_PlanCarousel> createState() => _PlanCarouselState();
@@ -2090,13 +2074,23 @@ class _PlanCarouselState extends State<_PlanCarousel> {
                   setState(() {
                     _pageIndex = value;
                   });
+                  if (value < widget.plans.length) {
+                    widget.onPageChanged?.call(widget.plans[value]);
+                  }
                 },
                 itemBuilder: (context, index) {
                   final plan = widget.plans[index];
                   final product = widget.billing.productFor(plan);
                   final isOwned = widget.billing.isOwned(plan);
                   final canPurchase = widget.billing.isAvailable && !isOwned;
-                  final price = isOwned ? 'Active' : product?.price ?? plan.fallbackPrice;
+                  final String price;
+                  if (isOwned) {
+                    price = 'Active';
+                  } else if (widget.billing.isLoading) {
+                    price = '...';
+                  } else {
+                    price = product?.price ?? plan.fallbackPrice;
+                  }
                   return Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 6),
                     child: _CarouselPlanCard(
@@ -2307,9 +2301,7 @@ class _CarouselPlanCard extends StatelessWidget {
                             ? 'Active'
                             : onPressed == null
                                 ? 'Unavailable'
-                                : plan == SubscriptionPlanId.weeklyAdFree
-                                    ? '7 Days'
-                                    : 'Subscribe',
+                                : 'Subscribe',
                         style: const TextStyle(fontWeight: FontWeight.w900),
                       ),
                     ),
@@ -4504,18 +4496,15 @@ bool _predictionMatchesPlan(
 }
 
 bool _isPopularPrediction(PredictionRecord prediction) {
+  if (_predictionConfidencePercent(prediction) >= 85) return false;
   final home = prediction.homeTeamName?.toLowerCase() ?? '';
   final away = prediction.awayTeamName?.toLowerCase() ?? '';
-  final popularClubs = [
+  const popularClubs = [
     'madrid', 'barcelona', 'bayern', 'united', 'city', 'arsenal', 'liverpool',
     'chelsea', 'psg', 'juventus', 'milan', 'inter', 'dortmund', 'tottenham',
     'atletico', 'napoli', 'porto', 'benfica', 'ajax'
   ];
-  final matchesPopularClub = popularClubs.any((club) => home.contains(club) || away.contains(club));
-  final isHighConfidence = _predictionConfidencePercent(prediction) >= 83;
-  final isPremium = _predictionMatchesPlan(prediction, SubscriptionPlanId.premium);
-  // Exclude premium matches from popular list
-  return (matchesPopularClub || isHighConfidence) && !isPremium;
+  return popularClubs.any((club) => home.contains(club) || away.contains(club));
 }
 
 String _planConfidenceLabel(SubscriptionPlanId plan) {
