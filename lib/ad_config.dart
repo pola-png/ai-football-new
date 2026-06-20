@@ -1,6 +1,6 @@
-const String kRewardedAdUnitId = 'ca-app-pub-1523681275533054/5223309611';
-const String kAndroidAdAppId = 'ca-app-pub-1523681275533054~6536391282';
-const String kBannerAdUnitId = 'ca-app-pub-1523681275533054/3153152228';
+const String kRewardedAdUnitId = 'ca-app-pub-4188538911412591/1085937251';
+const String kAndroidAdAppId = 'ca-app-pub-4188538911412591~2399018922';
+const String kBannerAdUnitId = 'ca-app-pub-4188538911412591/9040448896';
 
 // Google-provided test ad unit IDs — safe to use during development.
 const String kTestBannerAdUnitId = 'ca-app-pub-3940256099942544/6300978111';

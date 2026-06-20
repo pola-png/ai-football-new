@@ -257,6 +257,31 @@ function compactH2HRow(row) {
   };
 }
 
+// Top leagues by API-Football ID that get a popularity bonus
+const POPULAR_LEAGUE_IDS = new Set([
+  39,   // Premier League
+  140,  // La Liga
+  135,  // Serie A
+  78,   // Bundesliga
+  61,   // Ligue 1
+  94,   // Primeira Liga
+  88,   // Eredivisie
+  203,  // Super Lig
+  144,  // Jupiler Pro League
+  71,   // Brasileirao
+  128,  // Argentine Primera Division
+  2,    // UEFA Champions League
+  3,    // UEFA Europa League
+  848,  // UEFA Conference League
+  1,    // World Cup
+  4,    // Euro Championship
+]);
+
+function popularityBonus(leagueId) {
+  const id = Number(leagueId);
+  return Number.isFinite(id) && POPULAR_LEAGUE_IDS.has(id) ? 30 : 0;
+}
+
 function countOddsSignals(oddsRows) {
   const rows = Array.isArray(oddsRows) ? oddsRows : [];
   let signals = 0;
@@ -284,19 +309,21 @@ function countOddsSignals(oddsRows) {
   return signals;
 }
 
-function scoreFixtureForSync({ oddsRows, h2hRows }) {
-  const minimumH2hRows = Number.parseInt(process.env.H2H_MIN_ROWS || '2', 10);
+function scoreFixtureForSync({ oddsRows, h2hRows, leagueId }) {
+  const minimumH2hRows = Number.parseInt(process.env.H2H_MIN_ROWS || '1', 10);
   const h2hCount = Array.isArray(h2hRows) ? h2hRows.length : 0;
   const oddsCount = Array.isArray(oddsRows) ? oddsRows.length : 0;
   const oddsSignals = countOddsSignals(oddsRows);
+  const minH2h = Number.isFinite(minimumH2hRows) && minimumH2hRows > 0 ? minimumH2hRows : 1;
 
-  if (h2hCount < (Number.isFinite(minimumH2hRows) && minimumH2hRows > 0 ? minimumH2hRows : 2)) {
+  if (h2hCount < minH2h) {
     return { score: 0, qualified: false, reasons: ['missing-h2h'] };
   }
 
   let score = 0;
   const reasons = [];
 
+  // H2H depth score
   if (h2hCount >= 10) {
     score += 50;
     reasons.push('strong-h2h');
@@ -308,6 +335,7 @@ function scoreFixtureForSync({ oddsRows, h2hRows }) {
     reasons.push('light-h2h');
   }
 
+  // Odds market score
   if (oddsCount > 0) {
     score += 20;
     reasons.push('odds-present');
@@ -317,6 +345,13 @@ function scoreFixtureForSync({ oddsRows, h2hRows }) {
     }
   } else {
     reasons.push('no-odds');
+  }
+
+  // Popularity bonus for top leagues
+  const bonus = popularityBonus(leagueId);
+  if (bonus > 0) {
+    score += bonus;
+    reasons.push('popular-league');
   }
 
   return {
@@ -609,6 +644,7 @@ async function main() {
       const syncScore = scoreFixtureForSync({
         oddsRows: oddsResult.rows || [],
         h2hRows: h2hResult.rows || [],
+        leagueId: leagueInfo.id,
       });
 
       if (!syncScore.qualified) {
@@ -635,7 +671,8 @@ async function main() {
       return String(left.fixture?.fixture?.id || '').localeCompare(String(right.fixture?.fixture?.id || ''));
     });
 
-    const selectedFixtures = qualifiedFixtures;
+    const maxFixtures = Number.parseInt(process.env.MAX_FIXTURES || '130', 10);
+    const selectedFixtures = qualifiedFixtures.slice(0, maxFixtures);
 
     console.log(JSON.stringify({
       job: 'sync-fixtures',
@@ -643,7 +680,8 @@ async function main() {
       h2h_passed: h2hPassedCount,
       h2h_skipped: h2hSkippedCount,
       score_passed: scorePassedCount,
-      top_100_selected: selectedFixtures.length,
+      selected: selectedFixtures.length,
+      max_cap: maxFixtures,
     }));
 
     for (const qualified of selectedFixtures) {

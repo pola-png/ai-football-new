@@ -3377,21 +3377,31 @@ class PredictionGroupCard extends StatelessWidget {
       prediction,
     );
 
+    final verdict = _pickVerdict(prediction);
+    final isDark = _isDarkContext(context);
+    final cardColor = switch (verdict) {
+      _PickVerdict.correct => isDark ? const Color(0xFF0A2E1A) : const Color(0xFFE8F8EF),
+      _PickVerdict.wrong   => isDark ? const Color(0xFF2E0A0A) : const Color(0xFFFFF0F0),
+      _PickVerdict.pending => surface,
+    };
+    final cardBorder = switch (verdict) {
+      _PickVerdict.correct => const Color(0xFF00C853),
+      _PickVerdict.wrong   => const Color(0xFFFF5252),
+      _PickVerdict.pending => isSelected || popular ? const Color(0xFF00D4AA) : border,
+    };
+
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
-        color: surface,
-        border: Border.all(
-          color: isSelected
-              ? const Color(0xFF00D4AA)
-              : popular
-                  ? const Color(0xFF00D4AA)
-                  : border,
-          width: isSelected || popular ? 1.5 : 1.0,
-        ),
+        color: cardColor,
+        border: Border.all(color: cardBorder, width: verdict != _PickVerdict.pending || isSelected || popular ? 1.5 : 1.0),
         boxShadow: [
-          if (popular)
+          if (verdict == _PickVerdict.correct)
+            BoxShadow(color: const Color(0xFF00C853).withValues(alpha: 0.15), blurRadius: 18, offset: const Offset(0, 8))
+          else if (verdict == _PickVerdict.wrong)
+            BoxShadow(color: const Color(0xFFFF5252).withValues(alpha: 0.12), blurRadius: 18, offset: const Offset(0, 8))
+          else if (popular)
             BoxShadow(
               color: const Color(0xFF00D4AA).withValues(alpha: 0.12),
               blurRadius: 18,
