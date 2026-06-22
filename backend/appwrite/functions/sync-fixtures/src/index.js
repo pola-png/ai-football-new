@@ -357,9 +357,14 @@ async function fetchFixtureH2HHistory({
   const season = String(fixture.season || '').trim();
   const pairKey = buildTeamPairKey(homeTeamId, awayTeamId);
 
-  if (!fixtureApiId || !homeTeamId || !awayTeamId) {
+  // Always return something, even if data is missing
+  if (!fixtureApiId) {
     return { saved: 0, rows: [] };
   }
+  
+  // Continue even if team IDs are missing - use fallbacks
+  const safeHomeTeamId = homeTeamId || 'home_unknown';
+  const safeAwayTeamId = awayTeamId || 'away_unknown';
 
   const now = isoNow();
   const targetSeasons = getH2hSeasonRange(season);
@@ -440,6 +445,8 @@ async function fetchFixtureOdds({
   fixture,
 }) {
   const fixtureApiId = String(fixture.api_fixture_id || '').trim();
+  
+  // Always return something, even if no fixtureApiId
   if (!fixtureApiId) {
     return { saved: 0, rows: [] };
   }
@@ -585,19 +592,31 @@ async function main() {
       const homeTeam = fixture?.teams?.home || null;
       const awayTeam = fixture?.teams?.away || null;
 
-      if (!fixtureApiId || !leagueInfo || !homeTeam || !awayTeam) {
+      // Only skip if absolutely essential data is missing
+      if (!fixtureApiId) {
+        console.log(JSON.stringify({
+          job: 'sync-fixtures',
+          stage: 'fixture-skip',
+          reason: 'missing-fixture-id',
+          fixture: fixture
+        }));
         continue;
       }
+      
+      // Use fallback values for missing data instead of skipping
+      const safeLeagueInfo = leagueInfo || { id: 'unknown', season: '2024' };
+      const safeHomeTeam = homeTeam || { id: 'home_unknown', name: 'Home Team' };
+      const safeAwayTeam = awayTeam || { id: 'away_unknown', name: 'Away Team' };
 
       const fixtureStub = {
         api_fixture_id: String(fixtureApiId),
-        league_api_id: String(leagueInfo.id),
-        season: String(leagueInfo.season),
-        home_team_api_id: String(homeTeam.id),
-        away_team_api_id: String(awayTeam.id),
+        league_api_id: String(safeLeagueInfo.id),
+        season: String(safeLeagueInfo.season),
+        home_team_api_id: String(safeHomeTeam.id),
+        away_team_api_id: String(safeAwayTeam.id),
       };
 
-      const isWorldCup = Number(leagueInfo.id) === WORLD_CUP_LEAGUE_ID;
+      const isWorldCup = Number(safeLeagueInfo.id) === WORLD_CUP_LEAGUE_ID;
       
       // Get hour for distribution
       const kickoffTime = fixture?.fixture?.date || null;
@@ -622,7 +641,7 @@ async function main() {
       const syncScore = scoreFixtureForSync({
         oddsRows: oddsResult.rows || [],
         h2hRows: h2hResult.rows || [],
-        leagueId: leagueInfo.id,
+        leagueId: safeLeagueInfo.id,
       });
 
       const fixtureData = {
@@ -679,9 +698,9 @@ async function main() {
 
     for (const qualified of finalSelectedFixtures) {
       const fixture = qualified.fixture;
-      const leagueInfo = fixture.league;
-      const homeTeam = fixture.teams.home;
-      const awayTeam = fixture.teams.away;
+      const leagueInfo = fixture.league || { id: 'unknown', season: '2024' };
+      const homeTeam = fixture.teams?.home || { id: 'home_unknown', name: 'Home Team' };
+      const awayTeam = fixture.teams?.away || { id: 'away_unknown', name: 'Away Team' };
       const fixtureApiId = String(fixture.fixture.id);
       const teamRows = [
         { tableId: teamsTable, rowId: `team_${homeTeam.id}`, data: pickTeam(homeTeam) },
@@ -758,7 +777,7 @@ async function main() {
       status: 'success',
       started_at: startedAt,
       finished_at: isoNow(),
-      items_seen: selectedFixtures.length,
+      items_seen: finalSelectedFixtures.length,
       items_saved: itemsSaved,
       message: `Fetched ${fixtures.length} fixtures. ${h2hPassedCount} passed H2H. ${h2hSkippedCount} were skipped without H2H. ${scorePassedCount} passed the score gate. Saved ${itemsSaved} qualified fixtures (min: 100, max: 200).`,
       created_at: isoNow(),
@@ -767,7 +786,7 @@ async function main() {
 
     return {
       ok: true,
-      items_seen: selectedFixtures.length,
+      items_seen: finalSelectedFixtures.length,
       items_saved: itemsSaved,
     };
   } catch (error) {
