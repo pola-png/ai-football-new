@@ -89,6 +89,7 @@ function buildPrompt(fixture, oddsRows, h2hRows) {
     'Never use phrases about limited data, small samples, missing history, insufficient evidence, or not enough matches as reason text for a 0.85+ confidence pick.',
     'Focus on low-odds markets such as over, under, gg/btts, corners, double chance 12, and throw-ins if the data exists.',
     'When choosing an Over/Under goals market, pick the line that best fits the h2h average goals. Use Over 3.5 if average is near 4, Over 2.5 if near 3, Over 1.5 if near 2. For Under markets, use Under 1.5 if average is below 1, Under 2.5 if average is near 2, Under 3.5 if near 3. Never default to a fixed line — always derive it from the data.',
+    'IMPORTANT: For Over 3.5 and higher predictions, set confidence to maximum 0.83. For Under 2.5 and lower predictions, set confidence to maximum 0.83.',
     'Do not choose a straight win or draw selection unless you are at least 0.90 confident.',
     'If confidence is below 0.90, avoid home win, away win, draw, or team-name winner picks and choose a non-win market instead.',
     'If throw-in data is not available, skip it.',
@@ -103,13 +104,13 @@ function buildPrompt(fixture, oddsRows, h2hRows) {
     'JSON EXAMPLE:',
     '{',
     '  "predicted_winner": "Team A",',
-    '  "confidence": 0.86,',
+    '  "confidence": 0.83,',
     '  "confidence_label": "high",',
     '  "picks": [',
     '    {',
-    '      "selection": "Over 2.5",',
-    '      "confidence": 0.91,',
-    '      "reason": "Both teams have averaged over 3 goals in recent h2h meetings."',
+    '      "selection": "Over 3.5",',
+    '      "confidence": 0.83,',
+    '      "reason": "Both teams have averaged over 4 goals in recent h2h meetings."',
     '    }',
     '  ]',
     '}',
@@ -327,52 +328,36 @@ function countOddsSignals(oddsRows) {
 
 function scoreFixtureForAi({ fixture, oddsRows, h2hRows }) {
   const h2hCount = Array.isArray(h2hRows) ? h2hRows.length : 0;
-  const oddsCount = Array.isArray(oddsRows) ? oddsRows.length : 0;
-  const oddsSignals = countOddsSignals(oddsRows);
+  const leagueId = Number(fixture?.league_api_id);
+  const isWorldCup = leagueId === 1;
 
-  let score = 0;
   const reasons = [];
 
-  if (h2hCount <= 0) {
+  // World Cup matches always qualify for AI prediction
+  if (isWorldCup) {
+    reasons.push('world-cup-match');
     return {
-      score: 0,
-      shouldCallAi: false,
-      reasons: ['missing-h2h'],
+      score: 100,
+      shouldCallAi: true,
+      reasons,
     };
   }
 
-  if (h2hCount >= 8) {
-    score += 45;
-    reasons.push('strong-h2h-volume');
-  } else if (h2hCount >= 4) {
-    score += 35;
-    reasons.push('moderate-h2h-volume');
-  } else {
-    score += 20;
-    reasons.push('light-h2h-volume');
+  // For regular matches, only require H2H if available
+  if (h2hCount >= 1) {
+    reasons.push('has-h2h-data');
+    return {
+      score: 100,
+      shouldCallAi: true,
+      reasons,
+    };
   }
 
-  if (oddsCount > 0) {
-    score += 20;
-    reasons.push('odds-present');
-    if (oddsSignals > 0) {
-      score += Math.min(15, oddsSignals * 5);
-      reasons.push('non-win-odds-signals');
-    }
-  } else {
-    reasons.push('no-odds');
-  }
-
-  const kickoffAt = fixture?.kickoff_at ? new Date(fixture.kickoff_at) : null;
-  if (kickoffAt && !Number.isNaN(kickoffAt.getTime())) {
-    score += 5;
-    reasons.push('valid-kickoff');
-  }
-
+  // Skip only if no H2H and not World Cup
   return {
-    score,
-    shouldCallAi: score >= 45,
-    reasons,
+    score: 0,
+    shouldCallAi: false,
+    reasons: ['missing-h2h'],
   };
 }
 
