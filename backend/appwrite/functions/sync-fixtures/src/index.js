@@ -313,55 +313,33 @@ function countOddsSignals(oddsRows) {
 }
 
 function scoreFixtureForSync({ oddsRows, h2hRows, leagueId }) {
-  const minimumH2hRows = Number.parseInt(process.env.H2H_MIN_ROWS || '1', 10);
+  // No restrictions - all fixtures qualify
   const h2hCount = Array.isArray(h2hRows) ? h2hRows.length : 0;
   const oddsCount = Array.isArray(oddsRows) ? oddsRows.length : 0;
-  const oddsSignals = countOddsSignals(oddsRows);
-  const minH2h = Number.isFinite(minimumH2hRows) && minimumH2hRows > 0 ? minimumH2hRows : 1;
   const isWorldCup = Number(leagueId) === WORLD_CUP_LEAGUE_ID;
-
-  // World Cup matches don't require H2H data
-  if (!isWorldCup && h2hCount < minH2h) {
-    return { score: 0, qualified: false, reasons: ['missing-h2h'] };
+  
+  let score = 50; // Base score for all fixtures
+  const reasons = ['auto-qualified'];
+  
+  // Add bonus points but don't restrict
+  if (isWorldCup) {
+    score += 100;
+    reasons.push('world-cup');
   }
-
-  let score = 0;
-  const reasons = [];
-
-  // H2H depth score
-  if (h2hCount >= 10) {
-    score += 50;
-    reasons.push('strong-h2h');
-  } else if (h2hCount >= 5) {
-    score += 40;
-    reasons.push('good-h2h');
-  } else {
-    score += 25;
-    reasons.push('light-h2h');
+  
+  if (h2hCount > 0) {
+    score += h2hCount * 5; // More H2H = higher score
+    reasons.push('has-h2h');
   }
-
-  // Odds market score
+  
   if (oddsCount > 0) {
     score += 20;
-    reasons.push('odds-present');
-    if (oddsSignals > 0) {
-      score += Math.min(20, oddsSignals * 5);
-      reasons.push('good-odds-signals');
-    }
-  } else {
-    reasons.push('no-odds');
+    reasons.push('has-odds');
   }
-
-  // Popularity bonus for top leagues
-  const bonus = popularityBonus(leagueId);
-  if (bonus > 0) {
-    score += bonus;
-    reasons.push('popular-league');
-  }
-
+  
   return {
     score,
-    qualified: true,
+    qualified: true, // Always qualified
     reasons,
   };
 }
@@ -598,9 +576,8 @@ async function main() {
       league: league || null,
     }));
 
-    const qualifiedFixtures = [];
-    const worldCupFixtures = [];
-    const fixturesByHour = new Map();
+    // Process ALL fixtures without any restrictions
+    const allFixtures = [];
     
     for (const fixture of fixtures) {
       const fixtureApiId = fixture?.fixture?.id ?? fixture?.id ?? null;
@@ -641,27 +618,7 @@ async function main() {
       const h2hSaved = Number(h2hResult.saved ?? 0);
       const hasH2h = h2hSaved >= 1;
       
-      // Always include World Cup matches (no H2H requirement)
-      if (isWorldCup) {
-        const syncScore = scoreFixtureForSync({
-          oddsRows: oddsResult.rows || [],
-          h2hRows: h2hResult.rows || [],
-          leagueId: leagueInfo.id,
-        });
-
-        worldCupFixtures.push({
-          fixture,
-          oddsRows: oddsResult.rows || [],
-          h2hRows: h2hResult.rows || [],
-          score: syncScore.score + 100, // Boost World Cup matches
-          reasons: [...(syncScore.reasons || []), 'world-cup'],
-          hour,
-          hasH2h,
-        });
-        continue;
-      }
-      
-      // For all other fixtures, include them regardless of H2H for now
+      // Score all fixtures (no filtering)
       const syncScore = scoreFixtureForSync({
         oddsRows: oddsResult.rows || [],
         h2hRows: h2hResult.rows || [],
@@ -676,108 +633,51 @@ async function main() {
         reasons: syncScore.reasons || [],
         hour,
         hasH2h,
+        isWorldCup,
       };
       
-      qualifiedFixtures.push(fixtureData);
-      
-      // Group by hour for distribution
-      if (!fixturesByHour.has(hour)) {
-        fixturesByHour.set(hour, []);
-      }
-      fixturesByHour.get(hour).push(fixtureData);
+      allFixtures.push(fixtureData);
     }
 
-    // Sort fixtures by score within each hour
-    for (const [hour, fixtures] of fixturesByHour) {
-      fixtures.sort((a, b) => (b.score || 0) - (a.score || 0));
+    // Sort all fixtures by score (World Cup gets priority)
+    allFixtures.sort((a, b) => (b.score || 0) - (a.score || 0));
+    
+    // Simple selection: minimum 100, maximum 200
+    const totalAvailable = allFixtures.length;
+    const minRequired = 100;
+    const maxAllowed = 200;
+    
+    let selectedCount;
+    if (totalAvailable < minRequired) {
+      selectedCount = totalAvailable; // Take all available
+      console.log(JSON.stringify({
+        job: 'sync-fixtures',
+        stage: 'insufficient-fixtures',
+        available: totalAvailable,
+        required: minRequired,
+        message: `Only ${totalAvailable} fixtures available, less than required ${minRequired}`
+      }));
+    } else if (totalAvailable > maxAllowed) {
+      selectedCount = maxAllowed; // Cap at maximum
+    } else {
+      selectedCount = totalAvailable; // Take all available
     }
     
-    // Sort all qualified fixtures by score
-    qualifiedFixtures.sort((a, b) => (b.score || 0) - (a.score || 0));
-    
-    // Sort World Cup fixtures by score
-    worldCupFixtures.sort((a, b) => (b.score || 0) - (a.score || 0));
-
-    // Selection strategy:
-    // 1. All World Cup matches (no limits)
-    // 2. 130 matches across all hours (no H2H requirement, min 5 per hour if available)
-    // 3. 70 additional matches with H2H requirement (distributed across hours)
-    
-    const selectedFixtures = [...worldCupFixtures];
-    const usedFixtureIds = new Set(worldCupFixtures.map(f => f.fixture?.fixture?.id));
-    
-    // Phase 1: Select 130 fixtures (no H2H requirement, distribute across hours)
-    const phase1Selections = [];
-    const hoursWithFixtures = Array.from(fixturesByHour.keys()).sort();
-    const minPerHour = Math.min(5, Math.floor(130 / Math.max(hoursWithFixtures.length, 1)));
-    
-    // First, ensure at least minPerHour from each hour
-    for (const hour of hoursWithFixtures) {
-      const hourFixtures = fixturesByHour.get(hour).filter(f => !usedFixtureIds.has(f.fixture?.fixture?.id));
-      const selected = hourFixtures.slice(0, minPerHour);
-      phase1Selections.push(...selected);
-      selected.forEach(f => usedFixtureIds.add(f.fixture?.fixture?.id));
-    }
-    
-    // Fill remaining slots from all available fixtures
-    const remainingPhase1 = 130 - phase1Selections.length;
-    if (remainingPhase1 > 0) {
-      const availableFixtures = qualifiedFixtures.filter(f => !usedFixtureIds.has(f.fixture?.fixture?.id));
-      const additional = availableFixtures.slice(0, remainingPhase1);
-      phase1Selections.push(...additional);
-      additional.forEach(f => usedFixtureIds.add(f.fixture?.fixture?.id));
-    }
-    
-    selectedFixtures.push(...phase1Selections);
-    
-    // Phase 2: Select 70 fixtures with H2H requirement (distributed across hours)
-    const phase2Selections = [];
-    const fixturesWithH2h = qualifiedFixtures.filter(f => f.hasH2h && !usedFixtureIds.has(f.fixture?.fixture?.id));
-    const h2hByHour = new Map();
-    
-    // Group H2H fixtures by hour
-    fixturesWithH2h.forEach(f => {
-      if (!h2hByHour.has(f.hour)) {
-        h2hByHour.set(f.hour, []);
-      }
-      h2hByHour.get(f.hour).push(f);
-    });
-    
-    // Distribute 70 fixtures across available hours
-    const hoursWithH2h = Array.from(h2hByHour.keys()).sort();
-    const perHourH2h = Math.floor(70 / Math.max(hoursWithH2h.length, 1));
-    let remainingH2h = 70;
-    
-    for (const hour of hoursWithH2h) {
-      if (remainingH2h <= 0) break;
-      const hourFixtures = h2hByHour.get(hour);
-      const toTake = Math.min(perHourH2h, remainingH2h, hourFixtures.length);
-      const selected = hourFixtures.slice(0, toTake);
-      phase2Selections.push(...selected);
-      remainingH2h -= selected.length;
-    }
-    
-    // Fill any remaining H2H slots
-    if (remainingH2h > 0) {
-      const remainingH2hFixtures = fixturesWithH2h.filter(f => !phase2Selections.includes(f));
-      const additional = remainingH2hFixtures.slice(0, remainingH2h);
-      phase2Selections.push(...additional);
-    }
-    
-    selectedFixtures.push(...phase2Selections);
+    const finalSelectedFixtures = allFixtures.slice(0, selectedCount);
 
     console.log(JSON.stringify({
       job: 'sync-fixtures',
-      stage: 'fixtures-qualified',
-      world_cup_selected: worldCupFixtures.length,
-      phase1_selected: phase1Selections.length,
-      phase2_selected: phase2Selections.length,
-      total_selected: selectedFixtures.length,
-      hours_available: hoursWithFixtures.length,
-      min_per_hour: minPerHour,
+      stage: 'fixtures-selected',
+      total_fetched: fixtures.length,
+      total_processed: allFixtures.length,
+      world_cup_count: allFixtures.filter(f => f.isWorldCup).length,
+      with_h2h_count: allFixtures.filter(f => f.hasH2h).length,
+      final_selected: finalSelectedFixtures.length,
+      minimum_required: minRequired,
+      maximum_allowed: maxAllowed,
     }));
 
-    for (const qualified of selectedFixtures) {
+    for (const qualified of finalSelectedFixtures) {
       const fixture = qualified.fixture;
       const leagueInfo = fixture.league;
       const homeTeam = fixture.teams.home;
@@ -860,7 +760,7 @@ async function main() {
       finished_at: isoNow(),
       items_seen: selectedFixtures.length,
       items_saved: itemsSaved,
-      message: `Fetched ${fixtures.length} fixtures. ${h2hPassedCount} passed H2H. ${h2hSkippedCount} were skipped without H2H. ${scorePassedCount} passed the score gate. Saved top ${itemsSaved} qualified fixtures.`,
+      message: `Fetched ${fixtures.length} fixtures. ${h2hPassedCount} passed H2H. ${h2hSkippedCount} were skipped without H2H. ${scorePassedCount} passed the score gate. Saved ${itemsSaved} qualified fixtures (min: 100, max: 200).`,
       created_at: isoNow(),
       updated_at: isoNow(),
     });
