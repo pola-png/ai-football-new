@@ -277,6 +277,9 @@ const POPULAR_LEAGUE_IDS = new Set([
   4,    // Euro Championship
 ]);
 
+// World Cup league ID
+const WORLD_CUP_LEAGUE_ID = 1;
+
 function popularityBonus(leagueId) {
   const id = Number(leagueId);
   return Number.isFinite(id) && POPULAR_LEAGUE_IDS.has(id) ? 30 : 0;
@@ -315,8 +318,10 @@ function scoreFixtureForSync({ oddsRows, h2hRows, leagueId }) {
   const oddsCount = Array.isArray(oddsRows) ? oddsRows.length : 0;
   const oddsSignals = countOddsSignals(oddsRows);
   const minH2h = Number.isFinite(minimumH2hRows) && minimumH2hRows > 0 ? minimumH2hRows : 1;
+  const isWorldCup = Number(leagueId) === WORLD_CUP_LEAGUE_ID;
 
-  if (h2hCount < minH2h) {
+  // World Cup matches don't require H2H data
+  if (!isWorldCup && h2hCount < minH2h) {
     return { score: 0, qualified: false, reasons: ['missing-h2h'] };
   }
 
@@ -594,6 +599,8 @@ async function main() {
     }));
 
     const qualifiedFixtures = [];
+    const worldCupFixtures = [];
+    
     for (const fixture of fixtures) {
       const fixtureApiId = fixture?.fixture?.id ?? fixture?.id ?? null;
       const leagueInfo = fixture?.league || null;
@@ -612,6 +619,8 @@ async function main() {
         away_team_api_id: String(awayTeam.id),
       };
 
+      const isWorldCup = Number(leagueInfo.id) === WORLD_CUP_LEAGUE_ID;
+
       const [oddsResult, h2hResult] = await Promise.all([
         fetchFixtureOdds({
           fixture: fixtureStub,
@@ -625,6 +634,26 @@ async function main() {
       ]);
 
       const h2hSaved = Number(h2hResult.saved ?? 0);
+      
+      // World Cup fixtures don't need H2H requirement
+      if (isWorldCup) {
+        const syncScore = scoreFixtureForSync({
+          oddsRows: oddsResult.rows || [],
+          h2hRows: h2hResult.rows || [],
+          leagueId: leagueInfo.id,
+        });
+
+        worldCupFixtures.push({
+          fixture,
+          oddsRows: oddsResult.rows || [],
+          h2hRows: h2hResult.rows || [],
+          score: syncScore.score + 100, // Boost World Cup matches
+          reasons: [...(syncScore.reasons || []), 'world-cup'],
+        });
+        continue;
+      }
+      
+      // Regular fixtures need H2H requirement
       if (h2hSaved < (Number.isFinite(minimumH2hRows) && minimumH2hRows > 0 ? minimumH2hRows : 2)) {
         h2hSkippedCount += 1;
         console.log(JSON.stringify({
@@ -662,17 +691,30 @@ async function main() {
       });
     }
 
+    // Sort both arrays by score
     qualifiedFixtures.sort((left, right) => {
       const scoreDiff = (right.score || 0) - (left.score || 0);
       if (scoreDiff !== 0) {
         return scoreDiff;
       }
-
+      return String(left.fixture?.fixture?.id || '').localeCompare(String(right.fixture?.fixture?.id || ''));
+    });
+    
+    worldCupFixtures.sort((left, right) => {
+      const scoreDiff = (right.score || 0) - (left.score || 0);
+      if (scoreDiff !== 0) {
+        return scoreDiff;
+      }
       return String(left.fixture?.fixture?.id || '').localeCompare(String(right.fixture?.fixture?.id || ''));
     });
 
-    const maxFixtures = Number.parseInt(process.env.MAX_FIXTURES || '130', 10);
-    const selectedFixtures = qualifiedFixtures.slice(0, maxFixtures);
+    // Select up to 70 World Cup fixtures and 130 regular fixtures
+    const maxWorldCupFixtures = 70;
+    const maxRegularFixtures = 130;
+    
+    const selectedWorldCupFixtures = worldCupFixtures.slice(0, maxWorldCupFixtures);
+    const selectedRegularFixtures = qualifiedFixtures.slice(0, maxRegularFixtures);
+    const selectedFixtures = [...selectedWorldCupFixtures, ...selectedRegularFixtures];
 
     console.log(JSON.stringify({
       job: 'sync-fixtures',
@@ -680,8 +722,11 @@ async function main() {
       h2h_passed: h2hPassedCount,
       h2h_skipped: h2hSkippedCount,
       score_passed: scorePassedCount,
-      selected: selectedFixtures.length,
-      max_cap: maxFixtures,
+      world_cup_selected: selectedWorldCupFixtures.length,
+      regular_selected: selectedRegularFixtures.length,
+      total_selected: selectedFixtures.length,
+      max_world_cup: maxWorldCupFixtures,
+      max_regular: maxRegularFixtures,
     }));
 
     for (const qualified of selectedFixtures) {
