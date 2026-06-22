@@ -600,6 +600,7 @@ async function main() {
 
     const qualifiedFixtures = [];
     const worldCupFixtures = [];
+    const fixturesByHour = new Map();
     
     for (const fixture of fixtures) {
       const fixtureApiId = fixture?.fixture?.id ?? fixture?.id ?? null;
@@ -620,6 +621,10 @@ async function main() {
       };
 
       const isWorldCup = Number(leagueInfo.id) === WORLD_CUP_LEAGUE_ID;
+      
+      // Get hour for distribution
+      const kickoffTime = fixture?.fixture?.date || null;
+      const hour = kickoffTime ? new Date(kickoffTime).getUTCHours() : 0;
 
       const [oddsResult, h2hResult] = await Promise.all([
         fetchFixtureOdds({
@@ -634,8 +639,9 @@ async function main() {
       ]);
 
       const h2hSaved = Number(h2hResult.saved ?? 0);
+      const hasH2h = h2hSaved >= 1;
       
-      // World Cup fixtures don't need H2H requirement
+      // Always include World Cup matches (no H2H requirement)
       if (isWorldCup) {
         const syncScore = scoreFixtureForSync({
           oddsRows: oddsResult.rows || [],
@@ -649,84 +655,126 @@ async function main() {
           h2hRows: h2hResult.rows || [],
           score: syncScore.score + 100, // Boost World Cup matches
           reasons: [...(syncScore.reasons || []), 'world-cup'],
+          hour,
+          hasH2h,
         });
         continue;
       }
       
-      // Regular fixtures need H2H requirement
-      if (h2hSaved < (Number.isFinite(minimumH2hRows) && minimumH2hRows > 0 ? minimumH2hRows : 2)) {
-        h2hSkippedCount += 1;
-        console.log(JSON.stringify({
-          job: 'sync-fixtures',
-          fixture_api_id: fixtureApiId,
-          stage: 'fixture-skip',
-          reason: 'missing-h2h',
-          minimum_h2h_rows: Number.isFinite(minimumH2hRows) && minimumH2hRows > 0 ? minimumH2hRows : 2,
-          h2h_rows: h2hSaved,
-          message: 'Fixture not saved because not enough H2H data was available.',
-        }));
-        continue;
-      }
-
-      h2hPassedCount += 1;
-
+      // For all other fixtures, include them regardless of H2H for now
       const syncScore = scoreFixtureForSync({
         oddsRows: oddsResult.rows || [],
         h2hRows: h2hResult.rows || [],
         leagueId: leagueInfo.id,
       });
 
-      if (!syncScore.qualified) {
-        continue;
-      }
-
-      scorePassedCount += 1;
-
-      qualifiedFixtures.push({
+      const fixtureData = {
         fixture,
         oddsRows: oddsResult.rows || [],
         h2hRows: h2hResult.rows || [],
-        score: syncScore.score,
-        reasons: syncScore.reasons,
-      });
+        score: syncScore.score || 0,
+        reasons: syncScore.reasons || [],
+        hour,
+        hasH2h,
+      };
+      
+      qualifiedFixtures.push(fixtureData);
+      
+      // Group by hour for distribution
+      if (!fixturesByHour.has(hour)) {
+        fixturesByHour.set(hour, []);
+      }
+      fixturesByHour.get(hour).push(fixtureData);
     }
 
-    // Sort both arrays by score
-    qualifiedFixtures.sort((left, right) => {
-      const scoreDiff = (right.score || 0) - (left.score || 0);
-      if (scoreDiff !== 0) {
-        return scoreDiff;
-      }
-      return String(left.fixture?.fixture?.id || '').localeCompare(String(right.fixture?.fixture?.id || ''));
-    });
+    // Sort fixtures by score within each hour
+    for (const [hour, fixtures] of fixturesByHour) {
+      fixtures.sort((a, b) => (b.score || 0) - (a.score || 0));
+    }
     
-    worldCupFixtures.sort((left, right) => {
-      const scoreDiff = (right.score || 0) - (left.score || 0);
-      if (scoreDiff !== 0) {
-        return scoreDiff;
-      }
-      return String(left.fixture?.fixture?.id || '').localeCompare(String(right.fixture?.fixture?.id || ''));
-    });
+    // Sort all qualified fixtures by score
+    qualifiedFixtures.sort((a, b) => (b.score || 0) - (a.score || 0));
+    
+    // Sort World Cup fixtures by score
+    worldCupFixtures.sort((a, b) => (b.score || 0) - (a.score || 0));
 
-    // Select up to 70 World Cup fixtures and 130 regular fixtures
-    const maxWorldCupFixtures = 70;
-    const maxRegularFixtures = 130;
+    // Selection strategy:
+    // 1. All World Cup matches (no limits)
+    // 2. 130 matches across all hours (no H2H requirement, min 5 per hour if available)
+    // 3. 70 additional matches with H2H requirement (distributed across hours)
     
-    const selectedWorldCupFixtures = worldCupFixtures.slice(0, maxWorldCupFixtures);
-    const selectedRegularFixtures = qualifiedFixtures.slice(0, maxRegularFixtures);
-    const selectedFixtures = [...selectedWorldCupFixtures, ...selectedRegularFixtures];
+    const selectedFixtures = [...worldCupFixtures];
+    const usedFixtureIds = new Set(worldCupFixtures.map(f => f.fixture?.fixture?.id));
+    
+    // Phase 1: Select 130 fixtures (no H2H requirement, distribute across hours)
+    const phase1Selections = [];
+    const hoursWithFixtures = Array.from(fixturesByHour.keys()).sort();
+    const minPerHour = Math.min(5, Math.floor(130 / Math.max(hoursWithFixtures.length, 1)));
+    
+    // First, ensure at least minPerHour from each hour
+    for (const hour of hoursWithFixtures) {
+      const hourFixtures = fixturesByHour.get(hour).filter(f => !usedFixtureIds.has(f.fixture?.fixture?.id));
+      const selected = hourFixtures.slice(0, minPerHour);
+      phase1Selections.push(...selected);
+      selected.forEach(f => usedFixtureIds.add(f.fixture?.fixture?.id));
+    }
+    
+    // Fill remaining slots from all available fixtures
+    const remainingPhase1 = 130 - phase1Selections.length;
+    if (remainingPhase1 > 0) {
+      const availableFixtures = qualifiedFixtures.filter(f => !usedFixtureIds.has(f.fixture?.fixture?.id));
+      const additional = availableFixtures.slice(0, remainingPhase1);
+      phase1Selections.push(...additional);
+      additional.forEach(f => usedFixtureIds.add(f.fixture?.fixture?.id));
+    }
+    
+    selectedFixtures.push(...phase1Selections);
+    
+    // Phase 2: Select 70 fixtures with H2H requirement (distributed across hours)
+    const phase2Selections = [];
+    const fixturesWithH2h = qualifiedFixtures.filter(f => f.hasH2h && !usedFixtureIds.has(f.fixture?.fixture?.id));
+    const h2hByHour = new Map();
+    
+    // Group H2H fixtures by hour
+    fixturesWithH2h.forEach(f => {
+      if (!h2hByHour.has(f.hour)) {
+        h2hByHour.set(f.hour, []);
+      }
+      h2hByHour.get(f.hour).push(f);
+    });
+    
+    // Distribute 70 fixtures across available hours
+    const hoursWithH2h = Array.from(h2hByHour.keys()).sort();
+    const perHourH2h = Math.floor(70 / Math.max(hoursWithH2h.length, 1));
+    let remainingH2h = 70;
+    
+    for (const hour of hoursWithH2h) {
+      if (remainingH2h <= 0) break;
+      const hourFixtures = h2hByHour.get(hour);
+      const toTake = Math.min(perHourH2h, remainingH2h, hourFixtures.length);
+      const selected = hourFixtures.slice(0, toTake);
+      phase2Selections.push(...selected);
+      remainingH2h -= selected.length;
+    }
+    
+    // Fill any remaining H2H slots
+    if (remainingH2h > 0) {
+      const remainingH2hFixtures = fixturesWithH2h.filter(f => !phase2Selections.includes(f));
+      const additional = remainingH2hFixtures.slice(0, remainingH2h);
+      phase2Selections.push(...additional);
+    }
+    
+    selectedFixtures.push(...phase2Selections);
 
     console.log(JSON.stringify({
       job: 'sync-fixtures',
       stage: 'fixtures-qualified',
-      h2h_passed: h2hPassedCount,
-      h2h_skipped: h2hSkippedCount,
-      score_passed: scorePassedCount,
-      world_cup_selected: selectedWorldCupFixtures.length,
-      regular_selected: selectedRegularFixtures.length,
+      world_cup_selected: worldCupFixtures.length,
+      phase1_selected: phase1Selections.length,
+      phase2_selected: phase2Selections.length,
       total_selected: selectedFixtures.length,
-      max_world_cup: maxWorldCupFixtures,
-      max_regular: maxRegularFixtures,
+      hours_available: hoursWithFixtures.length,
+      min_per_hour: minPerHour,
     }));
 
     for (const qualified of selectedFixtures) {
