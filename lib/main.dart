@@ -977,7 +977,7 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
   final PredictionRepository _repository = PredictionRepository();
   late Future<List<PredictionRecord>> _futurePredictions;
   SubscriptionPlanId? _selectedPlanOverride;
-  SubscriptionPlanId? _subscriptionFocusPlan;
+  bool _showPurchaseScreen = false;
 
   @override
   void initState() {
@@ -1017,8 +1017,15 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
         final isAdmin = widget.isAdmin;
         final activePlan = billing.activePlan;
         final hasAccess = widget.adFree || isAdmin || activePlan != null;
-        final selectedPlan = _selectedPlanOverride ?? activePlan ?? SubscriptionPlanId.premium;
-        final headerTitle = activePlan == null ? selectedPlan.title : activePlan.title;
+        final selectedPlan = isAdmin
+            ? _selectedPlanOverride ?? activePlan ?? SubscriptionPlanId.premium
+            : activePlan ?? _selectedPlanOverride ?? SubscriptionPlanId.premium;
+        final purchasePlan = _selectedPlanOverride ?? activePlan ?? SubscriptionPlanId.premium;
+        final showingPurchaseScreen =
+            !isAdmin && activePlan != null && _showPurchaseScreen && purchasePlan != activePlan;
+        final headerTitle = showingPurchaseScreen
+            ? 'Subscribe to ${purchasePlan.title}'
+            : selectedPlan.title;
 
         return Container(
           decoration: BoxDecoration(
@@ -1030,7 +1037,15 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
           ),
           child: SafeArea(
             child: hasAccess
-                ? Column(
+                ? showingPurchaseScreen
+                    ? _buildPurchaseScreen(
+                        context: context,
+                        billing: billing,
+                        purchasePlan: purchasePlan,
+                        activePlan: activePlan,
+                        isAdmin: isAdmin,
+                      )
+                    : Column(
                     children: [
                       Padding(
                         padding: const EdgeInsets.fromLTRB(20, 16, 20, 10),
@@ -1046,41 +1061,72 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
                                 ),
                               ),
                             ),
-                            PopupMenuButton<SubscriptionPlanId>(
-                              tooltip: 'Switch plan',
-                              onSelected: (plan) {
-                                if (isAdmin || billing.isOwned(plan)) {
+                            if (isAdmin)
+                              PopupMenuButton<SubscriptionPlanId>(
+                                tooltip: 'Switch plan',
+                                onSelected: (plan) {
                                   setState(() {
                                     _selectedPlanOverride = plan;
-                                    _subscriptionFocusPlan = null;
                                   });
-                                }
-                              },
-                              itemBuilder: (context) {
-                                return widget.currentPlans.map((plan) {
-                                  final owned = isAdmin || billing.isOwned(plan);
-                                  return PopupMenuItem<SubscriptionPlanId>(
-                                    value: plan,
-                                    child: Row(
-                                      children: [
-                                        Icon(
-                                          owned
-                                              ? Icons.verified
-                                              : Icons.workspace_premium_outlined,
-                                          size: 18,
-                                        ),
-                                        const SizedBox(width: 10),
-                                        Expanded(child: Text(plan.title)),
-                                      ],
-                                    ),
-                                  );
-                                }).toList();
-                              },
-                              child: Icon(
-                                Icons.menu_open,
-                                color: _accentText(context),
+                                },
+                                itemBuilder: (context) {
+                                  return widget.currentPlans.map((plan) {
+                                    return PopupMenuItem<SubscriptionPlanId>(
+                                      value: plan,
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            Icons.workspace_premium_outlined,
+                                            size: 18,
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(child: Text(plan.title)),
+                                        ],
+                                      ),
+                                    );
+                                  }).toList();
+                                },
+                                child: Icon(
+                                  Icons.menu_open,
+                                  color: _accentText(context),
+                                ),
                               ),
-                            ),
+                            if (!isAdmin &&
+                                activePlan != null &&
+                                widget.currentPlans.any((plan) => plan != activePlan))
+                              PopupMenuButton<SubscriptionPlanId>(
+                                tooltip: 'Choose a plan',
+                                onSelected: (plan) {
+                                  setState(() {
+                                    _selectedPlanOverride = plan;
+                                    _showPurchaseScreen = true;
+                                  });
+                                },
+                                itemBuilder: (context) {
+                                  return widget.currentPlans
+                                      .where((plan) => plan != activePlan)
+                                      .map((plan) {
+                                        return PopupMenuItem<SubscriptionPlanId>(
+                                          value: plan,
+                                          child: Row(
+                                            children: [
+                                              Icon(
+                                                Icons.workspace_premium_outlined,
+                                                size: 18,
+                                              ),
+                                              const SizedBox(width: 10),
+                                              Expanded(child: Text(plan.title)),
+                                            ],
+                                          ),
+                                        );
+                                      })
+                                      .toList();
+                                },
+                                child: Icon(
+                                  Icons.menu_open,
+                                  color: _accentText(context),
+                                ),
+                              ),
                           ],
                         ),
                       ),
@@ -1095,16 +1141,6 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 16),
-                      SizedBox(
-                        height: 212,
-                        child: _PlanCarousel(
-                          plans: widget.currentPlans,
-                          billing: billing,
-                          compact: true,
-                          onBuyPlan: (plan) => _buyPlan(context, plan),
-                        ),
-                      ),
                       const SizedBox(height: 10),
                       Expanded(
                         child: _DedicatedPlanScreen(
@@ -1115,14 +1151,13 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
                           onRefresh: _reload,
                           plans: widget.currentPlans,
                           showSummaryCard: false,
-                          onSelectPlan: (plan) {
-                            if (isAdmin || billing.isOwned(plan)) {
-                              setState(() {
-                                _selectedPlanOverride = plan;
-                                _subscriptionFocusPlan = null;
-                              });
-                            }
-                          },
+                          onSelectPlan: isAdmin
+                              ? (plan) {
+                                  setState(() {
+                                    _selectedPlanOverride = plan;
+                                  });
+                                }
+                              : null,
                         ),
                       ),
                     ],
@@ -1186,6 +1221,171 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
       },
     );
   }
+
+  Widget _buildPurchaseScreen({
+    required BuildContext context,
+    required GooglePlayBillingService billing,
+    required SubscriptionPlanId purchasePlan,
+    required SubscriptionPlanId? activePlan,
+    required bool isAdmin,
+  }) {
+    final primaryText = _primaryText(context);
+    final secondaryText = _secondaryText(context);
+    final accentText = _accentText(context);
+    final product = billing.productFor(purchasePlan);
+    final priceText = billing.isLoading
+        ? 'Loading price...'
+        : product?.price ?? purchasePlan.fallbackPrice;
+    final canPurchase = billing.isAvailable && !billing.isOwned(purchasePlan);
+
+    return SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Subscribe to ${purchasePlan.title}',
+                  style: TextStyle(
+                    color: primaryText,
+                    fontSize: 28,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Back to plan',
+                onPressed: activePlan == null
+                    ? null
+                    : () {
+                        setState(() {
+                          _selectedPlanOverride = activePlan;
+                          _showPurchaseScreen = false;
+                        });
+                      },
+                icon: Icon(Icons.arrow_back, color: accentText),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Review the plan and continue to payment when you are ready.',
+            style: TextStyle(
+              color: secondaryText,
+              fontSize: 14,
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(height: 18),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _planGradientColors(purchasePlan, context),
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: _screenBorder(context)),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x16000000),
+                  blurRadius: 24,
+                  offset: Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        purchasePlan.title,
+                        style: TextStyle(
+                          color: primaryText,
+                          fontSize: 24,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    if (isAdmin)
+                      const Icon(Icons.admin_panel_settings, size: 20),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Price: $priceText',
+                  style: TextStyle(
+                    color: secondaryText,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ..._planBenefitLines(purchasePlan).map(
+                  (line) => Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.check_circle,
+                          size: 18,
+                          color: accentText,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            line,
+                            style: TextStyle(
+                              color: primaryText,
+                              fontSize: 14,
+                              height: 1.35,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: canPurchase
+                        ? () => _buyPlan(context, purchasePlan)
+                        : null,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF00D4AA),
+                      foregroundColor: const Color(0xFF07111F),
+                    ),
+                    child: Text(
+                      canPurchase ? 'Continue to payment' : 'Already active',
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          _planNotice(
+            context,
+            title: 'Active plan',
+            body: activePlan == null
+                ? 'You do not have an active paid plan yet.'
+                : 'Your active plan is ${activePlan.title}. Use the menu to switch to another plan or go back to your current plan.',
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 
@@ -1198,7 +1398,7 @@ class _DedicatedPlanScreen extends StatefulWidget {
     required this.onRefresh,
     required this.plans,
     required this.showSummaryCard,
-    required this.onSelectPlan,
+    this.onSelectPlan,
   });
 
   final SubscriptionPlanId plan;
@@ -1208,7 +1408,7 @@ class _DedicatedPlanScreen extends StatefulWidget {
   final Future<void> Function() onRefresh;
   final List<SubscriptionPlanId> plans;
   final bool showSummaryCard;
-  final void Function(SubscriptionPlanId plan) onSelectPlan;
+  final void Function(SubscriptionPlanId plan)? onSelectPlan;
 
   @override
   State<_DedicatedPlanScreen> createState() => _DedicatedPlanScreenState();
@@ -1271,30 +1471,31 @@ class _DedicatedPlanScreenState extends State<_DedicatedPlanScreen> {
                               ),
                             ),
                           ),
-                          PopupMenuButton<SubscriptionPlanId>(
-                            tooltip: 'Switch plan',
-                            onSelected: widget.onSelectPlan,
-                            itemBuilder: (context) => widget.plans
-                                .map(
-                                  (item) => PopupMenuItem<SubscriptionPlanId>(
-                                    value: item,
-                                    child: Row(
-                                      children: [
-                                        Icon(
-                                          item == widget.plan
-                                              ? Icons.check_circle
-                                              : Icons.swap_horiz,
-                                          size: 18,
-                                        ),
-                                        const SizedBox(width: 10),
-                                        Expanded(child: Text(item.title)),
-                                      ],
+                          if (widget.onSelectPlan != null)
+                            PopupMenuButton<SubscriptionPlanId>(
+                              tooltip: 'Switch plan',
+                              onSelected: widget.onSelectPlan,
+                              itemBuilder: (context) => widget.plans
+                                  .map(
+                                    (item) => PopupMenuItem<SubscriptionPlanId>(
+                                      value: item,
+                                      child: Row(
+                                        children: [
+                                          Icon(
+                                            item == widget.plan
+                                                ? Icons.check_circle
+                                                : Icons.swap_horiz,
+                                            size: 18,
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(child: Text(item.title)),
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                                )
-                                .toList(),
-                            child: Icon(Icons.more_vert, color: accentText),
-                          ),
+                                  )
+                                  .toList(),
+                              child: Icon(Icons.more_vert, color: accentText),
+                            ),
                         ],
                       ),
                       const SizedBox(height: 6),

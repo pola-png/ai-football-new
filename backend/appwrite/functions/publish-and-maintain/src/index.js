@@ -1,4 +1,5 @@
-import { Client, TablesDB, ID, Query, Messaging } from 'node-appwrite';
+import { Client, TablesDB, ID, Query } from 'node-appwrite';
+import { sendPredictionTopicNotification } from '../../_shared/firebase-notifications.js';
 
 function required(name) {
   const value = process.env[name];
@@ -410,7 +411,6 @@ async function publishPredictionRow({
   tablesdb,
   databaseId,
   predictionsTable,
-  messaging,
   topicId,
   row,
   logFn,
@@ -472,18 +472,16 @@ async function publishPredictionRow({
       seedValue: row.fixture_api_id || row.$id || row.home_team_name || 'prediction',
     });
 
-    await messaging.createPush({
-      messageId: ID.unique(),
+    await sendPredictionTopicNotification({
+      topicId,
       title: notificationCopy.title,
       body: notificationCopy.body,
-      topics: [topicId],
       data: {
         fixture_api_id: String(row.fixture_api_id || ''),
         prediction_id: row.$id,
         release_status: 'published',
         confidence: String(primaryConfidence),
       },
-      draft: false,
     });
 
     await upsertRow(tablesdb, databaseId, predictionsTable, row.$id, {
@@ -510,7 +508,7 @@ async function publishPredictionRow({
         stage: isFcmConfigIssue ? 'notification-config-error' : 'notification-error',
         message: errorMessage,
         hint: isFcmConfigIssue
-          ? 'Check the Appwrite Messaging push provider. The FCM service-account private key is missing or not loaded.'
+          ? 'Check the Firebase service-account credentials. The FCM private key is missing or not loaded.'
           : null,
       }));
     } else {
@@ -608,8 +606,6 @@ export default async function main({ res, error: reportError }) {
   try {
     const client = buildClient();
     tablesdb = new TablesDB(client);
-    const messaging = new Messaging(client);
-
     databaseId = required('APPWRITE_DATABASE_ID');
     const predictionsTable = required('APPWRITE_TABLE_PREDICTIONS');
     syncRunsTable = required('APPWRITE_TABLE_SYNC_RUNS');
@@ -673,7 +669,6 @@ export default async function main({ res, error: reportError }) {
         tablesdb,
         databaseId,
         predictionsTable,
-        messaging,
         topicId,
         row,
         logFn: log,

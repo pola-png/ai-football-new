@@ -8,6 +8,7 @@
     "start": "node src/index.js"
   },
   "dependencies": {
+    "firebase-admin": "^13.0.0",
     "node-appwrite": "^21.1.0"
   }
 }

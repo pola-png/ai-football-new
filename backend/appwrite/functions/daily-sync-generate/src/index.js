@@ -1,4 +1,5 @@
-import { Client, TablesDB, ID, Query, Messaging } from 'node-appwrite';
+import { Client, TablesDB, ID, Query } from 'node-appwrite';
+import { sendPredictionTopicNotification } from '../../_shared/firebase-notifications.js';
 
 function required(name) {
   const value = process.env[name];
@@ -1187,7 +1188,6 @@ async function savePredictionAndMaybePublish({
   databaseId,
   fixturesTable,
   predictionsTable,
-  messaging,
   topicId,
   fixture,
   h2hRows,
@@ -1287,7 +1287,7 @@ async function savePredictionAndMaybePublish({
     );
   }
 
-  if (!messaging || !topicId || !shouldSendPredictionNotification(primaryConfidence)) {
+  if (!topicId || !shouldSendPredictionNotification(primaryConfidence)) {
     return { saved: true, published: true, notified: false };
   }
 
@@ -1311,11 +1311,10 @@ async function savePredictionAndMaybePublish({
       seedValue: fixtureApiId,
     });
 
-    await messaging.createPush({
-      messageId: ID.unique(),
+    await sendPredictionTopicNotification({
+      topicId,
       title: notificationCopy.title,
       body: notificationCopy.body,
-      topics: [topicId],
       data: {
         fixture_api_id: fixtureApiId,
         prediction_id: `prediction_${fixtureApiId}`,
@@ -1323,7 +1322,6 @@ async function savePredictionAndMaybePublish({
         market: primarySelection,
         confidence: String(primaryConfidence),
       },
-      draft: false,
     });
 
     await upsertRow(tablesdb, databaseId, predictionsTable, `prediction_${fixtureApiId}`, {
@@ -1351,7 +1349,7 @@ async function savePredictionAndMaybePublish({
           stage: isFcmConfigIssue ? 'notification-config-error' : 'notification-error',
           message: errorMessage,
           hint: isFcmConfigIssue
-            ? 'Check the Appwrite Messaging push provider. The FCM service-account private key is missing or not loaded.'
+            ? 'Check the Firebase service-account credentials. The FCM private key is missing or not loaded.'
             : null,
         }),
       );
@@ -1377,7 +1375,6 @@ async function generatePredictionsForBatch({
   fixtureContexts,
   fixturesTable,
   predictionsTable,
-  messaging,
   topicId,
   startedAt,
   logFn,
@@ -1446,7 +1443,6 @@ async function generatePredictionsForBatch({
         databaseId,
         fixturesTable,
         predictionsTable,
-        messaging,
         topicId,
         fixture,
         h2hRows,
@@ -1490,7 +1486,6 @@ export default async function main(context) {
   const { res, error: reportError } = context;
   const client = buildClient();
   const tablesdb = new TablesDB(client);
-  const messaging = new Messaging(client);
   const { log: appwriteLog, error: appwriteError } = buildAppwriteLogger(context);
 
   const databaseId = required('APPWRITE_DATABASE_ID');
@@ -1503,7 +1498,7 @@ export default async function main(context) {
   const topicId = required('APPWRITE_TOPIC_PREDICTIONS');
 
   const league = process.env.API_FOOTBALL_LEAGUE ? Number(process.env.API_FOOTBALL_LEAGUE) : null;
-  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(0);
+  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(1);
   const syncRunId = `sync_${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}`;
   const startedAt = isoNow();
 
@@ -1946,7 +1941,6 @@ export default async function main(context) {
       fixtureContexts,
       fixturesTable,
       predictionsTable,
-      messaging,
       topicId,
       startedAt,
       logFn: appwriteLog,

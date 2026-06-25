@@ -1,4 +1,4 @@
-const { Client, TablesDB, ID, Query, Messaging } = require('node-appwrite');
+const { Client, TablesDB, ID, Query } = require('node-appwrite');
 
 function required(name) {
   const value = process.env[name];
@@ -79,7 +79,7 @@ async function fetchAllRows(tablesdb, databaseId, tableId, baseQueries, pageSize
 async function main() {
   const client = buildClient();
   const tablesdb = new TablesDB(client);
-  const messaging = new Messaging(client);
+  const { sendPredictionTopicNotification } = await import('../../_shared/firebase-notifications.js');
 
   const databaseId = required('APPWRITE_DATABASE_ID');
   const predictionsTable = required('APPWRITE_TABLE_PREDICTIONS');
@@ -120,17 +120,15 @@ async function main() {
           updated_at: publishedAt,
         });
 
-        await messaging.createPush({
-          messageId: ID.unique(),
+        await sendPredictionTopicNotification({
+          topicId,
           title: 'New prediction is live',
           body: 'Your football prediction is ready.',
-          topics: [topicId],
           data: {
             fixture_api_id: String(row.fixture_api_id),
             prediction_id: row.$id,
             release_status: 'published',
           },
-          draft: false,
         });
 
         await upsertRow(tablesdb, databaseId, predictionsTable, row.$id, {
