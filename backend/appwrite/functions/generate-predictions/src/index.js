@@ -88,6 +88,7 @@ function buildPrompt(fixture, oddsRows, h2hRows) {
     'If the confidence is below 0.85, set reason to an empty string and do not add any explanation text.',
     'Never use phrases about limited data, small samples, missing history, insufficient evidence, or not enough matches as reason text for a 0.85+ confidence pick.',
     'Focus on low-odds markets such as over, under, gg/btts, corners, double chance 12, and throw-ins if the data exists.',
+    'If Under 1.5, Under 2.5, or Over 3.5 is not at least 0.90 confident, do not save it and let the backend replace it with a safer pick.',
     'When choosing an Over/Under goals market, pick the line that best fits the h2h average goals. Use Over 3.5 if average is near 4, Over 2.5 if near 3, Over 1.5 if near 2. For Under markets, use Under 1.5 if average is below 1, Under 2.5 if average is near 2, Under 3.5 if near 3. Never default to a fixed line — always derive it from the data.',
     'IMPORTANT: For Over 3.5 and higher predictions, set confidence to maximum 0.83. For Under 2.5 and lower predictions, set confidence to maximum 0.83.',
     'Do not choose a straight win or draw selection unless you are at least 0.90 confident.',
@@ -163,6 +164,28 @@ function normalizeConfidenceLabel(label, confidence) {
 
   const text = typeof label === 'string' ? label.trim().toLowerCase() : '';
   return text === 'high' ? 'high' : 'medium';
+}
+
+function selectionMinimumConfidence(selection) {
+  const value = String(selection || '').trim().toLowerCase();
+  if (
+    /\bunder\s*1\.5\b/.test(value) ||
+    /\bunder\s*2\.5\b/.test(value) ||
+    /\bover\s*3\.5\b/.test(value)
+  ) {
+    return 0.9;
+  }
+
+  return 0.85;
+}
+
+function shouldKeepSelection(selection, confidence) {
+  const value = String(selection || '').trim();
+  if (!value) {
+    return false;
+  }
+
+  return Number.isFinite(confidence) && confidence >= selectionMinimumConfidence(value);
 }
 
 function pickAt(picks, index) {
@@ -458,12 +481,15 @@ async function main() {
       }
 
       const primaryPick = pickAt(parsed.picks, 0);
-      const primarySelection = primaryPick?.selection || parsed.predicted_winner || 'Over 1.5'; // Fallback selection
       const primaryConfidence = typeof primaryPick?.confidence === 'number'
         ? primaryPick.confidence
         : typeof parsed.confidence === 'number'
           ? parsed.confidence
           : 0.75; // Fallback confidence
+      const fallbackSelection = parsed.predicted_winner || 'Over 1.5';
+      const primarySelection = shouldKeepSelection(primaryPick?.selection, primaryConfidence)
+        ? primaryPick.selection.trim()
+        : fallbackSelection;
       const primaryReason = normalizePredictionReason(primaryPick?.reason, primaryConfidence);
 
       const shouldPublishNow = shouldPublishNearKickoff(fixture.kickoff_at, new Date());

@@ -681,6 +681,7 @@ function buildPrompt(fixture, h2hRows) {
     'Never use phrases about limited data, small samples, missing history, insufficient evidence, or not enough matches as reason text for a 0.85+ confidence pick.',
     'The reason must be short, one sentence only, and should not include extra explanation.',
     'Prefer conservative non-straight-win markets such as Over/Under goals, Both Teams To Score, Double Chance, Draw, or No Bet.',
+    'If Under 1.5, Under 2.5, or Over 3.5 is not at least 0.90 confident, do not save it and let the backend replace it with a safer pick.',
     'When choosing an Over/Under goals market, pick the line that best matches the h2h average goals. Use Over 3.5 if average is near 4, Over 2.5 if near 3, Over 1.5 if near 2. For Under markets, use Under 1.5 if average is below 1, Under 2.5 if average is near 2, Under 3.5 if near 3. Never default to a fixed line — always derive it from the data.',
     "Don't generate straight-win selections like Home Win, Away Win, Team X to win, or bare team-name wins unless confidence is 0.99 or higher.",
     "Don't choose a straight-win pick unless you are extremely certain.",
@@ -760,9 +761,23 @@ function isAllowedNonWinSelection(selection) {
   );
 }
 
+function selectionMinimumConfidence(selection) {
+  const value = String(selection || '').trim().toLowerCase();
+  if (
+    /\bunder\s*1\.5\b/.test(value) ||
+    /\bunder\s*2\.5\b/.test(value) ||
+    /\bover\s*3\.5\b/.test(value)
+  ) {
+    return 0.9;
+  }
+
+  return 0.85;
+}
+
 function sanitizePrimarySelection(selection, confidence, fallbackSelection) {
   const trimmed = typeof selection === 'string' ? selection.trim() : '';
   const numericConfidence = typeof confidence === 'number' ? confidence : 0;
+  const minimumConfidence = selectionMinimumConfidence(trimmed);
   const fallback = typeof fallbackSelection === 'string' && fallbackSelection.trim()
     ? fallbackSelection.trim()
     : 'Under 4.5 Goals';
@@ -771,7 +786,7 @@ function sanitizePrimarySelection(selection, confidence, fallbackSelection) {
     return fallback;
   }
 
-  if (isAllowedNonWinSelection(trimmed)) {
+  if (isAllowedNonWinSelection(trimmed) && numericConfidence >= minimumConfidence) {
     return trimmed;
   }
 
@@ -1498,7 +1513,7 @@ export default async function main(context) {
   const topicId = required('APPWRITE_TOPIC_PREDICTIONS');
 
   const league = process.env.API_FOOTBALL_LEAGUE ? Number(process.env.API_FOOTBALL_LEAGUE) : null;
-  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(1);
+  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(0);
   const syncRunId = `sync_${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}`;
   const startedAt = isoNow();
 

@@ -79,7 +79,7 @@ async function fetchAllRows(tablesdb, databaseId, tableId, baseQueries, pageSize
 async function main() {
   const client = buildClient();
   const tablesdb = new TablesDB(client);
-  const { sendPredictionTopicNotification } = await import('../_shared/firebase-notifications.js');
+  const { sendPredictionTopicNotification } = require('../_shared/firebase-notifications.js');
 
   const databaseId = required('APPWRITE_DATABASE_ID');
   const predictionsTable = required('APPWRITE_TABLE_PREDICTIONS');
