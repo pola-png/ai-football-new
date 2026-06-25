@@ -12,6 +12,7 @@ import 'appwrite_subscription_service.dart';
 import 'feed_banner_ad.dart';
 import 'google_play_billing_service.dart';
 import 'prediction_repository.dart';
+import 'play_store_update_service.dart';
 import 'push_notification_service.dart';
 
 @pragma('vm:entry-point')
@@ -207,6 +208,8 @@ class _NotificationBootstrapPageState extends State<NotificationBootstrapPage> {
     } catch (error) {
       debugPrint('Push subscription failed: $error');
     }
+
+    await PlayStoreUpdateService.checkAndUpdate();
 
     if (!mounted) {
       return;
