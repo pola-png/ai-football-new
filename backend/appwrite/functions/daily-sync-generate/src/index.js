@@ -1,5 +1,5 @@
 import { Client, TablesDB, ID, Query } from 'node-appwrite';
-import { sendPredictionTopicNotification } from '../../_shared/firebase-notifications.js';
+import { sendPredictionTopicNotification } from '../_shared/firebase-notifications.js';
 
 function required(name) {
   const value = process.env[name];
