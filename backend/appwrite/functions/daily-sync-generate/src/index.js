@@ -1503,7 +1503,7 @@ export default async function main(context) {
   const topicId = required('APPWRITE_TOPIC_PREDICTIONS');
 
   const league = process.env.API_FOOTBALL_LEAGUE ? Number(process.env.API_FOOTBALL_LEAGUE) : null;
-  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(1);
+  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(0);
   const syncRunId = `sync_${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}`;
   const startedAt = isoNow();
 
@@ -1598,7 +1598,6 @@ export default async function main(context) {
 
     const maxFixtures = Number.parseInt(process.env.MAX_FIXTURES || '130', 10);
     const minH2hRows = parseMinimumH2hRows(process.env.H2H_MIN_ROWS || '1');
-    const minPerHour = 5; // minimum fixtures to pick from each hour before cycling
 
     // ─── STEP 1: Pre-filter ───────────────────────────────────────────────────
     // Drop finished / cancelled / postponed matches immediately — no API calls.
@@ -1671,8 +1670,10 @@ export default async function main(context) {
       } catch (_) {
         return null; // API error — skip this fixture
       }
-      if (h2hFixtures.length < minH2hRows) return null; // not enough h2h history
       const { score, reasons } = scoreFixture({ h2hCount: h2hFixtures.length, oddsRows, leagueId });
+      if (h2hFixtures.length < minH2hRows) {
+        reasons.push('h2h-fallback');
+      }
       return { fixture: f, score, reasons, oddsRows, h2hFixtures };
     }
 
@@ -1694,7 +1695,19 @@ export default async function main(context) {
     );
     for (const { hour, results } of hourScoringResults) {
       // Sort each hour's pool best-score-first
-      results.sort((a, b) => (b.score - a.score) || String(a.fixture?.fixture?.id ?? '').localeCompare(String(b.fixture?.fixture?.id ?? '')));
+      results.sort((a, b) => {
+        const scoreDiff = b.score - a.score;
+        if (scoreDiff !== 0) {
+          return scoreDiff;
+        }
+
+        const popularityDiff = popularityBonus(b.fixture?.league?.id) - popularityBonus(a.fixture?.league?.id);
+        if (popularityDiff !== 0) {
+          return popularityDiff;
+        }
+
+        return String(a.fixture?.fixture?.id ?? '').localeCompare(String(b.fixture?.fixture?.id ?? ''));
+      });
       scoredByHour.set(hour, results);
     }
 
@@ -1730,43 +1743,54 @@ export default async function main(context) {
     const usedIds = new Set();
     const selected = []; // { fixture, score, h2hFixtures, kickoff, hour }
 
-    // Rule A — popular leagues
+    // Rule A - popular leagues first.
     for (const hour of allHours) {
       for (const item of (scoredByHour.get(hour) ?? [])) {
-        if (popularityBonus(item.fixture?.league?.id) === 0) continue;
+        if (selected.length >= maxFixtures) {
+          break;
+        }
+
+        if (popularityBonus(item.fixture?.league?.id) === 0) {
+          continue;
+        }
+
         const id = String(item.fixture?.fixture?.id ?? '');
-        if (!id || usedIds.has(id)) continue;
+        if (!id || usedIds.has(id)) {
+          continue;
+        }
+
         const kickoff = parseFixtureKickoff(item.fixture?.fixture?.date || null);
         usedIds.add(id);
         selected.push({ ...item, kickoff, hour });
       }
     }
 
-    // Rule B — regular fixtures, round-robin by hour
+    // Rule B - round robin across hours for the remaining fixtures.
     let round = 0;
     while (selected.length < maxFixtures) {
       let addedThisRound = 0;
       for (const hour of allHours) {
-        const pool = (scoredByHour.get(hour) ?? []).filter(
-          (item) => popularityBonus(item.fixture?.league?.id) === 0,
-        );
-        const startIdx = round * minPerHour;
-        if (startIdx >= pool.length) continue; // hour exhausted
-        const endIdx = Math.min(startIdx + minPerHour, pool.length);
-        for (let i = startIdx; i < endIdx; i++) {
-          const item = pool[i];
-          const id = String(item.fixture?.fixture?.id ?? '');
-          if (!id || usedIds.has(id)) continue;
-          const kickoff = parseFixtureKickoff(item.fixture?.fixture?.date || null);
-          usedIds.add(id);
-          selected.push({ ...item, kickoff, hour });
-          addedThisRound += 1;
+        const pool = scoredByHour.get(hour) ?? [];
+        const item = pool[round];
+        if (!item) {
+          continue; // hour exhausted
         }
+
+        const id = String(item.fixture?.fixture?.id ?? '');
+        if (!id || usedIds.has(id)) {
+          continue;
+        }
+
+        const kickoff = parseFixtureKickoff(item.fixture?.fixture?.date || null);
+        usedIds.add(id);
+        selected.push({ ...item, kickoff, hour });
+        addedThisRound += 1;
       }
       round += 1;
-      if (addedThisRound === 0) break; // all hours exhausted
+      if (addedThisRound === 0) {
+        break; // all hours exhausted
+      }
     }
-
     // Sort final list by kickoff time ascending
     selected.sort((a, b) => (a.kickoff?.getTime() ?? 0) - (b.kickoff?.getTime() ?? 0));
 
@@ -1997,3 +2021,4 @@ export default async function main(context) {
     throw error;
   }
 }
+
