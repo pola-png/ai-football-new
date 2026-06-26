@@ -1515,7 +1515,7 @@ export default async function main(context) {
   const topicId = required('APPWRITE_TOPIC_PREDICTIONS');
 
   const league = process.env.API_FOOTBALL_LEAGUE ? Number(process.env.API_FOOTBALL_LEAGUE) : null;
-  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(0);
+  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(1);
   const syncRunId = `sync_${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}`;
   const startedAt = isoNow();
 
