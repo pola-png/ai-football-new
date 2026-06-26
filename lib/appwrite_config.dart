@@ -55,5 +55,5 @@ const String appwriteChallengeEntriesTableId = String.fromEnvironment(
 
 const String appwriteAdminNotificationFunctionId = String.fromEnvironment(
   'APPWRITE_ADMIN_NOTIFICATION_FUNCTION_ID',
-  defaultValue: 'admin-send-notification',
+  defaultValue: '6a3e7c3b0022eeb7795a',
 );

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -8,6 +9,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'app_auth_service.dart';
 import 'admin_access_service.dart';
+import 'admin_notification_page.dart';
 import 'ad_gate_service.dart';
 import 'appwrite_subscription_service.dart';
 import 'community_page.dart';
@@ -437,6 +439,36 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
   int _currentIndex = 0;
   bool _adFreeUpsellShown = false;
 
+  Future<void> _openMainMenu(bool isAdmin) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => _MainMenuPage(
+          isAdmin: isAdmin,
+          onNavigate: _setIndex,
+          onOpenPolicy: () {
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const PolicyPage(),
+              ),
+            );
+          },
+          onOpenAdminNotification: () {
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const AdminNotificationPage(),
+              ),
+            );
+          },
+          onLogout: () async {
+            await AdminAccessService.instance.revoke();
+            await AppAuthService.instance.signOut();
+          },
+        ),
+      ),
+    );
+  }
+
   List<PredictionRecord> get _selectedItems {
     final items = _selectedPredictions.values.toList();
     items.sort(_comparePredictionsByKickoff);
@@ -671,6 +703,7 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
                     onToggleSelection: _toggleSelectedPrediction,
                     onOpenPicked: _openPickedTab,
                     onOpenPremium: () => _setIndex(1),
+                    onOpenMenu: () => _openMainMenu(isAdmin),
                   ),
                   PremiumPlanPage(
                     adFree: adFree,
@@ -772,6 +805,178 @@ extension _ConfidenceFilterX on _ConfidenceFilter {
   };
 }
 
+class _MainMenuPage extends StatelessWidget {
+  const _MainMenuPage({
+    required this.isAdmin,
+    required this.onNavigate,
+    required this.onOpenPolicy,
+    required this.onOpenAdminNotification,
+    required this.onLogout,
+  });
+
+  final bool isAdmin;
+  final ValueChanged<int> onNavigate;
+  final VoidCallback onOpenPolicy;
+  final VoidCallback onOpenAdminNotification;
+  final Future<void> Function() onLogout;
+
+  @override
+  Widget build(BuildContext context) {
+    final surface = _screenSurface(context);
+    final border = _screenBorder(context);
+    final primaryText = _primaryText(context);
+    final secondaryText = _secondaryText(context);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Menu'),
+        backgroundColor: surface,
+      ),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: _screenGradient(context),
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            Text(
+              'Navigate the app from one place.',
+              style: TextStyle(
+                color: secondaryText,
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 16),
+            _menuTile(
+              context,
+              icon: Icons.home_outlined,
+              title: 'Home',
+              subtitle: 'Back to predictions',
+              border: border,
+              textColor: primaryText,
+              onTap: () {
+                onNavigate(0);
+                Navigator.of(context).pop();
+              },
+            ),
+            _menuTile(
+              context,
+              icon: Icons.workspace_premium_outlined,
+              title: 'Premium Plan',
+              subtitle: 'View your plans and unlockables',
+              border: border,
+              textColor: primaryText,
+              onTap: () {
+                onNavigate(1);
+                Navigator.of(context).pop();
+              },
+            ),
+            _menuTile(
+              context,
+              icon: Icons.fact_check_outlined,
+              title: 'Picked Matches',
+              subtitle: 'See saved picks',
+              border: border,
+              textColor: primaryText,
+              onTap: () {
+                onNavigate(2);
+                Navigator.of(context).pop();
+              },
+            ),
+            _menuTile(
+              context,
+              icon: Icons.people_outline,
+              title: 'Community',
+              subtitle: 'Leaderboard and check-ins',
+              border: border,
+              textColor: primaryText,
+              onTap: () {
+                onNavigate(3);
+                Navigator.of(context).pop();
+              },
+            ),
+            _menuTile(
+              context,
+              icon: Icons.policy_outlined,
+              title: 'Policy',
+              subtitle: 'App policy and privacy',
+              border: border,
+              textColor: primaryText,
+              onTap: () {
+                Navigator.of(context).pop();
+                onOpenPolicy();
+              },
+            ),
+            if (isAdmin)
+              _menuTile(
+                context,
+                icon: Icons.notifications_active_outlined,
+                title: 'Admin Notification',
+                subtitle: 'Send a broadcast to users',
+                border: border,
+                textColor: primaryText,
+                onTap: () {
+                  Navigator.of(context).pop();
+                  onOpenAdminNotification();
+                },
+              ),
+            const SizedBox(height: 8),
+            _menuTile(
+              context,
+              icon: Icons.logout,
+              title: 'Log out',
+              subtitle: 'Sign out of your account',
+              border: border,
+              textColor: const Color(0xFFFF6B6B),
+              destructive: true,
+              onTap: () async {
+                Navigator.of(context).pop();
+                await onLogout();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _menuTile(
+    BuildContext context, {
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color border,
+    required Color textColor,
+    required VoidCallback onTap,
+    bool destructive = false,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: _screenSurface(context, elevated: true),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: border),
+      ),
+      child: ListTile(
+        leading: Icon(icon, color: destructive ? const Color(0xFFFF6B6B) : _accentText(context)),
+        title: Text(
+          title,
+          style: TextStyle(
+            color: destructive ? const Color(0xFFFF6B6B) : textColor,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        subtitle: Text(subtitle, style: TextStyle(color: _secondaryText(context))),
+        onTap: onTap,
+      ),
+    );
+  }
+}
+
 class _PredictionHomeTab extends StatefulWidget {
   const _PredictionHomeTab({
     required this.adFree,
@@ -782,6 +987,7 @@ class _PredictionHomeTab extends StatefulWidget {
     required this.onToggleSelection,
     required this.onOpenPicked,
     required this.onOpenPremium,
+    required this.onOpenMenu,
   });
 
   final bool adFree;
@@ -792,6 +998,7 @@ class _PredictionHomeTab extends StatefulWidget {
   final void Function(PredictionRecord prediction) onToggleSelection;
   final VoidCallback onOpenPicked;
   final VoidCallback onOpenPremium;
+  final VoidCallback onOpenMenu;
 
   @override
   State<_PredictionHomeTab> createState() => _PredictionHomeTabState();
@@ -965,15 +1172,30 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
               child: CustomScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
                 slivers: [
-                   SliverAppBar(
+                  SliverAppBar(
                     pinned: true,
                     floating: false,
-                    toolbarHeight: 72,
+                    toolbarHeight: 110,
                     backgroundColor: Colors.transparent,
                     surfaceTintColor: Colors.transparent,
                     elevation: 0,
                     titleSpacing: 20,
-                    title: const _StickyHeader(),
+                    title: _StickyHeader(
+                      searchQuery: _searchQuery,
+                      onSearchChanged: (value) {
+                        setState(() {
+                          _searchQuery = value;
+                        });
+                      },
+                      onClearSearch: _searchQuery.isEmpty
+                          ? null
+                          : () {
+                              setState(() {
+                                _searchQuery = '';
+                              });
+                            },
+                      onOpenMenu: widget.onOpenMenu,
+                    ),
                     flexibleSpace: ClipRect(
                       child: BackdropFilter(
                         filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
@@ -990,77 +1212,6 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
                         ),
                       ),
                     ),
-                    actions: [
-                      Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          IconButton(
-                            tooltip: 'Search',
-                            onPressed: () async {
-                              final result = await showGeneralDialog<_SearchResult>(
-                                context: context,
-                                barrierDismissible: true,
-                                barrierLabel: 'Search',
-                                barrierColor: Colors.black54,
-                                transitionDuration: const Duration(milliseconds: 220),
-                                transitionBuilder: (ctx, anim, _, child) {
-                                  return SlideTransition(
-                                    position: Tween<Offset>(
-                                      begin: const Offset(0, -1),
-                                      end: Offset.zero,
-                                    ).animate(CurvedAnimation(
-                                      parent: anim,
-                                      curve: Curves.easeOut,
-                                    )),
-                                    child: child,
-                                  );
-                                },
-                                pageBuilder: (ctx, _, __) => _SearchModal(
-                                  initialQuery: _searchQuery,
-                                  initialFilter: _confidenceFilter,
-                                ),
-                              );
-                              if (result != null) {
-                                setState(() {
-                                  _searchQuery = result.query;
-                                  _confidenceFilter = result.filter;
-                                });
-                              }
-                            },
-                            icon: const Icon(Icons.search),
-                            color: _accentText(context),
-                          ),
-                          if (_searchQuery.isNotEmpty)
-                            Positioned(
-                              top: 10,
-                              right: 10,
-                              child: Container(
-                                width: 8,
-                                height: 8,
-                                decoration: const BoxDecoration(
-                                  color: Color(0xFF00D4AA),
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.only(right: 12),
-                        child: IconButton(
-                          tooltip: 'Policy',
-                          onPressed: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) => const PolicyPage(),
-                              ),
-                            );
-                          },
-                          icon: const Icon(Icons.menu),
-                          color: _accentText(context),
-                        ),
-                      ),
-                    ],
                   ),
                   SliverToBoxAdapter(
                     child: Padding(
@@ -1920,7 +2071,7 @@ class PickedMatchesPage extends StatelessWidget {
                                     maxWidth: screenWidth * 0.26,
                                   ),
                                   child: Text(
-                                    finalSelection(
+                                    _finalSelection(
                                       _PickCardData.fromPick(
                                         'Primary pick',
                                         prediction.primaryPick,
@@ -2202,12 +2353,53 @@ String _predictionUnlockKey(PredictionRecord prediction) {
   return _normalizeFixtureApiId(prediction.fixtureApiId);
 }
 
-class _StickyHeader extends StatelessWidget {
-  const _StickyHeader();
+class _StickyHeader extends StatefulWidget {
+  const _StickyHeader({
+    required this.searchQuery,
+    required this.onSearchChanged,
+    required this.onClearSearch,
+    required this.onOpenMenu,
+  });
+
+  final String searchQuery;
+  final ValueChanged<String> onSearchChanged;
+  final VoidCallback? onClearSearch;
+  final VoidCallback onOpenMenu;
+
+  @override
+  State<_StickyHeader> createState() => _StickyHeaderState();
+}
+
+class _StickyHeaderState extends State<_StickyHeader> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.searchQuery);
+  }
+
+  @override
+  void didUpdateWidget(covariant _StickyHeader oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.searchQuery != widget.searchQuery &&
+        widget.searchQuery != _controller.text) {
+      _controller.text = widget.searchQuery;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final primaryText = _primaryText(context);
+    final secondaryText = _secondaryText(context);
+    final border = _screenBorder(context);
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
@@ -2226,8 +2418,8 @@ class _StickyHeader extends StatelessWidget {
         const SizedBox(width: 12),
         Expanded(
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
                 'AI Football Prediction',
@@ -2239,18 +2431,43 @@ class _StickyHeader extends StatelessWidget {
                   letterSpacing: 0.2,
                 ),
               ),
-              const SizedBox(height: 2),
-              Text(
-                'Search live picks and upgrade the vibe',
-                style: TextStyle(
-                  color: _secondaryText(context),
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  height: 1.0,
+              const SizedBox(height: 6),
+              Container(
+                height: 38,
+                decoration: BoxDecoration(
+                  color: _screenSurface(context, elevated: true),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: border),
+                ),
+                child: TextField(
+                  controller: _controller,
+                  onChanged: widget.onSearchChanged,
+                  textInputAction: TextInputAction.search,
+                  decoration: InputDecoration(
+                    hintText: 'Search picks, teams, leagues',
+                    hintStyle: TextStyle(color: secondaryText, fontSize: 12),
+                    prefixIcon: Icon(Icons.search, color: secondaryText, size: 18),
+                    suffixIcon: widget.searchQuery.isEmpty
+                        ? null
+                        : IconButton(
+                            tooltip: 'Clear search',
+                            onPressed: widget.onClearSearch,
+                            icon: Icon(Icons.close, color: secondaryText, size: 18),
+                          ),
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
                 ),
               ),
             ],
           ),
+        ),
+        const SizedBox(width: 8),
+        IconButton(
+          tooltip: 'Menu',
+          onPressed: widget.onOpenMenu,
+          icon: Icon(Icons.menu, color: _accentText(context)),
         ),
       ],
     );
@@ -3986,57 +4203,75 @@ class _PredictionSocialSection extends StatelessWidget {
 
         return Container(
           width: double.infinity,
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
             color: _screenSurface(context, elevated: true),
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(14),
             border: Border.all(color: border),
           ),
-          child: Column(
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Community',
-                style: TextStyle(
-                  color: primaryText,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 10),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: topCounts.isEmpty
-                    ? [
-                        _TinyVerdictChip(
-                          label: 'No votes yet',
-                          color: _secondaryText(context),
-                        ),
-                      ]
-                    : topCounts.take(4).map((entry) {
-                        return _TinyVerdictChip(
-                          label: '${entry.key}: ${entry.value}',
-                          color: const Color(0xFF00D4AA),
-                        );
-                      }).toList(),
-              ),
-              const SizedBox(height: 10),
-              Row(
+              Expanded(
+                child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: Text(
-                      '${comments.length} comment${comments.length == 1 ? '' : 's'}',
-                      style: TextStyle(
-                        color: secondaryText,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
+                  Text(
+                    'Community',
+                    style: TextStyle(
+                      color: primaryText,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: topCounts.isEmpty
+                        ? [
+                            _TinyVerdictChip(
+                              label: 'No votes yet',
+                              color: _secondaryText(context),
+                            ),
+                          ]
+                        : topCounts.take(3).map((entry) {
+                            return _TinyVerdictChip(
+                              label: '${entry.key} ${entry.value}',
+                              color: const Color(0xFF00D4AA),
+                            );
+                          }).toList(),
+                  ),
+                ],
+              ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '${comments.length}',
+                    style: TextStyle(
+                      color: primaryText,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  Text(
+                    'comments',
+                    style: TextStyle(
+                      color: secondaryText,
+                      fontSize: 10,
                     ),
                   ),
                   TextButton(
                     onPressed: onOpenComments,
-                    child: const Text('Open comments'),
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
+                      minimumSize: const Size(0, 28),
+                    ),
+                    child: const Text('Open'),
                   ),
                 ],
               ),
@@ -4585,7 +4820,7 @@ class _PickCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        finalSelection(data),
+                        _finalSelection(data),
                         style: TextStyle(
                           color: _primaryText(context),
                           fontSize: 18,
@@ -4758,7 +4993,7 @@ class _TinyVerdictChip extends StatelessWidget {
   }
 }
 
-String finalSelection(_PickCardData data) {
+String _finalSelection(_PickCardData data) {
   return data.selection ?? data.market ?? 'Selection';
 }
 

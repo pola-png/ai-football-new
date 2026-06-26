@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:appwrite/appwrite.dart' as appwrite;
-import 'package:appwrite/src/enums.dart' as appwrite_enums;
+import 'package:appwrite/enums.dart' as appwrite_enums;
 
 import 'app_auth_service.dart';
 import 'appwrite_config.dart';
@@ -29,6 +29,7 @@ class AdminNotificationService {
     await _functions.createExecution(
       functionId: appwriteAdminNotificationFunctionId,
       method: appwrite_enums.ExecutionMethod.pOST,
+      xasync: true,
       body: jsonEncode(payload),
     );
   }

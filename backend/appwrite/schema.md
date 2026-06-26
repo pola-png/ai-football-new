@@ -231,15 +231,15 @@ Suggested values for `status`:
 ## `user_profiles`
 
 Stores app users, points, coins, and ranking metadata.
+Use the Appwrite auth user id as the row id for this table. A separate `user_id` column is not required.
 
 Columns:
 
-- `user_id` `text` required unique indexed
 - `user_name` `text` required indexed
 - `email` `text` required indexed
 - `points` `integer` required default `0`
 - `coins` `integer` required default `0`
-- `streak_days` `integer` required default `0`
+- `streak_days` `text` required default `0`
 - `is_admin` `boolean` required default `false`
 - `last_checkin_at` `datetime` optional indexed
 - `created_at` `datetime` required

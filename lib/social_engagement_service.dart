@@ -75,6 +75,8 @@ class SocialEngagementService {
   TablesDB? _tables;
   Realtime? _realtime;
 
+  bool get hasCurrentUser => AppAuthService.instance.currentUser != null;
+
   TablesDB get _db => _tables ??= TablesDB(_client);
   Realtime get _rt => _realtime ??= Realtime(_client);
 
@@ -89,36 +91,27 @@ class SocialEngagementService {
       return;
     }
 
-    final rows = await _db.listRows(
+    final now = DateTime.now().toUtc().toIso8601String();
+    await _db.upsertRow(
       databaseId: appwriteDatabaseId,
       tableId: appwriteUserProfilesTableId,
-      queries: [
-        Query.equal('user_id', user.id),
-        Query.limit(1),
-      ],
-      total: false,
-    );
-
-    if (rows.rows.isNotEmpty) {
-      return;
-    }
-
-    await _db.createRow(
-      databaseId: appwriteDatabaseId,
-      tableId: appwriteUserProfilesTableId,
-      rowId: ID.unique(),
-        data: {
-        'user_id': user.id,
+      rowId: user.id,
+      data: {
         'user_name': user.name,
         'email': user.email,
         'points': 0,
         'coins': 0,
-        'streak_days': 0,
+        'streak_days': '0',
         'is_admin': false,
         'last_checkin_at': null,
-        'created_at': DateTime.now().toUtc().toIso8601String(),
-        'updated_at': DateTime.now().toUtc().toIso8601String(),
+        'created_at': now,
+        'updated_at': now,
       },
+      permissions: [
+        Permission.read(Role.user(user.id)),
+        Permission.update(Role.user(user.id)),
+        Permission.delete(Role.user(user.id)),
+      ],
     );
   }
 
@@ -259,32 +252,13 @@ class SocialEngagementService {
       return;
     }
 
-    final profileRows = await _db.listRows(
+    await ensureProfile();
+
+    final existing = await _db.getRow(
       databaseId: appwriteDatabaseId,
       tableId: appwriteUserProfilesTableId,
-      queries: [
-        Query.equal('user_id', user.id),
-        Query.limit(1),
-      ],
-      total: false,
-    );
-    if (profileRows.rows.isEmpty) {
-      await ensureProfile();
-    }
-
-    final resolvedRows = profileRows.rows.isNotEmpty
-        ? profileRows.rows
-        : (await _db.listRows(
-              databaseId: appwriteDatabaseId,
-              tableId: appwriteUserProfilesTableId,
-              queries: [
-                Query.equal('user_id', user.id),
-                Query.limit(1),
-              ],
-              total: false,
-            ))
-            .rows;
-    final existing = resolvedRows.isNotEmpty ? resolvedRows.first : null;
+      rowId: user.id,
+    ).catchError((_) => null);
     final currentCoins = _asInt(existing?.data['coins']);
     final currentStreak = _asInt(existing?.data['streak_days']);
     final nextStreak = currentStreak <= 0 ? 1 : currentStreak + 1;
@@ -334,7 +308,7 @@ class SocialEngagementService {
       rowId: existing?.$id ?? user.id,
       data: {
         'coins': currentCoins + rewardCoins,
-        'streak_days': nextStreak,
+        'streak_days': '$nextStreak',
         'last_checkin_at': today.toIso8601String(),
         'updated_at': today.toIso8601String(),
       },

@@ -44,7 +44,7 @@ class AdminAccessService extends ChangeNotifier {
         databaseId: appwriteDatabaseId,
         tableId: appwriteUserProfilesTableId,
         queries: [
-          Query.equal('user_id', user.id),
+          Query.equal('\$id', user.id),
           Query.limit(1),
         ],
         total: false,

@@ -25,10 +25,15 @@ function parsePayload() {
 
 async function main() {
   const payload = parsePayload();
-  const title = String(payload.title || '').trim();
-  const body = String(payload.body || '').trim();
+  const title = String(payload.title || payload.notification?.title || 'AI Football Prediction').trim();
+  const body = String(payload.body || payload.notification?.body || 'A new notification is available.').trim();
   const data = payload.data && typeof payload.data === 'object' ? payload.data : {};
-  const topicId = String(payload.topicId || process.env.APPWRITE_TOPIC_PREDICTIONS || '').trim();
+  const topicId = String(
+    payload.topicId ||
+    process.env.APPWRITE_TOPIC_PREDICTIONS ||
+    process.env.APPWRITE_PREDICTION_TOPIC_ID ||
+    '',
+  ).trim();
 
   if (!title || !body) {
     throw new Error('Notification title and body are required.');
