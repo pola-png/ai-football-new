@@ -53,7 +53,8 @@ class AdminAccessService extends ChangeNotifier {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         notifyListeners();
       });
-    } catch (_) {
+    } catch (error) {
+      debugPrint('Admin role sync failed: $error');
       // Keep the existing local state if the backend profile lookup fails.
     }
   }

@@ -1,4 +1,9 @@
-const { sendPredictionTopicNotification } = require('../_shared/firebase-notifications.js');
+console.log(JSON.stringify({
+  level: 'info',
+  step: 'bootstrap',
+  timestamp: new Date().toISOString(),
+  message: 'admin-send-notification booted',
+}));
 
 function logStep(step, details = {}) {
   console.log(JSON.stringify({
@@ -28,13 +33,18 @@ process.on('unhandledRejection', (reason) => {
   logError('process.unhandledRejection', reason);
 });
 
-function parsePayload() {
-  const rawPayload =
+function readPayload() {
+  return (
     process.env.APPWRITE_FUNCTION_DATA ||
     process.env.APPWRITE_FUNCTION_BODY ||
     process.env.APPWRITE_FUNCTION_PAYLOAD ||
     process.env.APPWRITE_FUNCTION_EVENT_DATA ||
-    '';
+    ''
+  );
+}
+
+function parsePayload() {
+  const rawPayload = readPayload();
 
   if (!rawPayload) {
     logStep('payload.empty', { source: 'appwrite-env' });
@@ -61,6 +71,20 @@ function parsePayload() {
   }
 }
 
+function loadSender() {
+  logStep('module.load.start', {
+    module: '../_shared/firebase-notifications.js',
+  });
+
+  const mod = require('../_shared/firebase-notifications.js');
+
+  logStep('module.load.success', {
+    module: '../_shared/firebase-notifications.js',
+  });
+
+  return mod.sendPredictionTopicNotification;
+}
+
 async function main() {
   logStep('function.start', {
     runtime: process.version,
@@ -72,9 +96,19 @@ async function main() {
     hasPrivateKey: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_PRIVATE_KEY),
     topicEnvPresent: Boolean(
       process.env.APPWRITE_TOPIC_PREDICTIONS ||
-        process.env.APPWRITE_PREDICTION_TOPIC_ID,
+      process.env.APPWRITE_PREDICTION_TOPIC_ID,
     ),
   });
+
+  let sendPredictionTopicNotification;
+  try {
+    sendPredictionTopicNotification = loadSender();
+  } catch (error) {
+    logError('module.load.failed', error, {
+      module: '../_shared/firebase-notifications.js',
+    });
+    throw error;
+  }
 
   const payload = parsePayload();
   const title = String(payload.title || payload.notification?.title || 'AI Football Prediction').trim();

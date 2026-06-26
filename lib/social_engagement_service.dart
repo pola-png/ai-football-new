@@ -92,26 +92,44 @@ class SocialEngagementService {
     }
 
     final now = DateTime.now().toUtc().toIso8601String();
-    await _db.upsertRow(
+    final existing = await _db.getRow(
       databaseId: appwriteDatabaseId,
       tableId: appwriteUserProfilesTableId,
       rowId: user.id,
-      data: {
-        'user_name': user.name,
-        'email': user.email,
-        'points': 0,
-        'coins': 0,
-        'streak_days': '0',
-        'is_admin': false,
-        'last_checkin_at': null,
-        'created_at': now,
-        'updated_at': now,
-      },
-      permissions: [
-        Permission.read(Role.user(user.id)),
-        Permission.update(Role.user(user.id)),
-        Permission.delete(Role.user(user.id)),
-      ],
+    ).catchError((_) => null);
+
+    final data = <String, dynamic>{
+      'user_name': user.name,
+      'email': user.email,
+      'points': _asInt(existing?.data['points']),
+      'coins': _asInt(existing?.data['coins']),
+      'streak_days': _asString(existing?.data['streak_days']) ?? '0',
+      'is_admin': existing?.data['is_admin'] ?? false,
+      'last_checkin_at': existing?.data['last_checkin_at'],
+      'created_at': existing?.data['created_at'] ?? now,
+      'updated_at': now,
+    };
+
+    if (existing == null) {
+      await _db.createRow(
+        databaseId: appwriteDatabaseId,
+        tableId: appwriteUserProfilesTableId,
+        rowId: user.id,
+        data: data,
+        permissions: [
+          Permission.read(Role.user(user.id)),
+          Permission.update(Role.user(user.id)),
+          Permission.delete(Role.user(user.id)),
+        ],
+      );
+      return;
+    }
+
+    await _db.updateRow(
+      databaseId: appwriteDatabaseId,
+      tableId: appwriteUserProfilesTableId,
+      rowId: user.id,
+      data: data,
     );
   }
 
