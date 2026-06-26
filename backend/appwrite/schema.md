@@ -9,8 +9,10 @@ Use one Appwrite database with the tables below.
 ## Table Permissions
 
 - Give read access to `teams`, `leagues`, `fixtures`, `fixture_odds`, `fixture_h2h_history`, `predictions`, and `results` so the Flutter app can read published data.
+- Give authenticated read access to `user_profiles`, `prediction_comments`, `prediction_selections`, `daily_checkins`, `prediction_challenges`, and `challenge_entries`.
+- Allow authenticated write access to `user_profiles`, `prediction_comments`, `prediction_selections`, `daily_checkins`, and `challenge_entries`.
 - Keep `sync_runs` private.
-- Keep write access limited to Appwrite Functions.
+- Keep write access for the prediction tables limited to Appwrite Functions.
 
 ## `teams`
 
@@ -225,6 +227,89 @@ Suggested values for `status`:
 - `success`
 - `failed`
 - `partial`
+
+## `user_profiles`
+
+Stores app users, points, coins, and ranking metadata.
+
+Columns:
+
+- `user_id` `text` required unique indexed
+- `user_name` `text` required indexed
+- `email` `text` required indexed
+- `points` `integer` required default `0`
+- `coins` `integer` required default `0`
+- `streak_days` `integer` required default `0`
+- `is_admin` `boolean` required default `false`
+- `last_checkin_at` `datetime` optional indexed
+- `created_at` `datetime` required
+- `updated_at` `datetime` required
+
+## `prediction_comments`
+
+Stores comments attached to a prediction card.
+
+Columns:
+
+- `fixture_api_id` `text` required indexed
+- `user_id` `text` required indexed
+- `user_name` `text` required indexed
+- `selection` `text` optional indexed
+- `message` `mediumtext` required
+- `created_at` `datetime` required indexed
+- `updated_at` `datetime` required
+
+## `prediction_selections`
+
+Stores what users selected on each prediction card so counts can update in realtime.
+
+Columns:
+
+- `fixture_api_id` `text` required indexed
+- `user_id` `text` required unique indexed
+- `user_name` `text` required indexed
+- `selection` `text` required indexed
+- `created_at` `datetime` required
+- `updated_at` `datetime` required
+
+## `daily_checkins`
+
+Stores one row per user per day for check-in rewards.
+
+Columns:
+
+- `user_id` `text` required indexed
+- `date_key` `text` required unique indexed
+- `reward_coins` `integer` required default `0`
+- `created_at` `datetime` required
+- `updated_at` `datetime` required
+
+## `prediction_challenges`
+
+Stores community challenge prompts.
+
+Columns:
+
+- `title` `text` required indexed
+- `description` `mediumtext` required
+- `target_count` `integer` required default `0`
+- `reward_points` `integer` required default `0`
+- `status` `text` required default `open`
+- `created_at` `datetime` required
+- `updated_at` `datetime` required
+
+## `challenge_entries`
+
+Stores user submissions for prediction challenges.
+
+Columns:
+
+- `challenge_id` `text` required indexed
+- `user_id` `text` required indexed
+- `user_name` `text` required indexed
+- `entry_text` `mediumtext` required
+- `created_at` `datetime` required
+- `updated_at` `datetime` required
 
 ## Recommended Flow
 

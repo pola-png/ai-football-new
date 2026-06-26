@@ -6,13 +6,16 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'app_auth_service.dart';
 import 'admin_access_service.dart';
 import 'ad_gate_service.dart';
 import 'appwrite_subscription_service.dart';
+import 'community_page.dart';
 import 'feed_banner_ad.dart';
 import 'google_play_billing_service.dart';
 import 'prediction_repository.dart';
 import 'play_store_update_service.dart';
+import 'social_engagement_service.dart';
 import 'push_notification_service.dart';
 
 @pragma('vm:entry-point')
@@ -29,6 +32,8 @@ Future<void> main() async {
     await AdGateService.instance.initialize();
     await GooglePlayBillingService.instance.initialize();
     await AdminAccessService.instance.initialize();
+    await AppAuthService.instance.initialize();
+    await SocialEngagementService.instance.initialize();
   } catch (error) {
     debugPrint('Push subscription failed: $error');
     // Push subscription issues should not block the prediction feed.
@@ -111,7 +116,7 @@ class MyApp extends StatelessWidget {
       },
       theme: _buildTheme(Brightness.light),
       darkTheme: _buildTheme(Brightness.dark),
-      home: const NotificationBootstrapPage(),
+      home: const AuthGatePage(),
       routes: {
         '/popular': (context) {
           final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
@@ -173,6 +178,193 @@ Color _inputFill(BuildContext context) {
   return _isDarkContext(context) ? const Color(0xFF121B2E) : Colors.white;
 }
 
+class AuthGatePage extends StatelessWidget {
+  const AuthGatePage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: AppAuthService.instance,
+      builder: (context, _) {
+        if (AppAuthService.instance.isLoading) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        if (!AppAuthService.instance.isSignedIn) {
+          return const AuthPage();
+        }
+
+        return const NotificationBootstrapPage();
+      },
+    );
+  }
+}
+
+class AuthPage extends StatefulWidget {
+  const AuthPage({super.key});
+
+  @override
+  State<AuthPage> createState() => _AuthPageState();
+}
+
+class _AuthPageState extends State<AuthPage> {
+  final _signInEmail = TextEditingController();
+  final _signInPassword = TextEditingController();
+  final _signUpName = TextEditingController();
+  final _signUpEmail = TextEditingController();
+  final _signUpPassword = TextEditingController();
+  bool _isSignIn = true;
+
+  @override
+  void dispose() {
+    _signInEmail.dispose();
+    _signInPassword.dispose();
+    _signUpName.dispose();
+    _signUpEmail.dispose();
+    _signUpPassword.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final auth = AppAuthService.instance;
+    try {
+      if (_isSignIn) {
+        await auth.signIn(
+          email: _signInEmail.text,
+          password: _signInPassword.text,
+        );
+      } else {
+        await auth.signUp(
+          name: _signUpName.text,
+          email: _signUpEmail.text,
+          password: _signUpPassword.text,
+        );
+      }
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Authentication failed: $error')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final primaryText = _primaryText(context);
+    final secondaryText = _secondaryText(context);
+
+    return AnimatedBuilder(
+      animation: AppAuthService.instance,
+      builder: (context, _) {
+        return Scaffold(
+          body: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: _screenGradient(context),
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
+            ),
+            child: SafeArea(
+              child: ListView(
+                padding: const EdgeInsets.all(20),
+                children: [
+              const SizedBox(height: 24),
+              Text(
+                'AI Football Prediction',
+                style: TextStyle(
+                  color: primaryText,
+                  fontSize: 32,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Sign in to follow comments, rankings, daily check-ins, and live community picks.',
+                style: TextStyle(color: secondaryText, fontSize: 14, height: 1.5),
+              ),
+              const SizedBox(height: 24),
+              ToggleButtons(
+                isSelected: [_isSignIn, !_isSignIn],
+                onPressed: (index) => setState(() => _isSignIn = index == 0),
+                borderRadius: BorderRadius.circular(14),
+                fillColor: const Color(0xFF00D4AA).withAlpha(35),
+                selectedColor: const Color(0xFF00D4AA),
+                children: const [
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 18),
+                    child: Text('Sign in'),
+                  ),
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 18),
+                    child: Text('Sign up'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              if (_isSignIn) ...[
+                _AuthField(controller: _signInEmail, hint: 'Email', keyboardType: TextInputType.emailAddress),
+                const SizedBox(height: 12),
+                _AuthField(controller: _signInPassword, hint: 'Password', obscureText: true),
+              ] else ...[
+                _AuthField(controller: _signUpName, hint: 'Display name'),
+                const SizedBox(height: 12),
+                _AuthField(controller: _signUpEmail, hint: 'Email', keyboardType: TextInputType.emailAddress),
+                const SizedBox(height: 12),
+                _AuthField(controller: _signUpPassword, hint: 'Password', obscureText: true),
+              ],
+              const SizedBox(height: 20),
+                  FilledButton(
+                    onPressed: AppAuthService.instance.isLoading ? null : _submit,
+                    child: Text(
+                      AppAuthService.instance.isLoading
+                          ? 'Please wait...'
+                          : (_isSignIn ? 'Sign in' : 'Create account'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _AuthField extends StatelessWidget {
+  const _AuthField({
+    required this.controller,
+    required this.hint,
+    this.obscureText = false,
+    this.keyboardType,
+  });
+
+  final TextEditingController controller;
+  final String hint;
+  final bool obscureText;
+  final TextInputType? keyboardType;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      obscureText: obscureText,
+      keyboardType: keyboardType,
+      decoration: InputDecoration(
+        hintText: hint,
+        filled: true,
+        fillColor: _inputFill(context),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+      ),
+    );
+  }
+}
+
 class NotificationBootstrapPage extends StatefulWidget {
   const NotificationBootstrapPage({super.key});
 
@@ -205,6 +397,8 @@ class _NotificationBootstrapPageState extends State<NotificationBootstrapPage> {
       );
       await Permission.notification.request();
       await AppwriteSubscriptionService().ensureSubscribed();
+      await SocialEngagementService.instance.ensureProfile();
+      await AdminAccessService.instance.syncFromBackend();
     } catch (error) {
       debugPrint('Push subscription failed: $error');
     }
@@ -272,6 +466,13 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
         _selectedPredictions[key] = prediction;
       }
     });
+
+    SocialEngagementService.instance.recordSelection(
+      fixtureApiId: prediction.fixtureApiId,
+      selection: _selectedPredictions.containsKey(key)
+          ? (prediction.primaryPick?.selection ?? prediction.predictedWinner ?? '')
+          : '',
+    );
   }
 
   void _clearSelections() {
@@ -482,6 +683,7 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
                         ? null
                         : _clearSelections,
                   ),
+                  const CommunityPage(),
                 ],
               ),
               bottomNavigationBar: Column(
@@ -536,6 +738,14 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
                                 isActive: _currentIndex == 2,
                               ),
                               label: 'Picked',
+                            ),
+                            NavigationDestination(
+                              icon: const Icon(Icons.people_outline),
+                              selectedIcon: _PulsingIcon(
+                                icon: Icons.people,
+                                isActive: _currentIndex == 3,
+                              ),
+                              label: 'Community',
                             ),
                           ],
                         ),
@@ -718,6 +928,10 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
     }
 
     widget.onToggleSelection(prediction);
+  }
+
+  Future<void> _openComments(PredictionRecord prediction) {
+    return showPredictionCommentsSheet(context, prediction);
   }
 
   @override
@@ -941,6 +1155,7 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
                           widget.adFree,
                           widget.isPredictionSelected,
                           _handleSelectPrediction,
+                          _openComments,
                           !widget.adFree,
                         ),
                       ),
@@ -2861,6 +3076,7 @@ List<Widget> _buildGroupedPredictionWidgets(
   bool adFree,
   bool Function(PredictionRecord prediction) isSelected,
   void Function(PredictionRecord prediction) onToggleSelection,
+  Future<void> Function(PredictionRecord prediction) onOpenComments,
   bool showAds,
 ) {
   final sections = _groupPredictionsByDate(predictions);
@@ -2907,6 +3123,7 @@ List<Widget> _buildGroupedPredictionWidgets(
           adFree,
           isSelected,
           onToggleSelection,
+          onOpenComments,
           showAds,
         ),
       );
@@ -2927,6 +3144,7 @@ List<Widget> _buildGroupedPredictionWidgets(
             canSelect:
                 adFree || isPickUnlocked(_predictionUnlockKey(prediction)),
             onSelectionPressed: () => onToggleSelection(prediction),
+            onOpenComments: () => onOpenComments(prediction),
           ),
         ),
       );
@@ -2955,6 +3173,7 @@ List<Widget> _buildTodayStatusWidgets(
   bool adFree,
   bool Function(PredictionRecord prediction) isSelected,
   void Function(PredictionRecord prediction) onToggleSelection,
+  Future<void> Function(PredictionRecord prediction) onOpenComments,
   bool showAds,
 ) {
   final now = DateTime.now();
@@ -3020,6 +3239,7 @@ List<Widget> _buildTodayStatusWidgets(
           isSelected: isSelected(prediction),
           canSelect: adFree || isPickUnlocked(_predictionUnlockKey(prediction)),
           onSelectionPressed: () => onToggleSelection(prediction),
+          onOpenComments: () => onOpenComments(prediction),
         ),
       ),
     );
@@ -3549,6 +3769,7 @@ class PredictionGroupCard extends StatelessWidget {
     required this.isSelected,
     required this.canSelect,
     required this.onSelectionPressed,
+    this.onOpenComments,
     this.isPopular,
   });
 
@@ -3559,6 +3780,7 @@ class PredictionGroupCard extends StatelessWidget {
   final bool isSelected;
   final bool canSelect;
   final VoidCallback onSelectionPressed;
+  final VoidCallback? onOpenComments;
   final bool? isPopular;
 
   @override
@@ -3699,6 +3921,13 @@ class PredictionGroupCard extends StatelessWidget {
                     ),
                   ),
                 ],
+                if (!isLocked && onOpenComments != null) ...[
+                  const SizedBox(height: 14),
+                  _PredictionSocialSection(
+                    prediction: prediction,
+                    onOpenComments: onOpenComments!,
+                  ),
+                ],
               ],
             ),
           ),
@@ -3727,6 +3956,288 @@ class PredictionGroupCard extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _PredictionSocialSection extends StatelessWidget {
+  const _PredictionSocialSection({
+    required this.prediction,
+    required this.onOpenComments,
+  });
+
+  final PredictionRecord prediction;
+  final VoidCallback onOpenComments;
+
+  @override
+  Widget build(BuildContext context) {
+    final border = _screenBorder(context);
+    final primaryText = _primaryText(context);
+    final secondaryText = _secondaryText(context);
+
+    return StreamBuilder<PredictionSocialSnapshot>(
+      stream: SocialEngagementService.instance.watchPrediction(prediction.fixtureApiId),
+      builder: (context, snapshot) {
+        final counts = snapshot.data?.selectionCounts ?? const <String, int>{};
+        final comments = snapshot.data?.comments ?? const <PredictionComment>[];
+        final topCounts = counts.entries.toList()
+          ..sort((a, b) => b.value.compareTo(a.value));
+
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: _screenSurface(context, elevated: true),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Community',
+                style: TextStyle(
+                  color: primaryText,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: topCounts.isEmpty
+                    ? [
+                        _TinyVerdictChip(
+                          label: 'No votes yet',
+                          color: _secondaryText(context),
+                        ),
+                      ]
+                    : topCounts.take(4).map((entry) {
+                        return _TinyVerdictChip(
+                          label: '${entry.key}: ${entry.value}',
+                          color: const Color(0xFF00D4AA),
+                        );
+                      }).toList(),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '${comments.length} comment${comments.length == 1 ? '' : 's'}',
+                      style: TextStyle(
+                        color: secondaryText,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: onOpenComments,
+                    child: const Text('Open comments'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+Future<void> showPredictionCommentsSheet(
+  BuildContext context,
+  PredictionRecord prediction,
+) {
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (sheetContext) {
+      return _PredictionCommentsSheet(prediction: prediction);
+    },
+  );
+}
+
+class _PredictionCommentsSheet extends StatefulWidget {
+  const _PredictionCommentsSheet({required this.prediction});
+
+  final PredictionRecord prediction;
+
+  @override
+  State<_PredictionCommentsSheet> createState() => _PredictionCommentsSheetState();
+}
+
+class _PredictionCommentsSheetState extends State<_PredictionCommentsSheet> {
+  final TextEditingController _commentController = TextEditingController();
+
+  @override
+  void dispose() {
+    _commentController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submitComment() async {
+    final text = _commentController.text.trim();
+    if (text.isEmpty) {
+      return;
+    }
+
+    await SocialEngagementService.instance.addComment(
+      fixtureApiId: widget.prediction.fixtureApiId,
+      message: text,
+      selection: widget.prediction.primaryPick?.selection,
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    _commentController.clear();
+    FocusScope.of(context).unfocus();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final primaryText = _primaryText(context);
+    final secondaryText = _secondaryText(context);
+    final mediaQuery = MediaQuery.of(context);
+
+    return Container(
+      margin: EdgeInsets.only(bottom: mediaQuery.viewInsets.bottom),
+      decoration: BoxDecoration(
+        color: _screenSurface(context),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 44,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: _screenBorder(context),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                '${widget.prediction.homeTeamName ?? 'Home'} vs ${widget.prediction.awayTeamName ?? 'Away'}',
+                style: TextStyle(
+                  color: primaryText,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Comments and selection chat',
+                style: TextStyle(color: secondaryText, fontSize: 12),
+              ),
+              const SizedBox(height: 14),
+              SizedBox(
+                height: 280,
+                child: StreamBuilder<PredictionSocialSnapshot>(
+                  stream: SocialEngagementService.instance.watchPrediction(widget.prediction.fixtureApiId),
+                  builder: (context, snapshot) {
+                    final comments = snapshot.data?.comments ?? const <PredictionComment>[];
+                    if (comments.isEmpty) {
+                      return Center(
+                        child: Text(
+                          'No comments yet.',
+                          style: TextStyle(color: secondaryText),
+                        ),
+                      );
+                    }
+
+                    return ListView.separated(
+                      itemCount: comments.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (context, index) {
+                        final comment = comments[index];
+                        return Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: _screenSurface(context, elevated: true),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: _screenBorder(context)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      comment.userName,
+                                      style: TextStyle(
+                                        color: primaryText,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                  if (comment.selection != null && comment.selection!.isNotEmpty)
+                                    Text(
+                                      comment.selection!,
+                                      style: TextStyle(
+                                        color: _accentText(context),
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                comment.message,
+                                style: TextStyle(
+                                  color: secondaryText,
+                                  height: 1.4,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _commentController,
+                maxLines: 3,
+                decoration: InputDecoration(
+                  hintText: 'Write a comment...',
+                  filled: true,
+                  fillColor: _inputFill(context),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide(color: _screenBorder(context)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: _submitComment,
+                  child: const Text('Post comment'),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -5166,6 +5677,10 @@ class _PopularMatchesPageState extends State<PopularMatchesPage> {
     }
   }
 
+  Future<void> _openComments(PredictionRecord prediction) {
+    return showPredictionCommentsSheet(context, prediction);
+  }
+
   @override
   Widget build(BuildContext context) {
     final popularList = widget.predictions.where(_isPopularPrediction).toList();
@@ -5213,6 +5728,7 @@ class _PopularMatchesPageState extends State<PopularMatchesPage> {
                         isSelected: false,
                         canSelect: false,
                         onSelectionPressed: () {},
+                        onOpenComments: () => _openComments(prediction),
                       ),
                     );
                   },

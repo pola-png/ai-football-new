@@ -88,9 +88,10 @@ function buildPrompt(fixture, oddsRows, h2hRows) {
     'If the confidence is below 0.85, set reason to an empty string and do not add any explanation text.',
     'Never use phrases about limited data, small samples, missing history, insufficient evidence, or not enough matches as reason text for a 0.85+ confidence pick.',
     'Focus on low-odds markets such as over, under, gg/btts, corners, double chance 12, and throw-ins if the data exists.',
+    'Target at least 10 predictions with confidence from 0.87 to 1.00 and at least 5 additional predictions with confidence from 0.85 to 0.869 when enough fixtures exist.',
+    'Do not lower confidence just to hit a quota if the fixture does not support it.',
     'If Under 1.5, Under 2.5, or Over 3.5 is not at least 0.90 confident, do not save it and let the backend replace it with a safer pick.',
     'When choosing an Over/Under goals market, pick the line that best fits the h2h average goals. Use Over 3.5 if average is near 4, Over 2.5 if near 3, Over 1.5 if near 2. For Under markets, use Under 1.5 if average is below 1, Under 2.5 if average is near 2, Under 3.5 if near 3. Never default to a fixed line — always derive it from the data.',
-    'IMPORTANT: For Over 3.5 and higher predictions, set confidence to maximum 0.83. For Under 2.5 and lower predictions, set confidence to maximum 0.83.',
     'Do not choose a straight win or draw selection unless you are at least 0.90 confident.',
     'If confidence is below 0.90, avoid home win, away win, draw, or team-name winner picks and choose a non-win market instead.',
     'If throw-in data is not available, skip it.',
@@ -106,12 +107,12 @@ function buildPrompt(fixture, oddsRows, h2hRows) {
     'REQUIRED JSON FORMAT (respond with this exact structure):',
     '{',
     '  "predicted_winner": "Team A",',
-    '  "confidence": 0.83,',
+    '  "confidence": 0.91,',
     '  "confidence_label": "high",',
     '  "picks": [',
     '    {',
     '      "selection": "Over 3.5",',
-    '      "confidence": 0.83,',
+    '      "confidence": 0.91,',
     '      "reason": "Both teams have averaged over 4 goals in recent h2h meetings."',
     '    }',
     '  ]',
@@ -400,6 +401,8 @@ async function main() {
   let saved = 0;
   let failed = 0;
   let skipped = 0;
+  let ultraConfidenceSaved = 0;
+  let highConfidenceSaved = 0;
 
   try {
     const syncRun = await fetchLatestSyncRun(tablesdb, databaseId, syncRunsTable);
@@ -491,6 +494,11 @@ async function main() {
         ? primaryPick.selection.trim()
         : fallbackSelection;
       const primaryReason = normalizePredictionReason(primaryPick?.reason, primaryConfidence);
+      if (primaryConfidence >= 0.87) {
+        ultraConfidenceSaved += 1;
+      } else if (primaryConfidence >= 0.85) {
+        highConfidenceSaved += 1;
+      }
 
       const shouldPublishNow = shouldPublishNearKickoff(fixture.kickoff_at, new Date());
       const releaseStatus = shouldPublishNow ? 'published' : 'draft';
@@ -541,7 +549,7 @@ async function main() {
       finished_at: isoNow(),
       items_seen: fixtures.length,
       items_saved: saved,
-      message: `Generated ${saved} predictions from batch ${syncRunId}. Skipped ${skipped} fixtures before AI.`,
+      message: `Generated ${saved} predictions from batch ${syncRunId}. Skipped ${skipped} fixtures before AI. Confidence breakdown: >=0.87 ${ultraConfidenceSaved}, >=0.85 ${highConfidenceSaved}.`,
       created_at: isoNow(),
       updated_at: isoNow(),
     });

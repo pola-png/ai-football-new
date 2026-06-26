@@ -22,3 +22,38 @@ const String appwritePredictionTopicId = String.fromEnvironment(
   'APPWRITE_PREDICTION_TOPIC_ID',
   defaultValue: 'predictions',
 );
+
+const String appwriteUserProfilesTableId = String.fromEnvironment(
+  'APPWRITE_USER_PROFILES_TABLE_ID',
+  defaultValue: 'user_profiles',
+);
+
+const String appwritePredictionCommentsTableId = String.fromEnvironment(
+  'APPWRITE_PREDICTION_COMMENTS_TABLE_ID',
+  defaultValue: 'prediction_comments',
+);
+
+const String appwritePredictionSelectionsTableId = String.fromEnvironment(
+  'APPWRITE_PREDICTION_SELECTIONS_TABLE_ID',
+  defaultValue: 'prediction_selections',
+);
+
+const String appwriteDailyCheckinsTableId = String.fromEnvironment(
+  'APPWRITE_DAILY_CHECKINS_TABLE_ID',
+  defaultValue: 'daily_checkins',
+);
+
+const String appwritePredictionChallengesTableId = String.fromEnvironment(
+  'APPWRITE_PREDICTION_CHALLENGES_TABLE_ID',
+  defaultValue: 'prediction_challenges',
+);
+
+const String appwriteChallengeEntriesTableId = String.fromEnvironment(
+  'APPWRITE_CHALLENGE_ENTRIES_TABLE_ID',
+  defaultValue: 'challenge_entries',
+);
+
+const String appwriteAdminNotificationFunctionId = String.fromEnvironment(
+  'APPWRITE_ADMIN_NOTIFICATION_FUNCTION_ID',
+  defaultValue: 'admin-send-notification',
+);

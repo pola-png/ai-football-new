@@ -317,26 +317,26 @@ function scoreFixtureForSync({ oddsRows, h2hRows, leagueId }) {
   const h2hCount = Array.isArray(h2hRows) ? h2hRows.length : 0;
   const oddsCount = Array.isArray(oddsRows) ? oddsRows.length : 0;
   const isWorldCup = Number(leagueId) === WORLD_CUP_LEAGUE_ID;
-  
+
   let score = 50; // Base score for all fixtures
   const reasons = ['auto-qualified'];
-  
+
   // Add bonus points but don't restrict
   if (isWorldCup) {
     score += 100;
     reasons.push('world-cup');
   }
-  
+
   if (h2hCount > 0) {
     score += h2hCount * 5; // More H2H = higher score
     reasons.push('has-h2h');
   }
-  
+
   if (oddsCount > 0) {
     score += 20;
     reasons.push('has-odds');
   }
-  
+
   return {
     score,
     qualified: true, // Always qualified
@@ -361,7 +361,7 @@ async function fetchFixtureH2HHistory({
   if (!fixtureApiId) {
     return { saved: 0, rows: [] };
   }
-  
+
   // Continue even if team IDs are missing - use fallbacks
   const safeHomeTeamId = homeTeamId || 'home_unknown';
   const safeAwayTeamId = awayTeamId || 'away_unknown';
@@ -445,7 +445,7 @@ async function fetchFixtureOdds({
   fixture,
 }) {
   const fixtureApiId = String(fixture.api_fixture_id || '').trim();
-  
+
   // Always return something, even if no fixtureApiId
   if (!fixtureApiId) {
     return { saved: 0, rows: [] };
@@ -547,7 +547,7 @@ async function main() {
   const syncRunsTable = required('APPWRITE_TABLE_SYNC_RUNS');
 
   const league = process.env.API_FOOTBALL_LEAGUE ? Number(process.env.API_FOOTBALL_LEAGUE) : null;
-  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(1);
+  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(0);
 
   const url = new URL(`${required('API_FOOTBALL_BASE_URL').replace(/\/$/, '')}/fixtures`);
   url.searchParams.set('date', fetchDate);
@@ -585,7 +585,7 @@ async function main() {
 
     // Process ALL fixtures without any restrictions
     const allFixtures = [];
-    
+
     for (const fixture of fixtures) {
       const fixtureApiId = fixture?.fixture?.id ?? fixture?.id ?? null;
       const leagueInfo = fixture?.league || null;
@@ -602,7 +602,7 @@ async function main() {
         }));
         continue;
       }
-      
+
       // Use fallback values for missing data instead of skipping
       const safeLeagueInfo = leagueInfo || { id: 'unknown', season: '2024' };
       const safeHomeTeam = homeTeam || { id: 'home_unknown', name: 'Home Team' };
@@ -617,7 +617,7 @@ async function main() {
       };
 
       const isWorldCup = Number(safeLeagueInfo.id) === WORLD_CUP_LEAGUE_ID;
-      
+
       // Get hour for distribution
       const kickoffTime = fixture?.fixture?.date || null;
       const hour = kickoffTime ? new Date(kickoffTime).getUTCHours() : 0;
@@ -636,7 +636,7 @@ async function main() {
 
       const h2hSaved = Number(h2hResult.saved ?? 0);
       const hasH2h = h2hSaved >= 1;
-      
+
       // Score all fixtures (no filtering)
       const syncScore = scoreFixtureForSync({
         oddsRows: oddsResult.rows || [],
@@ -654,18 +654,18 @@ async function main() {
         hasH2h,
         isWorldCup,
       };
-      
+
       allFixtures.push(fixtureData);
     }
 
     // Sort all fixtures by score (World Cup gets priority)
     allFixtures.sort((a, b) => (b.score || 0) - (a.score || 0));
-    
+
     // Simple selection: minimum 100, maximum 200
     const totalAvailable = allFixtures.length;
     const minRequired = 100;
     const maxAllowed = 200;
-    
+
     let selectedCount;
     if (totalAvailable < minRequired) {
       selectedCount = totalAvailable; // Take all available
@@ -681,7 +681,7 @@ async function main() {
     } else {
       selectedCount = totalAvailable; // Take all available
     }
-    
+
     const finalSelectedFixtures = allFixtures.slice(0, selectedCount);
 
     console.log(JSON.stringify({
