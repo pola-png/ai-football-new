@@ -40,18 +40,13 @@ class AdminAccessService extends ChangeNotifier {
 
     try {
       final tables = TablesDB(AppAuthService.instance.client);
-      final rows = await tables.listRows(
+      final row = await tables.getRow(
         databaseId: appwriteDatabaseId,
         tableId: appwriteUserProfilesTableId,
-        queries: [
-          Query.equal('\$id', user.id),
-          Query.limit(1),
-        ],
-        total: false,
+        rowId: user.id,
       );
 
-      final backendIsAdmin = rows.rows.isNotEmpty &&
-          _asBool(rows.rows.first.data['is_admin']);
+      final backendIsAdmin = _asBool(row.data['is_admin']);
 
       _isAdmin = backendIsAdmin;
       await _preferences?.setBool(_adminAccessKey, backendIsAdmin);

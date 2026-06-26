@@ -549,8 +549,10 @@ async function refreshOutcomeRow({
   const finalAwayGoals = toNumericValue(scoreFields.fulltime_away_goals ?? scoreFields.current_away_goals);
   const finalStatus = isFinalStatus(statusShort);
   const existingOutcome = typeof row.match_outcome === 'string' ? row.match_outcome.trim() : '';
-  const nextOutcome = finalStatus && finalHomeGoals != null && finalAwayGoals != null
-    ? determineOutcome(finalHomeGoals, finalAwayGoals)
+  const nextOutcome = finalStatus
+    ? (finalHomeGoals != null && finalAwayGoals != null
+        ? determineOutcome(finalHomeGoals, finalAwayGoals)
+        : 'void')
     : existingOutcome || null;
 
   if (typeof logFn === 'function') {

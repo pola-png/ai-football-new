@@ -1,6 +1,18 @@
 import { getApps, initializeApp, cert } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 
+function logStep(step, details = {}) {
+  console.log(
+    JSON.stringify({
+      level: 'info',
+      component: 'firebase-notifications',
+      step,
+      timestamp: new Date().toISOString(),
+      ...details,
+    }),
+  );
+}
+
 function required(name) {
   const value = process.env[name];
   if (!value) {
@@ -32,8 +44,19 @@ function buildServiceAccount() {
 
 export function getFirebaseMessaging() {
   if (!getApps().length) {
+    logStep('firebase.initialize.start', {
+      hasProjectId: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_PROJECT_ID),
+      hasClientEmail: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_CLIENT_EMAIL),
+      hasPrivateKey: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_PRIVATE_KEY),
+      hasServiceAccountJson: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON),
+    });
+
     initializeApp({
       credential: cert(buildServiceAccount()),
+    });
+
+    logStep('firebase.initialize.success', {
+      appCount: getApps().length,
     });
   }
 
@@ -50,8 +73,15 @@ export async function sendPredictionTopicNotification({
     throw new Error('Missing Firebase topic id.');
   }
 
+  logStep('firebase.messaging.send.start', {
+    topicId,
+    title,
+    bodyLength: String(body || '').length,
+    dataKeys: Object.keys(data || {}),
+  });
+
   const messaging = getFirebaseMessaging();
-  return messaging.send({
+  const messageId = await messaging.send({
     topic: topicId,
     notification: {
       title,
@@ -67,4 +97,11 @@ export async function sendPredictionTopicNotification({
       },
     },
   });
+
+  logStep('firebase.messaging.send.success', {
+    topicId,
+    messageId,
+  });
+
+  return messageId;
 }

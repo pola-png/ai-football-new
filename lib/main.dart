@@ -263,77 +263,146 @@ class _AuthPageState extends State<AuthPage> {
       animation: AppAuthService.instance,
       builder: (context, _) {
         return Scaffold(
-          body: Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: _screenGradient(context),
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-              ),
-            ),
-            child: SafeArea(
-              child: ListView(
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+          body: SafeArea(
+            child: Center(
+              child: SingleChildScrollView(
                 padding: const EdgeInsets.all(20),
-                children: [
-              const SizedBox(height: 24),
-              Text(
-                'AI Football Prediction',
-                style: TextStyle(
-                  color: primaryText,
-                  fontSize: 32,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'Sign in to follow comments, rankings, daily check-ins, and live community picks.',
-                style: TextStyle(color: secondaryText, fontSize: 14, height: 1.5),
-              ),
-              const SizedBox(height: 24),
-              ToggleButtons(
-                isSelected: [_isSignIn, !_isSignIn],
-                onPressed: (index) => setState(() => _isSignIn = index == 0),
-                borderRadius: BorderRadius.circular(14),
-                fillColor: const Color(0xFF00D4AA).withAlpha(35),
-                selectedColor: const Color(0xFF00D4AA),
-                children: const [
-                  Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 18),
-                    child: Text('Sign in'),
-                  ),
-                  Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 18),
-                    child: Text('Sign up'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              if (_isSignIn) ...[
-                _AuthField(controller: _signInEmail, hint: 'Email', keyboardType: TextInputType.emailAddress),
-                const SizedBox(height: 12),
-                _AuthField(controller: _signInPassword, hint: 'Password', obscureText: true),
-              ] else ...[
-                _AuthField(controller: _signUpName, hint: 'Display name'),
-                const SizedBox(height: 12),
-                _AuthField(controller: _signUpEmail, hint: 'Email', keyboardType: TextInputType.emailAddress),
-                const SizedBox(height: 12),
-                _AuthField(controller: _signUpPassword, hint: 'Password', obscureText: true),
-              ],
-              const SizedBox(height: 20),
-                  FilledButton(
-                    onPressed: AppAuthService.instance.isLoading ? null : _submit,
-                    child: Text(
-                      AppAuthService.instance.isLoading
-                          ? 'Please wait...'
-                          : (_isSignIn ? 'Sign in' : 'Create account'),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 440),
+                  child: Card(
+                    elevation: 0,
+                    color: _screenSurface(context),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      side: BorderSide(color: _screenBorder(context)),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            'AI Football Prediction',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: primaryText,
+                              fontSize: 24,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Sign in to continue.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: secondaryText,
+                              fontSize: 14,
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _AuthModeButton(
+                                  label: 'Sign in',
+                                  selected: _isSignIn,
+                                  onTap: () => setState(() => _isSignIn = true),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: _AuthModeButton(
+                                  label: 'Sign up',
+                                  selected: !_isSignIn,
+                                  onTap: () => setState(() => _isSignIn = false),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 20),
+                          if (_isSignIn) ...[
+                            _AuthField(
+                              controller: _signInEmail,
+                              hint: 'Email',
+                              keyboardType: TextInputType.emailAddress,
+                            ),
+                            const SizedBox(height: 12),
+                            _AuthField(
+                              controller: _signInPassword,
+                              hint: 'Password',
+                              obscureText: true,
+                            ),
+                          ] else ...[
+                            _AuthField(controller: _signUpName, hint: 'Display name'),
+                            const SizedBox(height: 12),
+                            _AuthField(
+                              controller: _signUpEmail,
+                              hint: 'Email',
+                              keyboardType: TextInputType.emailAddress,
+                            ),
+                            const SizedBox(height: 12),
+                            _AuthField(
+                              controller: _signUpPassword,
+                              hint: 'Password',
+                              obscureText: true,
+                            ),
+                          ],
+                          const SizedBox(height: 20),
+                          FilledButton(
+                            onPressed: AppAuthService.instance.isLoading ? null : _submit,
+                            child: Text(
+                              AppAuthService.instance.isLoading
+                                  ? 'Please wait...'
+                                  : (_isSignIn ? 'Sign in' : 'Create account'),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ],
+                ),
               ),
             ),
           ),
         );
       },
+    );
+  }
+}
+
+class _AuthModeButton extends StatelessWidget {
+  const _AuthModeButton({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final primaryText = _primaryText(context);
+    final border = _screenBorder(context);
+
+    return OutlinedButton(
+      onPressed: onTap,
+      style: OutlinedButton.styleFrom(
+        backgroundColor:
+            selected ? const Color(0xFF00D4AA).withAlpha(24) : Colors.transparent,
+        foregroundColor: selected ? const Color(0xFF00D4AA) : primaryText,
+        side: BorderSide(color: selected ? const Color(0xFF00D4AA) : border),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+        ),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(fontWeight: FontWeight.w700),
+      ),
     );
   }
 }
@@ -5012,6 +5081,10 @@ _PickVerdict _pickVerdict(PredictionRecord prediction) {
   final outcome = prediction.matchOutcome?.trim().toLowerCase();
   if (outcome == null || outcome.isEmpty) {
     return _PickVerdict.pending;
+  }
+
+  if (outcome == 'void') {
+    return _PickVerdict.correct;
   }
 
   final selection = _normalizeSelection(prediction);

@@ -1,5 +1,29 @@
 import { sendPredictionTopicNotification } from '../_shared/firebase-notifications.js';
 
+function logStep(step, details = {}) {
+  console.log(
+    JSON.stringify({
+      level: 'info',
+      step,
+      timestamp: new Date().toISOString(),
+      ...details,
+    }),
+  );
+}
+
+function logError(step, error, details = {}) {
+  console.error(
+    JSON.stringify({
+      level: 'error',
+      step,
+      timestamp: new Date().toISOString(),
+      message: error?.message || String(error),
+      stack: error?.stack,
+      ...details,
+    }),
+  );
+}
+
 function parsePayload() {
   const rawPayload =
     process.env.APPWRITE_FUNCTION_DATA ||
@@ -9,12 +33,22 @@ function parsePayload() {
     '';
 
   if (!rawPayload) {
+    logStep('payload.empty', { source: 'appwrite-env' });
     return {};
   }
 
   try {
-    return JSON.parse(rawPayload);
-  } catch {
+    const parsed = JSON.parse(rawPayload);
+    logStep('payload.parsed', {
+      keys: Object.keys(parsed || {}),
+      hasNotification: Boolean(parsed?.notification),
+      hasData: Boolean(parsed?.data),
+    });
+    return parsed;
+  } catch (error) {
+    logError('payload.parse_failed', error, {
+      rawPayloadPreview: String(rawPayload).slice(0, 500),
+    });
     return {
       title: 'AI Football Prediction',
       body: String(rawPayload),
@@ -24,6 +58,20 @@ function parsePayload() {
 }
 
 async function main() {
+  logStep('function.start', {
+    runtime: process.version,
+    functionId: process.env.APPWRITE_FUNCTION_ID || null,
+    deploymentId: process.env.APPWRITE_FUNCTION_DEPLOYMENT || null,
+    hasFirebaseJson: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON),
+    hasProjectId: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_PROJECT_ID),
+    hasClientEmail: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_CLIENT_EMAIL),
+    hasPrivateKey: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_PRIVATE_KEY),
+    topicEnvPresent: Boolean(
+      process.env.APPWRITE_TOPIC_PREDICTIONS ||
+        process.env.APPWRITE_PREDICTION_TOPIC_ID,
+    ),
+  });
+
   const payload = parsePayload();
   const title = String(payload.title || payload.notification?.title || 'AI Football Prediction').trim();
   const body = String(payload.body || payload.notification?.body || 'A new notification is available.').trim();
@@ -35,30 +83,60 @@ async function main() {
     '',
   ).trim();
 
+  logStep('notification.resolved', {
+    title,
+    bodyLength: body.length,
+    topicId,
+    dataKeys: Object.keys(data || {}),
+  });
+
   if (!title || !body) {
     throw new Error('Notification title and body are required.');
   }
+  if (!topicId) {
+    throw new Error('Missing Firebase topic id.');
+  }
 
-  const messageId = await sendPredictionTopicNotification({
-    topicId,
-    title,
-    body,
-    data,
-  });
+  try {
+    logStep('firebase.send.start', {
+      topicId,
+      title,
+      dataPreview: data,
+    });
 
-  return {
-    ok: true,
-    message_id: messageId,
-    topic_id: topicId,
-  };
+    const messageId = await sendPredictionTopicNotification({
+      topicId,
+      title,
+      body,
+      data,
+    });
+
+    logStep('firebase.send.success', {
+      topicId,
+      messageId,
+    });
+
+    return {
+      ok: true,
+      message_id: messageId,
+      topic_id: topicId,
+    };
+  } catch (error) {
+    logError('firebase.send.failed', error, {
+      topicId,
+      title,
+      dataKeys: Object.keys(data || {}),
+    });
+    throw error;
+  }
 }
 
 main().then(
   (result) => {
-    console.log(JSON.stringify(result));
+    logStep('function.completed', result);
   },
   (error) => {
-    console.error(error);
+    logError('function.failed', error);
     process.exit(1);
   },
 );

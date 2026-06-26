@@ -242,6 +242,10 @@ class PredictionRepository {
     var correctCount = 0;
     for (final p in todayFinished) {
       final outcome = p.matchOutcome?.trim().toLowerCase();
+      if (outcome == 'void') {
+        correctCount++;
+        continue;
+      }
       final selection = _normalizeSelectionLocal(p);
       final homeTeam = _normalizeTextLocal(p.homeTeamName ?? '');
       final awayTeam = _normalizeTextLocal(p.awayTeamName ?? '');
