@@ -1,28 +1,32 @@
-import { sendPredictionTopicNotification } from '../_shared/firebase-notifications.js';
+const { sendPredictionTopicNotification } = require('../_shared/firebase-notifications.js');
 
 function logStep(step, details = {}) {
-  console.log(
-    JSON.stringify({
-      level: 'info',
-      step,
-      timestamp: new Date().toISOString(),
-      ...details,
-    }),
-  );
+  console.log(JSON.stringify({
+    level: 'info',
+    step,
+    timestamp: new Date().toISOString(),
+    ...details,
+  }));
 }
 
 function logError(step, error, details = {}) {
-  console.error(
-    JSON.stringify({
-      level: 'error',
-      step,
-      timestamp: new Date().toISOString(),
-      message: error?.message || String(error),
-      stack: error?.stack,
-      ...details,
-    }),
-  );
+  console.error(JSON.stringify({
+    level: 'error',
+    step,
+    timestamp: new Date().toISOString(),
+    message: error?.message || String(error),
+    stack: error?.stack,
+    ...details,
+  }));
 }
+
+process.on('uncaughtException', (error) => {
+  logError('process.uncaughtException', error);
+});
+
+process.on('unhandledRejection', (reason) => {
+  logError('process.unhandledRejection', reason);
+});
 
 function parsePayload() {
   const rawPayload =

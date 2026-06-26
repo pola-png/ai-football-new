@@ -1,16 +1,14 @@
-import { getApps, initializeApp, cert } from 'firebase-admin/app';
-import { getMessaging } from 'firebase-admin/messaging';
+const { getApps, initializeApp, cert } = require('firebase-admin/app');
+const { getMessaging } = require('firebase-admin/messaging');
 
 function logStep(step, details = {}) {
-  console.log(
-    JSON.stringify({
-      level: 'info',
-      component: 'firebase-notifications',
-      step,
-      timestamp: new Date().toISOString(),
-      ...details,
-    }),
-  );
+  console.log(JSON.stringify({
+    level: 'info',
+    component: 'firebase-notifications',
+    step,
+    timestamp: new Date().toISOString(),
+    ...details,
+  }));
 }
 
 function required(name) {
@@ -42,7 +40,7 @@ function buildServiceAccount() {
   };
 }
 
-export function getFirebaseMessaging() {
+function getFirebaseMessaging() {
   if (!getApps().length) {
     logStep('firebase.initialize.start', {
       hasProjectId: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_PROJECT_ID),
@@ -63,7 +61,7 @@ export function getFirebaseMessaging() {
   return getMessaging();
 }
 
-export async function sendPredictionTopicNotification({
+async function sendPredictionTopicNotification({
   topicId,
   title,
   body,
@@ -105,3 +103,8 @@ export async function sendPredictionTopicNotification({
 
   return messageId;
 }
+
+module.exports = {
+  getFirebaseMessaging,
+  sendPredictionTopicNotification,
+};
