@@ -35,7 +35,7 @@ async function deepSeekChat(messages) {
         response_format: {
           type: 'json_object',
         },
-        temperature: 0.2,
+        temperature: 0,
         max_tokens: 700,
       }),
     });
@@ -57,46 +57,39 @@ async function deepSeekChat(messages) {
 }
 
 function buildPrompt(fixture, oddsRows, h2hRows) {
+  const outputSchema = {
+    predicted_winner: 'string',
+    confidence: 0.0,
+    confidence_label: 'high',
+    picks: [
+      {
+        selection: 'string',
+        confidence: 0.0,
+      },
+    ],
+  };
+
   return [
     'You are a football prediction assistant.',
-    'CRITICAL REQUIREMENT: You MUST return ONLY valid JSON. No explanatory text, no markdown, no code blocks - just pure JSON.',
-    'Use the fixture and odds context to produce a single JSON object. Optional h2h history may be provided, but it is not required.',
-    'MANDATORY JSON structure: {"predicted_winner": "string", "confidence": number, "confidence_label": "string", "picks": [{"selection": "string", "confidence": number, "reason": "string"}]}',
-    'The picks array must contain exactly 1 entry.',
-    'That single pick must include only selection and confidence.',
-    'Do not generate any reason, explanation text, commentary, or analysis for any prediction.',
-    'Set reason to an empty string for every pick.',
-    'Focus on low-odds markets such as over, under, gg/btts, corners, double chance 12, and throw-ins if the data exists.',
-    'Target at least 10 predictions with confidence from 0.87 to 1.00 and at least 5 additional predictions with confidence from 0.85 to 0.869 when enough fixtures exist.',
-    'Do not lower confidence just to hit a quota if the fixture does not support it.',
-    'If Over 3.5 or Under 2.5 is not at least 0.90 confident, do not pick it.',
-    'If Under 1.5, Under 2.5, or Over 3.5 is not at least 0.90 confident, choose another safer market instead of forcing it.',
-    'When choosing an Over/Under goals market, use the available match context and odds. Prefer the safest line that fits the overall signals. Never default to a fixed line - always derive it from the data you have.',
-    'Do not choose a straight win or draw selection unless you are at least 0.90 confident.',
-    'If confidence is below 0.90, avoid home win, away win, draw, or team-name winner picks and choose a non-win market instead.',
-    'If throw-in data is not available, skip it.',
-    'If the evidence is weak, lower confidence below 0.85.',
-    'Confidence should be a decimal between 0 and 1.',
-    'Use confidence_label values like high or medium only.',
-    'RESPOND WITH VALID JSON ONLY - NO OTHER TEXT.',
+    'Return exactly one JSON object and nothing else.',
+    'Do not use markdown, code fences, bullet points, labels, or commentary.',
+    'The output must begin with { and end with }.',
+    'Use double quotes for every key and string value.',
+    'Do not output trailing commas, multiple JSON objects, or extra keys.',
+    'Follow this shape exactly: ' + JSON.stringify(outputSchema),
+    'The picks array must contain exactly one object.',
+    'Use one conservative low-risk market choice from the fixture, odds, and h2h context.',
+    'Prefer over/under, both teams to score, double chance, draw no bet, corners, or throw-ins when the data supports them.',
+    'Avoid straight win, away win, home win, or draw selections unless the evidence is strong.',
+    'confidence must be a decimal from 0 to 1.',
+    'confidence_label must be either high or medium.',
+    'If the evidence is weak, still return valid JSON and lower confidence rather than explaining uncertainty.',
     '',
     `FIXTURE: ${JSON.stringify(fixture)}`,
     `ODDS: ${JSON.stringify(oddsRows)}`,
     `H2H_HISTORY: ${JSON.stringify(h2hRows)}`,
     '',
-    'REQUIRED JSON FORMAT (respond with this exact structure):',
-    '{',
-    '  "predicted_winner": "Team A",',
-    '  "confidence": 0.91,',
-    '  "confidence_label": "high",',
-    '  "picks": [',
-    '    {',
-    '      "selection": "Over 3.5",',
-    '      "confidence": 0.91,',
-    '      "reason": "Both teams have averaged over 4 goals in recent h2h meetings."',
-    '    }',
-    '  ]',
-    '}',
+    'Return only the JSON object, with no surrounding text.',
   ].join('\n');
 }
 
@@ -288,21 +281,16 @@ function scoreFixtureForAi({ fixture }) {
 
 async function requestAiPrediction({ fixtureApiId, prompt, fixture, logFn }) {
   const systemPrompt = [
-    'Return only valid JSON.',
-    'Include predicted_winner, confidence, confidence_label, and picks.',
-    'picks must be an array with exactly 1 item.',
-    'The single pick must include selection, confidence, and reason.',
-    'If confidence is below 0.85, reason must be an empty string.',
-    'Never use phrases about limited data, small samples, missing history, insufficient evidence, or not enough matches as reason text for a 0.85+ confidence pick.',
-    'Do not add markdown, explanation text, or code fences.',
-    'Do not add extra explanation outside the single short reason field.',
-    'Use fixture context and odds only.',
-    'If H2H data is empty, rely on whatever context is already supplied.',
-    'If no H2H data exists at all, do not invent H2H and stay conservative.',
-    'Prefer non-straight-win selections such as Over/Under, Both Teams To Score, Double Chance, Draw, or No Bet.',
-    'When choosing Over/Under goals, pick the line that fits the h2h average goals: use Over 3.5 if average is near 4, Over 2.5 if near 3, Over 1.5 if near 2. For Under markets, use Under 1.5 if average is below 1, Under 2.5 if average is near 2, Under 3.5 if near 3. Never default to a fixed line - always derive it from the data.',
-    "Don't use straight-win selections unless confidence is 0.99 or higher.",
-    "Don't waste credits on straight-win picks when a safer market is available.",
+    'You are a JSON generator for football predictions.',
+    'Return exactly one valid JSON object and nothing else.',
+    'Use double quotes only.',
+    'Never output markdown, code fences, comments, or multiple objects.',
+    'The object must contain predicted_winner, confidence, confidence_label, and picks.',
+    'picks must be an array with exactly one item.',
+    'The single pick must contain selection and confidence only.',
+    'Use only the fixture, odds, and h2h context provided by the user message.',
+    'Prefer safer non-straight-win markets when possible.',
+    'If the safest choice is unclear, still return valid JSON with a conservative selection and lower confidence.',
   ].join(' ');
 
   const messages = [

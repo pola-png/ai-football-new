@@ -623,7 +623,7 @@ async function main() {
   const league = process.env.API_FOOTBALL_LEAGUE
     ? Number(process.env.API_FOOTBALL_LEAGUE)
     : null;
-  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(0);
+  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(1);
 
   const url = new URL(
     `${required("API_FOOTBALL_BASE_URL").replace(/\/$/, "")}/fixtures`,
