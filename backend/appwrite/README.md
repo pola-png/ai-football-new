@@ -135,7 +135,7 @@ Account deletion function:
 
 - `delete-account` expects an authenticated function execution from the signed-in user.
 - Configure `APPWRITE_FUNCTION_ENDPOINT`, `APPWRITE_FUNCTION_PROJECT_ID`, `APPWRITE_FUNCTION_API_KEY`, `APPWRITE_DATABASE_ID`, and either `APPWRITE_FUNCTION_USER_ID` or `APPWRITE_FUNCTION_JWT`.
-- The function removes rows from `user_profiles`, `prediction_comments`, `prediction_selections`, `daily_checkins`, and `challenge_entries` before deleting the auth account.
+- The function removes rows from `user_profiles`, `prediction_comments`, `prediction_selections`, `chat_messages`, `chat_message_likes`, `daily_checkins`, and `challenge_entries` before deleting the auth account.
 
 ## Fetch schedule
 

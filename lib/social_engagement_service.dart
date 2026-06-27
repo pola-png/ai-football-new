@@ -307,6 +307,9 @@ class SocialEngagementService {
     }
 
     final rows = await _listAllRows(
+    final rows = await _listAllRowsHelper(
+      db: _db,
+      databaseId: appwriteDatabaseId,
       tableId: appwritePredictionSelectionsTableId,
       queries: [
         Query.equal('user_id', user.id),
@@ -468,7 +471,9 @@ class SocialEngagementService {
       return const [];
     }
 
-    final selectedRows = await _listAllRows(
+    final selectedRows = await _listAllRowsHelper(
+      db: _db,
+      databaseId: appwriteDatabaseId,
       tableId: appwritePredictionSelectionsTableId,
       queries: [
         Query.equal('user_id', user.id),
@@ -542,7 +547,9 @@ class SocialEngagementService {
   }
 
   Future<List<ChatMessageRecord>> fetchChatMessages({String roomId = appwriteChatRoomId}) async {
-    final rows = await _listAllRows(
+    final rows = await _listAllRowsHelper(
+      db: _db,
+      databaseId: appwriteDatabaseId,
       tableId: appwriteChatMessagesTableId,
       queries: [
         Query.equal('room_id', roomId),
@@ -566,7 +573,9 @@ class SocialEngagementService {
   }
 
   Future<Map<String, int>> fetchChatLikeCounts({String roomId = appwriteChatRoomId}) async {
-    final rows = await _listAllRows(
+    final rows = await _listAllRowsHelper(
+      db: _db,
+      databaseId: appwriteDatabaseId,
       tableId: appwriteChatMessageLikesTableId,
       queries: [
         Query.equal('room_id', roomId),
@@ -794,19 +803,6 @@ Future<_ListRowsResult> _listAllRowsHelper({
 }
 
 extension on SocialEngagementService {
-  Future<_ListRowsResult> _listAllRows({
-    required String tableId,
-    required List<String> queries,
-  }) {
-    return _listAllRowsHelper(
-      db: _db,
-      databaseId: appwriteDatabaseId,
-      tableId: tableId,
-      queries: queries,
-    );
-  }
-}
-
 class _ListRowsResult {
   _ListRowsResult(this.rows);
   final List<dynamic> rows;

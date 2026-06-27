@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import 'ad_gate_service.dart';
-import 'app_auth_service.dart';
 import 'appwrite_config.dart';
 import 'social_engagement_service.dart';
 

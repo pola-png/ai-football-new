@@ -173,6 +173,8 @@ async function main() {
   const tableUserProfiles = normalizeTableId('APPWRITE_TABLE_USER_PROFILES', 'user_profiles');
   const tableComments = normalizeTableId('APPWRITE_TABLE_PREDICTION_COMMENTS', 'prediction_comments');
   const tableSelections = normalizeTableId('APPWRITE_TABLE_PREDICTION_SELECTIONS', 'prediction_selections');
+  const tableChatMessages = normalizeTableId('APPWRITE_TABLE_CHAT_MESSAGES', 'chat_messages');
+  const tableChatLikes = normalizeTableId('APPWRITE_TABLE_CHAT_MESSAGE_LIKES', 'chat_message_likes');
   const tableCheckins = normalizeTableId('APPWRITE_TABLE_DAILY_CHECKINS', 'daily_checkins');
   const tableChallengeEntries = normalizeTableId('APPWRITE_TABLE_CHALLENGE_ENTRIES', 'challenge_entries');
 
@@ -183,6 +185,8 @@ async function main() {
     user_profile: false,
     prediction_comments: 0,
     prediction_selections: 0,
+    chat_messages: 0,
+    chat_message_likes: 0,
     daily_checkins: 0,
     challenge_entries: 0,
     auth_user: false,
@@ -193,6 +197,8 @@ async function main() {
 
     deleted.prediction_comments = await deleteRowsByUserId(tablesdb, databaseId, tableComments, userId);
     deleted.prediction_selections = await deleteRowsByUserId(tablesdb, databaseId, tableSelections, userId);
+    deleted.chat_messages = await deleteRowsByUserId(tablesdb, databaseId, tableChatMessages, userId);
+    deleted.chat_message_likes = await deleteRowsByUserId(tablesdb, databaseId, tableChatLikes, userId);
     deleted.daily_checkins = await deleteRowsByUserId(tablesdb, databaseId, tableCheckins, userId);
     deleted.challenge_entries = await deleteRowsByUserId(tablesdb, databaseId, tableChallengeEntries, userId);
     deleted.user_profile = await deleteRowIfExists(tablesdb, databaseId, tableUserProfiles, userId);

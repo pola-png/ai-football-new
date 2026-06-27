@@ -601,7 +601,7 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
       MaterialPageRoute<void>(
         builder: (_) => PickedMatchesPage(
           selectedPredictions: _selectedItems,
-          onClearAll: _selectedItems.isEmpty ? null : () => unawaited(_clearSelections()),
+          onClearAll: _selectedItems.isEmpty ? null : _clearSelections,
         ),
       ),
     );
@@ -809,7 +809,7 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
                     _SelectedMatchesBar(
                       count: _selectedItems.length,
                       onOpenPicked: _openPickedTab,
-                      onClear: _clearSelections,
+                      onClear: () => unawaited(_clearSelections()),
                     ),
                   ClipRect(
                     child: BackdropFilter(
@@ -2016,7 +2016,7 @@ class PickedMatchesPage extends StatefulWidget {
   });
 
   final List<PredictionRecord> selectedPredictions;
-  final VoidCallback? onClearAll;
+  final Future<void> Function()? onClearAll;
 
   @override
   State<PickedMatchesPage> createState() => _PickedMatchesPageState();
@@ -2048,7 +2048,7 @@ class _PickedMatchesPageState extends State<PickedMatchesPage> {
 
   Future<void> _clearAll() async {
     if (widget.onClearAll != null) {
-      widget.onClearAll!();
+      await widget.onClearAll!();
     }
     await _refresh();
   }
@@ -4050,6 +4050,30 @@ int _datePriority(DateTime date, DateTime now) {
 DateTime _dateOnly(DateTime value) {
   final local = value.toLocal();
   return DateTime(local.year, local.month, local.day);
+}
+
+String _dateOnlyKey(DateTime value) {
+  final local = value.toLocal();
+  final year = local.year.toString().padLeft(4, '0');
+  final month = local.month.toString().padLeft(2, '0');
+  final day = local.day.toString().padLeft(2, '0');
+  return '$year-$month-$day';
+}
+
+String _formatPickedGroupLabel(DateTime value) {
+  final now = DateTime.now();
+  final diff = _dateOnly(value).difference(_dateOnly(now)).inDays;
+  if (diff == 0) {
+    return 'Today';
+  }
+  if (diff == 1) {
+    return 'Tomorrow';
+  }
+  if (diff == -1) {
+    return 'Yesterday';
+  }
+  final local = value.toLocal();
+  return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')}';
 }
 
 String _weekdayName(int weekday) {
