@@ -3,6 +3,17 @@ const ai = require('./ai');
 const save = require('./save');
 const notify = require('./notify');
 
+function buildAppwriteLogger(context) {
+  const log = typeof context?.log === 'function'
+    ? (message) => context.log(message)
+    : (message) => console.log(message);
+  const error = typeof context?.error === 'function'
+    ? (message) => context.error(message)
+    : (message) => console.error(message);
+
+  return { log, error };
+}
+
 function required(name) {
   const value = process.env[name];
   if (!value) {
@@ -120,6 +131,18 @@ function shouldPublishNearKickoff(kickoffAtValue, now = new Date()) {
 }
 
 async function main() {
+  const { log, error } = buildAppwriteLogger();
+  const appwriteLog = log;
+  const appwriteError = error;
+
+  appwriteLog(JSON.stringify({
+    level: 'info',
+    job: 'generate-predictions',
+    step: 'bootstrap',
+    timestamp: isoNow(),
+    message: 'generate-predictions booted',
+  }));
+
   const client = buildClient();
   const tablesdb = new TablesDB(client);
 
@@ -141,10 +164,30 @@ async function main() {
   let highConfidenceSaved = 0;
 
   try {
+    appwriteLog(JSON.stringify({
+      level: 'info',
+      job: 'generate-predictions',
+      step: 'function.start',
+      timestamp: isoNow(),
+      syncRunsTable,
+      predictionsTable,
+      fixturesTable,
+      oddsTable,
+      h2hTable,
+      topicPresent: Boolean(topicId),
+    }));
+
     const syncRun = await fetchLatestSyncRun(tablesdb, databaseId, syncRunsTable);
     const syncRunId = syncRun?.sync_run_id;
 
     if (!syncRunId) {
+      appwriteError(JSON.stringify({
+        level: 'error',
+        job: 'generate-predictions',
+        step: 'missing_sync_run',
+        timestamp: isoNow(),
+        message: 'No successful sync_run_id found to generate predictions from.',
+      }));
       throw new Error('No successful sync_run_id found to generate predictions from.');
     }
 
@@ -218,15 +261,13 @@ async function main() {
             updated_at: isoNow(),
           });
         } catch (error) {
-          console.error(
-            JSON.stringify({
-              job: 'generate-predictions',
-              fixture_api_id: fixture.api_fixture_id,
-              prediction_id: `prediction_${fixture.api_fixture_id}`,
-              stage: 'notification-error',
-              message: error instanceof Error ? error.message : String(error),
-            }),
-          );
+          appwriteError(JSON.stringify({
+            job: 'generate-predictions',
+            fixture_api_id: fixture.api_fixture_id,
+            prediction_id: `prediction_${fixture.api_fixture_id}`,
+            stage: 'notification-error',
+            message: error instanceof Error ? error.message : String(error),
+          }));
         }
       }
 
@@ -254,6 +295,15 @@ async function main() {
       skipped: skipped,
     };
   } catch (error) {
+    appwriteError(JSON.stringify({
+      level: 'error',
+      job: 'generate-predictions',
+      step: 'function.failed',
+      timestamp: isoNow(),
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : null,
+    }));
+
     await createRun(tablesdb, databaseId, syncRunsTable, {
       job_name: 'generate-predictions',
       status: 'failed',
@@ -269,5 +319,28 @@ async function main() {
     throw error;
   }
 }
+
+main().then(
+  (result) => {
+    console.log(JSON.stringify({
+      level: 'info',
+      job: 'generate-predictions',
+      step: 'function.completed',
+      timestamp: isoNow(),
+      ...result,
+    }));
+  },
+  (error) => {
+    console.error(JSON.stringify({
+      level: 'error',
+      job: 'generate-predictions',
+      step: 'process.failed',
+      timestamp: isoNow(),
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : null,
+    }));
+    process.exitCode = 1;
+  },
+);
 
 module.exports = { main };

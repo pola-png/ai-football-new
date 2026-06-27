@@ -32,7 +32,14 @@ Color _secondaryText(BuildContext context) {
 }
 
 class CommunityPage extends StatelessWidget {
-  const CommunityPage({super.key});
+  const CommunityPage({
+    super.key,
+    required this.onOpenChat,
+    required this.onOpenPickedMatches,
+  });
+
+  final VoidCallback onOpenChat;
+  final VoidCallback onOpenPickedMatches;
 
   Future<void> _checkIn(BuildContext context) async {
     await SocialEngagementService.instance.checkInToday();
@@ -82,6 +89,12 @@ class CommunityPage extends StatelessWidget {
     );
   }
 
+  void _openPage(BuildContext context, Widget page) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => page),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
@@ -102,236 +115,70 @@ class CommunityPage extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.all(20),
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Group',
-                        style: TextStyle(
-                          color: _primaryText(context),
-                          fontSize: 28,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ),
-                  ],
+                Text(
+                  'Group',
+                  style: TextStyle(
+                    color: _primaryText(context),
+                    fontSize: 28,
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  !hasSession
-                      ? 'Sign in to join the live group features.'
-                      : 'Welcome back.',
+                  hasSession
+                      ? 'Open the community tools from one menu.'
+                      : 'Sign in to use community tools.',
                   style: TextStyle(
                     color: _secondaryText(context),
                     fontSize: 14,
                   ),
                 ),
-                const SizedBox(height: 14),
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final columns = constraints.maxWidth >= 1024
-                        ? 3
-                        : constraints.maxWidth >= 640
-                            ? 2
-                            : 1;
-                    const gap = 12.0;
-                    final cardWidth =
-                        (constraints.maxWidth - gap * (columns - 1)) / columns;
-
-                    final tiles = <Widget>[
-                      if (isAdmin)
-                        SizedBox(
-                          width: cardWidth,
-                          child: _communityCard(
-                            context,
-                            title: 'Admin broadcast',
-                            body: 'Send notifications directly to subscribers.',
-                            actionLabel: 'Open editor',
-                            onPressed: () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute<void>(
-                                  builder: (_) => const AdminNotificationPage(),
-                                ),
-                              );
-                            },
-                            compact: true,
-                          ),
-                        ),
-                      SizedBox(
-                        width: cardWidth,
-                        child: _communityCard(
-                          context,
-                          title: 'Daily check-in',
-                          body: '10 coins, 20 coins, premium reward.',
-                          actionLabel: 'Check in',
-                          onPressed: hasSession ? () => _checkIn(context) : null,
-                          compact: true,
-                        ),
-                      ),
-                      SizedBox(
-                        width: cardWidth,
-                        child: _communityCard(
-                          context,
-                          title: 'Leaderboard',
-                          body: 'Live rankings update in real time.',
-                          actionLabel: null,
-                          onPressed: null,
-                          compact: true,
-                          child: SizedBox(
-                            height: 140,
-                            child: StreamBuilder<List<LeaderboardEntry>>(
-                              stream: SocialEngagementService.instance.watchLeaderboard(),
-                              builder: (context, snapshot) {
-                                final entries = snapshot.data ?? const <LeaderboardEntry>[];
-                                final displayRows = entries.isEmpty
-                                    ? const [
-                                        ('John', 1250),
-                                        ('Sarah', 1180),
-                                        ('Mike', 1140),
-                                      ]
-                                    : entries
-                                        .take(3)
-                                        .map((entry) => (entry.userName, entry.points))
-                                        .toList();
-
-                                return ListView.separated(
-                                  itemCount: displayRows.length,
-                                  separatorBuilder: (_, __) =>
-                                      Divider(color: _screenBorder(context)),
-                                  itemBuilder: (context, index) {
-                                    final item = displayRows[index];
-                                    return ListTile(
-                                      dense: true,
-                                      visualDensity: VisualDensity.compact,
-                                      contentPadding: EdgeInsets.zero,
-                                      title: Text(
-                                        item.$1,
-                                        style: TextStyle(
-                                          color: _primaryText(context),
-                                          fontWeight: FontWeight.w700,
-                                          fontSize: 13,
-                                        ),
-                                      ),
-                                      subtitle: Text(
-                                        '${item.$2} pts',
-                                        style: TextStyle(
-                                          color: _secondaryText(context),
-                                          fontSize: 11,
-                                        ),
-                                      ),
-                                      leading: CircleAvatar(
-                                        radius: 13,
-                                        backgroundColor:
-                                            const Color(0xFF00D4AA).withAlpha(25),
-                                        child: Text(
-                                          '${index + 1}',
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w900,
-                                            fontSize: 11,
-                                          ),
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                      ),
-                      SizedBox(
-                        width: cardWidth,
-                        child: _communityCard(
-                          context,
-                          title: 'Challenges',
-                          body: 'Submit picks and earn points.',
-                          actionLabel: null,
-                          onPressed: null,
-                          compact: true,
-                          child: SizedBox(
-                            height: 140,
-                            child: StreamBuilder<List<PredictionChallenge>>(
-                              stream: SocialEngagementService.instance.watchChallenges(),
-                              builder: (context, snapshot) {
-                                final challenges = snapshot.data ?? const <PredictionChallenge>[];
-                                if (challenges.isEmpty) {
-                                  return Center(
-                                    child: Text(
-                                      'No challenges yet.',
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        color: _secondaryText(context),
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  );
-                                }
-
-                                return ListView.separated(
-                                  itemCount: challenges.length > 3 ? 3 : challenges.length,
-                                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                                  itemBuilder: (context, index) {
-                                    final challenge = challenges[index];
-                                    return Container(
-                                      padding: const EdgeInsets.all(10),
-                                      decoration: BoxDecoration(
-                                        color: _screenSurface(context, elevated: true),
-                                        borderRadius: BorderRadius.circular(12),
-                                        border: Border.all(color: _screenBorder(context)),
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          Expanded(
-                                            child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                              children: [
-                                                Text(
-                                                  challenge.title,
-                                                  maxLines: 1,
-                                                  overflow: TextOverflow.ellipsis,
-                                                  style: TextStyle(
-                                                    color: _primaryText(context),
-                                                    fontWeight: FontWeight.w800,
-                                                    fontSize: 13,
-                                                  ),
-                                                ),
-                                                const SizedBox(height: 2),
-                                                Text(
-                                                  '${challenge.targetCount} matches - ${challenge.rewardPoints} pts',
-                                                  maxLines: 1,
-                                                  overflow: TextOverflow.ellipsis,
-                                                  style: TextStyle(
-                                                    color: _secondaryText(context),
-                                                    fontSize: 11,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                          TextButton(
-                                            onPressed: () =>
-                                                _submitChallengeEntry(context, challenge),
-                                            child: const Text('Join'),
-                                          ),
-                                        ],
-                                      ),
-                                    );
-                                  },
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                      ),
-                    ];
-
-                    return Wrap(
-                      spacing: gap,
-                      runSpacing: gap,
-                      children: tiles,
-                    );
-                  },
+                const SizedBox(height: 16),
+                _menuCard(
+                  context,
+                  icon: Icons.chat_bubble_outline,
+                  title: 'Chat',
+                  subtitle: 'Open the general chat room with replies and likes.',
+                  onTap: onOpenChat,
                 ),
+                _menuCard(
+                  context,
+                  icon: Icons.fact_check_outlined,
+                  title: 'Picked Matches',
+                  subtitle: 'View saved picks grouped by date.',
+                  onTap: onOpenPickedMatches,
+                ),
+                _menuCard(
+                  context,
+                  icon: Icons.calendar_month_outlined,
+                  title: 'Daily Check-in',
+                  subtitle: 'Earn coins for checking in each day.',
+                  onTap: hasSession
+                      ? () => _openPage(context, const DailyCheckInPage())
+                      : null,
+                ),
+                _menuCard(
+                  context,
+                  icon: Icons.emoji_events_outlined,
+                  title: 'Leaderboard',
+                  subtitle: 'See the top community points table.',
+                  onTap: () => _openPage(context, const LeaderboardPage()),
+                ),
+                _menuCard(
+                  context,
+                  icon: Icons.task_alt_outlined,
+                  title: 'Challenges',
+                  subtitle: 'Join live prediction challenges.',
+                  onTap: () => _openPage(context, const ChallengesPage()),
+                ),
+                if (isAdmin)
+                  _menuCard(
+                    context,
+                    icon: Icons.notifications_active_outlined,
+                    title: 'Admin Broadcast',
+                    subtitle: 'Send a push notification to users.',
+                    onTap: () => _openPage(context, const AdminNotificationPage()),
+                  ),
               ],
             ),
           ),
@@ -340,57 +187,358 @@ class CommunityPage extends StatelessWidget {
     );
   }
 
-  Widget _communityCard(
+  Widget _menuCard(
     BuildContext context, {
+    required IconData icon,
     required String title,
-    required String body,
-    required String? actionLabel,
-    required VoidCallback? onPressed,
-    Widget? child,
-    bool compact = false,
+    required String subtitle,
+    required VoidCallback? onTap,
   }) {
+    final surface = _screenSurface(context);
+    final border = _screenBorder(context);
+    final primaryText = _primaryText(context);
+    final secondaryText = _secondaryText(context);
+
     return Container(
-      padding: EdgeInsets.all(compact ? 12 : 16),
+      margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: _screenSurface(context),
-        borderRadius: BorderRadius.circular(compact ? 16 : 20),
-        border: Border.all(color: _screenBorder(context)),
+        color: surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: border),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: TextStyle(
-              color: _primaryText(context),
-              fontSize: compact ? 15 : 18,
-              fontWeight: FontWeight.w900,
-            ),
+      child: ListTile(
+        leading: Icon(icon, color: const Color(0xFF00D4AA)),
+        title: Text(
+          title,
+          style: TextStyle(
+            color: primaryText,
+            fontWeight: FontWeight.w800,
           ),
-          const SizedBox(height: 5),
-          Text(
-            body,
-            style: TextStyle(
-              color: _secondaryText(context),
-              height: compact ? 1.25 : 1.45,
-              fontSize: compact ? 12 : 13,
-            ),
+        ),
+        subtitle: Text(
+          subtitle,
+          style: TextStyle(color: secondaryText),
+        ),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: onTap,
+      ),
+    );
+  }
+}
+
+class DailyCheckInPage extends StatelessWidget {
+  const DailyCheckInPage({super.key});
+
+  Future<void> _checkIn(BuildContext context) async {
+    await SocialEngagementService.instance.checkInToday();
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Check-in saved.')),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final primaryText = _primaryText(context);
+    final secondaryText = _secondaryText(context);
+    final surface = _screenSurface(context);
+    final border = _screenBorder(context);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Daily Check-in')),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: _screenGradient(context),
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
           ),
-          if (child != null) ...[
+        ),
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            Text(
+              'Daily rewards',
+              style: TextStyle(color: primaryText, fontSize: 28, fontWeight: FontWeight.w900),
+            ),
             const SizedBox(height: 8),
-            child,
-          ],
-          if (actionLabel != null) ...[
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: onPressed,
-                child: Text(actionLabel),
+            Text(
+              'Tap once per day to keep your streak going and earn coins.',
+              style: TextStyle(color: secondaryText, fontSize: 14, height: 1.45),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: surface,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: border),
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Rewards', style: TextStyle(fontWeight: FontWeight.w800)),
+                  SizedBox(height: 10),
+                  Text('Day 1 - 10 coins'),
+                  SizedBox(height: 6),
+                  Text('Day 2 - 20 coins'),
+                  SizedBox(height: 6),
+                  Text('Long streaks unlock bigger rewards'),
+                ],
               ),
             ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: () => _checkIn(context),
+              icon: const Icon(Icons.check_circle_outline),
+              label: const Text('Check in now'),
+            ),
           ],
-        ],
+        ),
+      ),
+    );
+  }
+}
+
+class LeaderboardPage extends StatelessWidget {
+  const LeaderboardPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final primaryText = _primaryText(context);
+    final secondaryText = _secondaryText(context);
+    final surface = _screenSurface(context);
+    final border = _screenBorder(context);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Leaderboard')),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: _screenGradient(context),
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: RefreshIndicator(
+          onRefresh: () async {},
+          child: StreamBuilder<List<LeaderboardEntry>>(
+            stream: SocialEngagementService.instance.watchLeaderboard(),
+            builder: (context, snapshot) {
+              final entries = snapshot.data ?? const <LeaderboardEntry>[];
+              final rows = entries.isEmpty
+                  ? const <LeaderboardEntry>[]
+                  : entries;
+
+              return ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(20),
+                children: [
+                  Text(
+                    'Top players',
+                    style: TextStyle(color: primaryText, fontSize: 28, fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Live rankings update automatically.',
+                    style: TextStyle(color: secondaryText, fontSize: 14),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: surface,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: border),
+                    ),
+                    child: rows.isEmpty
+                        ? Padding(
+                            padding: const EdgeInsets.all(18),
+                            child: Text(
+                              'No leaderboard entries yet.',
+                              style: TextStyle(color: secondaryText),
+                            ),
+                          )
+                        : Column(
+                            children: [
+                              for (var index = 0; index < rows.length; index++)
+                                ListTile(
+                                  leading: CircleAvatar(
+                                    backgroundColor: const Color(0xFF00D4AA).withAlpha(35),
+                                    child: Text('${index + 1}'),
+                                  ),
+                                  title: Text(
+                                    rows[index].userName,
+                                    style: TextStyle(
+                                      color: primaryText,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    '${rows[index].coins} coins | ${rows[index].streakDays} day streak',
+                                    style: TextStyle(color: secondaryText),
+                                  ),
+                                  trailing: Text(
+                                    '${rows[index].points} pts',
+                                    style: TextStyle(
+                                      color: primaryText,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class ChallengesPage extends StatelessWidget {
+  const ChallengesPage({super.key});
+
+  Future<void> _submitChallengeEntry(BuildContext context, PredictionChallenge challenge) async {
+    final controller = TextEditingController();
+    final entry = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: Text('Submit for ${challenge.title}'),
+          content: TextField(
+            controller: controller,
+            maxLines: 4,
+            decoration: const InputDecoration(
+              hintText: 'Write your challenge prediction',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(controller.text),
+              child: const Text('Send'),
+            ),
+          ],
+        );
+      },
+    );
+    controller.dispose();
+    if (entry == null || entry.trim().isEmpty) return;
+
+    await SocialEngagementService.instance.submitChallengeEntry(
+      challengeId: challenge.id,
+      entryText: entry,
+    );
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Challenge entry submitted.')),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final primaryText = _primaryText(context);
+    final secondaryText = _secondaryText(context);
+    final surface = _screenSurface(context);
+    final border = _screenBorder(context);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Challenges')),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: _screenGradient(context),
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: RefreshIndicator(
+          onRefresh: () async {},
+          child: StreamBuilder<List<PredictionChallenge>>(
+            stream: SocialEngagementService.instance.watchChallenges(),
+            builder: (context, snapshot) {
+              final challenges = snapshot.data ?? const <PredictionChallenge>[];
+
+              return ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.all(20),
+                children: [
+                  Text(
+                    'Live challenges',
+                    style: TextStyle(color: primaryText, fontSize: 28, fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Pick one challenge and submit your entry.',
+                    style: TextStyle(color: secondaryText, fontSize: 14),
+                  ),
+                  const SizedBox(height: 16),
+                  if (challenges.isEmpty)
+                    Container(
+                      padding: const EdgeInsets.all(18),
+                      decoration: BoxDecoration(
+                        color: surface,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: border),
+                      ),
+                      child: Text(
+                        'No challenges yet.',
+                        style: TextStyle(color: secondaryText),
+                      ),
+                    )
+                  else
+                    for (final challenge in challenges)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: surface,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(color: border),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              challenge.title,
+                              style: TextStyle(
+                                color: primaryText,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              challenge.description,
+                              style: TextStyle(color: secondaryText, height: 1.4),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              '${challenge.targetCount} matches - ${challenge.rewardPoints} pts',
+                              style: TextStyle(color: secondaryText, fontSize: 12),
+                            ),
+                            const SizedBox(height: 10),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: FilledButton(
+                                onPressed: () => _submitChallengeEntry(context, challenge),
+                                child: const Text('Join challenge'),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                ],
+              );
+            },
+          ),
+        ),
       ),
     );
   }

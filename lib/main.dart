@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
@@ -517,6 +516,7 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
         builder: (_) => _MainMenuPage(
           isAdmin: isAdmin,
           onNavigate: _setIndex,
+          onOpenPicked: _openPickedTab,
           onOpenPolicy: () {
             Navigator.of(context).push(
               MaterialPageRoute<void>(
@@ -796,7 +796,10 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
                     isAdmin: isAdmin,
                     currentPlans: GooglePlayBillingService.instance.plans,
                   ),
-                  const CommunityPage(),
+                  CommunityPage(
+                    onOpenChat: () => _setIndex(3),
+                    onOpenPickedMatches: _openPickedTab,
+                  ),
                   ChatPage(
                     hasAdFreeAccess: adFree || rewardedAdFree || isAdmin,
                   ),
@@ -892,6 +895,7 @@ class _MainMenuPage extends StatelessWidget {
   const _MainMenuPage({
     required this.isAdmin,
     required this.onNavigate,
+    required this.onOpenPicked,
     required this.onOpenPolicy,
     required this.onOpenDeleteAccount,
     required this.onOpenAdminNotification,
@@ -900,6 +904,7 @@ class _MainMenuPage extends StatelessWidget {
 
   final bool isAdmin;
   final ValueChanged<int> onNavigate;
+  final VoidCallback onOpenPicked;
   final VoidCallback onOpenPolicy;
   final VoidCallback onOpenDeleteAccount;
   final VoidCallback onOpenAdminNotification;
@@ -968,7 +973,7 @@ class _MainMenuPage extends StatelessWidget {
               border: border,
               textColor: primaryText,
               onTap: () {
-                onNavigate(2);
+                onOpenPicked();
                 Navigator.of(context).pop();
               },
             ),

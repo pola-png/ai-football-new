@@ -85,6 +85,20 @@ function loadSender() {
   return mod.sendPredictionTopicNotification;
 }
 
+function sendWithTimeout(sendFn, payload, timeoutMs = 20000) {
+  let timeoutId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(`Timed out after ${timeoutMs}ms while sending Firebase notification.`));
+    }, timeoutMs);
+  });
+
+  return Promise.race([
+    Promise.resolve().then(() => sendFn(payload)).finally(() => clearTimeout(timeoutId)),
+    timeoutPromise,
+  ]);
+}
+
 async function main() {
   logStep('function.start', {
     runtime: process.version,
@@ -142,7 +156,7 @@ async function main() {
       dataPreview: data,
     });
 
-    const messageId = await sendPredictionTopicNotification({
+    const messageId = await sendWithTimeout(sendPredictionTopicNotification, {
       topicId,
       title,
       body,

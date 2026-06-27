@@ -306,7 +306,6 @@ class SocialEngagementService {
       return;
     }
 
-    final rows = await _listAllRows(
     final rows = await _listAllRowsHelper(
       db: _db,
       databaseId: appwriteDatabaseId,
@@ -802,7 +801,6 @@ Future<_ListRowsResult> _listAllRowsHelper({
   return _ListRowsResult(rows);
 }
 
-extension on SocialEngagementService {
 class _ListRowsResult {
   _ListRowsResult(this.rows);
   final List<dynamic> rows;
