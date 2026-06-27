@@ -251,6 +251,11 @@ function isFinalStatus(statusShort) {
   return new Set(['FT', 'AET', 'PEN', 'CANC', 'ABD', 'PST', 'WO']).has(normalized);
 }
 
+function isVoidStatus(statusShort) {
+  const normalized = String(statusShort || '').toUpperCase();
+  return new Set(['CANC', 'ABD', 'PST', 'WO', 'AWD', 'INT']).has(normalized);
+}
+
 function shouldPublishPrediction(row, now) {
   if (String(row.release_status || '').toLowerCase() !== 'draft') {
     return false;
@@ -267,18 +272,13 @@ function shouldPublishPrediction(row, now) {
 
 function needsOutcomeRefresh(row, now) {
   const kickoffAt = parseDate(row.kickoff_at);
-  if (!kickoffAt) {
-    return false;
-  }
+  if (!kickoffAt) return false;
 
-  if (kickoffAt.getTime() > now.getTime()) {
-    return false;
-  }
+  // Must have kicked off already
+  if (kickoffAt.getTime() > now.getTime()) return false;
 
-  const resultCheckedAt = parseDate(row.result_checked_at);
-  if (resultCheckedAt && isFinalStatus(row.match_status_short)) {
-    return false;
-  }
+  // Already has a final outcome — no need to recheck
+  if (isFinalStatus(row.match_status_short) && row.match_outcome) return false;
 
   return true;
 }
@@ -557,11 +557,39 @@ async function refreshOutcomeRow({
   fixture,
   logFn,
 }) {
+  const now = isoNow();
+
+  // No fixture found from API — if match is >3 hours past kickoff mark as void
   if (!fixture) {
+    const kickoffAt = parseDate(row.kickoff_at);
+    const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000);
+    if (kickoffAt && kickoffAt.getTime() < threeHoursAgo.getTime()) {
+      await upsertRow(tablesdb, databaseId, predictionsTable, row.$id, {
+        match_status_short: row.match_status_short || 'VOID',
+        match_outcome: 'void',
+        result_checked_at: now,
+        updated_at: now,
+      });
+      await upsertResultRow(tablesdb, databaseId, resultsTable, row.fixture_api_id, {
+        outcome: 'void',
+        checked_at: now,
+        final_status: 'VOID',
+        created_at: row.created_at || now,
+        updated_at: now,
+      });
+      if (typeof logFn === 'function') {
+        logFn(JSON.stringify({
+          job: 'publish-and-maintain',
+          fixture_api_id: row.fixture_api_id || null,
+          stage: 'outcome-void-no-fixture',
+          message: 'Marked void — fixture not found from API and >3h past kickoff.',
+        }));
+      }
+      return { updated: true, status_short: 'VOID', final: true, match_outcome: 'void' };
+    }
     return { updated: false, reason: 'missing-fixture' };
   }
 
-  const now = isoNow();
   const statusShort = fixture?.fixture?.status?.short || row.match_status_short || null;
   const statusLong = fixture?.fixture?.status?.long || row.match_status_long || null;
   const scoreFields = buildScoreFields(fixture);
@@ -570,12 +598,19 @@ async function refreshOutcomeRow({
   const finalHomeGoals = toNumericValue(scoreFields.fulltime_home_goals ?? scoreFields.current_home_goals);
   const finalAwayGoals = toNumericValue(scoreFields.fulltime_away_goals ?? scoreFields.current_away_goals);
   const finalStatus = isFinalStatus(statusShort);
-  const existingOutcome = typeof row.match_outcome === 'string' ? row.match_outcome.trim() : '';
-  const nextOutcome = finalStatus
-    ? (finalHomeGoals != null && finalAwayGoals != null
-        ? determineOutcome(finalHomeGoals, finalAwayGoals)
-        : 'void')
-    : existingOutcome || null;
+  const voidStatus = isVoidStatus(statusShort);
+
+  // Determine outcome
+  let nextOutcome;
+  if (voidStatus) {
+    nextOutcome = 'void';
+  } else if (finalStatus) {
+    nextOutcome = (finalHomeGoals != null && finalAwayGoals != null)
+      ? determineOutcome(finalHomeGoals, finalAwayGoals)
+      : 'void';
+  } else {
+    nextOutcome = typeof row.match_outcome === 'string' ? row.match_outcome.trim() || null : null;
+  }
 
   if (typeof logFn === 'function') {
     logFn(JSON.stringify({
@@ -584,15 +619,23 @@ async function refreshOutcomeRow({
       prediction_id: row.$id || null,
       stage: 'outcome-refresh',
       status_short: statusShort,
-      status_long: statusLong,
       current_home_goals: homeGoals,
       current_away_goals: awayGoals,
       fulltime_home_goals: finalHomeGoals,
       fulltime_away_goals: finalAwayGoals,
       match_outcome: nextOutcome,
       final: finalStatus,
+      void: voidStatus,
     }));
   }
+
+  // Backfill team names if missing
+  const teamNamePatch = (!row.home_team_name || !row.away_team_name) ? {
+    home_team_name: row.home_team_name || fixture?.teams?.home?.name || null,
+    away_team_name: row.away_team_name || fixture?.teams?.away?.name || null,
+    home_team_logo_url: row.home_team_logo_url || fixture?.teams?.home?.logo || null,
+    away_team_logo_url: row.away_team_logo_url || fixture?.teams?.away?.logo || null,
+  } : {};
 
   await upsertRow(tablesdb, databaseId, predictionsTable, row.$id, {
     match_status_short: statusShort,
@@ -601,13 +644,14 @@ async function refreshOutcomeRow({
     match_outcome: nextOutcome,
     result_checked_at: now,
     updated_at: now,
+    ...teamNamePatch,
   });
 
-  if (finalStatus) {
+  if (finalStatus || voidStatus) {
     const resultOutcome = nextOutcome || 'void';
-    const resultWinner = resultOutcome === 'void'
+    const resultWinner = (resultOutcome === 'void' || resultOutcome === 'draw')
       ? null
-      : determineOutcome(finalHomeGoals, finalAwayGoals);
+      : resultOutcome;
 
     await upsertResultRow(tablesdb, databaseId, resultsTable, row.fixture_api_id, {
       home_score: toTextNumber(finalHomeGoals ?? homeGoals),
@@ -624,7 +668,7 @@ async function refreshOutcomeRow({
   return {
     updated: true,
     status_short: statusShort,
-    final: finalStatus,
+    final: finalStatus || voidStatus,
     match_outcome: nextOutcome,
     current_home_goals: homeGoals,
     current_away_goals: awayGoals,
@@ -745,6 +789,17 @@ export default async function main({ res, error: reportError }) {
 
     for (const row of outcomeCandidates) {
       const fixture = fixtureMap.get(String(row.fixture_api_id || '').trim()) || null;
+
+      // Backfill team names from live API data if missing on prediction row
+      if (fixture && (!row.home_team_name || !row.away_team_name) && row.$id) {
+        await upsertRow(tablesdb, databaseId, predictionsTable, row.$id, {
+          home_team_name: row.home_team_name || fixture?.teams?.home?.name || null,
+          away_team_name: row.away_team_name || fixture?.teams?.away?.name || null,
+          home_team_logo_url: row.home_team_logo_url || fixture?.teams?.home?.logo || null,
+          away_team_logo_url: row.away_team_logo_url || fixture?.teams?.away?.logo || null,
+          updated_at: isoNow(),
+        });
+      }
       log(JSON.stringify({
         job: 'publish-and-maintain',
         fixture_api_id: row.fixture_api_id || null,

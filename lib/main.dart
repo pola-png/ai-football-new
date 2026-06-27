@@ -4707,77 +4707,86 @@ class _PredictionSocialSection extends StatelessWidget {
 
         return Container(
           width: double.infinity,
-          padding: const EdgeInsets.all(10),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           decoration: BoxDecoration(
             color: _screenSurface(context, elevated: true),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: border),
           ),
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
+              // Community label
+              Text(
+                'Community',
+                style: TextStyle(
+                  color: primaryText,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(width: 6),
+              // Votes
               Expanded(
-                child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: topCounts.isEmpty
+                        ? [
+                            _TinyVerdictChip(
+                              label: 'No votes',
+                              color: secondaryText,
+                            ),
+                          ]
+                        : topCounts.take(3).map((entry) {
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 4),
+                              child: _TinyVerdictChip(
+                                label: '${entry.key} ${entry.value}',
+                                color: const Color(0xFF00D4AA),
+                              ),
+                            );
+                          }).toList(),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              // Notes / comment count
+              Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
+                  Icon(Icons.chat_bubble_outline, size: 13, color: secondaryText),
+                  const SizedBox(width: 3),
                   Text(
-                    'Community',
+                    '${comments.length}',
                     style: TextStyle(
                       color: primaryText,
                       fontSize: 12,
                       fontWeight: FontWeight.w800,
                     ),
                   ),
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: topCounts.isEmpty
-                        ? [
-                            _TinyVerdictChip(
-                              label: 'No votes yet',
-                              color: _secondaryText(context),
-                            ),
-                          ]
-                        : topCounts.take(3).map((entry) {
-                            return _TinyVerdictChip(
-                              label: '${entry.key} ${entry.value}',
-                              color: const Color(0xFF00D4AA),
-                            );
-                          }).toList(),
-                  ),
                 ],
               ),
-              ),
-              const SizedBox(width: 8),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    '${comments.length}',
+              const SizedBox(width: 4),
+              // Open button
+              GestureDetector(
+                onTap: onOpenComments,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF00D4AA).withAlpha(22),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFF00D4AA).withAlpha(60)),
+                  ),
+                  child: Text(
+                    'View',
                     style: TextStyle(
-                      color: primaryText,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w900,
+                      color: _accentText(context),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
-                  Text(
-                    'comments',
-                    style: TextStyle(
-                      color: secondaryText,
-                      fontSize: 10,
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: onOpenComments,
-                    style: TextButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 0),
-                      minimumSize: const Size(0, 28),
-                    ),
-                    child: const Text('Open'),
-                  ),
-                ],
+                ),
               ),
             ],
           ),
