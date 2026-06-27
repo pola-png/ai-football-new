@@ -872,14 +872,16 @@ String _chatLikeRowId({
   required String userId,
 }) {
   final input = '$roomId|$messageId|$userId';
-  var hash = 0xcbf29ce484222325;
-  const prime = 0x100000001b3;
+  var h1 = 0x9dc5812f;
+  var h2 = 0x7e8f4320;
 
-  for (final codeUnit in input.codeUnits) {
-    hash ^= codeUnit;
-    hash = (hash * prime) & 0xFFFFFFFFFFFFFFFF;
+  for (var i = 0; i < input.length; i++) {
+    final c = input.codeUnitAt(i);
+    h1 = ((h1 ^ c) * 0x1000193) & 0xFFFFFFFF;
+    h2 = ((h2 ^ c) * 0x811c9dc5) & 0xFFFFFFFF;
   }
 
-  final hex = hash.toRadixString(16).padLeft(16, '0');
-  return 'cl_${hex.substring(hex.length - 16)}';
+  final hex = (h1.toRadixString(16).padLeft(8, '0')) +
+      (h2.toRadixString(16).padLeft(8, '0'));
+  return 'cl_$hex';
 }
