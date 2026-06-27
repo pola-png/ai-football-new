@@ -351,9 +351,20 @@ function countOddsSignals(oddsRows) {
   return signals;
 }
 
+function isWorldCupCompetitionName(value) {
+  const text = String(value || '').toLowerCase();
+  return (
+    text.includes('world cup') ||
+    text.includes('fifa world cup') ||
+    text.includes("women's world cup") ||
+    text.includes('womens world cup')
+  );
+}
+
 function scoreFixtureForAi({ fixture }) {
   const leagueId = Number(fixture?.league_api_id);
-  const isWorldCup = leagueId === 1;
+  const leagueName = fixture?.league_name || fixture?.name || fixture?.leagueName || '';
+  const isWorldCup = leagueId === 1 || isWorldCupCompetitionName(leagueName);
   const reasons = isWorldCup ? ['world-cup-match'] : ['ai-enabled'];
 
   return {

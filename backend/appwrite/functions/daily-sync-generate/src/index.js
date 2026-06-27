@@ -106,9 +106,25 @@ const POPULAR_LEAGUE_IDS = new Set([
   4, // Euro Championship
 ]);
 
-function popularityBonus(leagueId) {
+const WORLD_CUP_LEAGUE_ID = 1;
+
+function isWorldCupCompetitionName(value) {
+  const text = String(value || "").toLowerCase();
+  return (
+    text.includes("world cup") ||
+    text.includes("fifa world cup") ||
+    text.includes("women's world cup") ||
+    text.includes("womens world cup")
+  );
+}
+
+function popularityBonus(leagueId, leagueName = "") {
   const id = Number(leagueId);
-  return Number.isFinite(id) && POPULAR_LEAGUE_IDS.has(id) ? 30 : 0;
+  if (Number.isFinite(id) && POPULAR_LEAGUE_IDS.has(id)) {
+    return 30;
+  }
+
+  return isWorldCupCompetitionName(leagueName) ? 30 : 0;
 }
 
 function countOddsSignalsLocal(oddsRows) {
@@ -1926,8 +1942,14 @@ export default async function main(context) {
         }
 
         const popularityDiff =
-          popularityBonus(b.fixture?.league?.id) -
-          popularityBonus(a.fixture?.league?.id);
+          popularityBonus(
+            b.fixture?.league?.id,
+            b.fixture?.league?.name,
+          ) -
+          popularityBonus(
+            a.fixture?.league?.id,
+            a.fixture?.league?.name,
+          );
         if (popularityDiff !== 0) {
           return popularityDiff;
         }
@@ -1980,7 +2002,12 @@ export default async function main(context) {
     // Rule A - popular leagues first, even if they exceed the soft cap.
     for (const hour of allHours) {
       for (const item of scoredByHour.get(hour) ?? []) {
-        if (popularityBonus(item.fixture?.league?.id) === 0) {
+        if (
+          popularityBonus(
+            item.fixture?.league?.id,
+            item.fixture?.league?.name,
+          ) === 0
+        ) {
           continue;
         }
 
@@ -2017,7 +2044,9 @@ export default async function main(context) {
         return scoreDiff;
       }
 
-      const popularityDiff = popularityBonus(b.fixture?.league?.id) - popularityBonus(a.fixture?.league?.id);
+      const popularityDiff =
+        popularityBonus(b.fixture?.league?.id, b.fixture?.league?.name) -
+        popularityBonus(a.fixture?.league?.id, a.fixture?.league?.name);
       if (popularityDiff !== 0) {
         return popularityDiff;
       }
@@ -2026,7 +2055,10 @@ export default async function main(context) {
     });
 
     for (const item of remaining) {
-      if (selected.length >= maxFixtures && popularityBonus(item.fixture?.league?.id) === 0) {
+      if (
+        selected.length >= maxFixtures &&
+        popularityBonus(item.fixture?.league?.id, item.fixture?.league?.name) === 0
+      ) {
         break;
       }
       selectItem(item, item.hour);
@@ -2040,10 +2072,13 @@ export default async function main(context) {
     for (const item of selected)
       hourCounts[item.hour] = (hourCounts[item.hour] || 0) + 1;
     const popularCount = selected.filter(
-      (s) => popularityBonus(s.fixture?.league?.id) > 0,
+      (s) =>
+        popularityBonus(s.fixture?.league?.id, s.fixture?.league?.name) > 0,
     ).length;
     const worldCupCount = selected.filter(
-      (s) => Number(s.fixture?.league?.id) === WORLD_CUP_LEAGUE_ID,
+      (s) =>
+        isWorldCupCompetitionName(s.fixture?.league?.name) ||
+        Number(s.fixture?.league?.id) === WORLD_CUP_LEAGUE_ID,
     ).length;
 
     appwriteLog(

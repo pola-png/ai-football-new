@@ -301,9 +301,23 @@ const POPULAR_LEAGUE_IDS = new Set([
 // World Cup league ID
 const WORLD_CUP_LEAGUE_ID = 1;
 
-function popularityBonus(leagueId) {
+function isWorldCupCompetitionName(value) {
+  const text = String(value || "").toLowerCase();
+  return (
+    text.includes("world cup") ||
+    text.includes("fifa world cup") ||
+    text.includes("women's world cup") ||
+    text.includes("womens world cup")
+  );
+}
+
+function popularityBonus(leagueId, leagueName = "") {
   const id = Number(leagueId);
-  return Number.isFinite(id) && POPULAR_LEAGUE_IDS.has(id) ? 30 : 0;
+  if (Number.isFinite(id) && POPULAR_LEAGUE_IDS.has(id)) {
+    return 30;
+  }
+
+  return isWorldCupCompetitionName(leagueName) ? 30 : 0;
 }
 
 function countOddsSignals(oddsRows) {
@@ -333,11 +347,13 @@ function countOddsSignals(oddsRows) {
   return signals;
 }
 
-function scoreFixtureForSync({ oddsRows, h2hRows, leagueId }) {
+function scoreFixtureForSync({ oddsRows, h2hRows, leagueId, leagueName }) {
   // No restrictions - all fixtures qualify
   const h2hCount = Array.isArray(h2hRows) ? h2hRows.length : 0;
   const oddsCount = Array.isArray(oddsRows) ? oddsRows.length : 0;
-  const isWorldCup = Number(leagueId) === WORLD_CUP_LEAGUE_ID;
+  const isWorldCup =
+    Number(leagueId) === WORLD_CUP_LEAGUE_ID ||
+    isWorldCupCompetitionName(leagueName);
 
   let score = 50; // Base score for all fixtures
   const reasons = ["auto-qualified"];
@@ -688,7 +704,9 @@ async function main() {
         away_team_api_id: String(safeAwayTeam.id),
       };
 
-      const isWorldCup = Number(safeLeagueInfo.id) === WORLD_CUP_LEAGUE_ID;
+      const isWorldCup =
+        Number(safeLeagueInfo.id) === WORLD_CUP_LEAGUE_ID ||
+        isWorldCupCompetitionName(safeLeagueInfo.name);
 
       // Get hour for distribution
       const kickoffTime = fixture?.fixture?.date || null;
@@ -714,6 +732,7 @@ async function main() {
         oddsRows: oddsResult.rows || [],
         h2hRows: h2hResult.rows || [],
         leagueId: safeLeagueInfo.id,
+        leagueName: safeLeagueInfo.name,
       });
 
       const fixtureData = {
