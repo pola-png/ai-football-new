@@ -641,12 +641,22 @@ class SocialEngagementService {
       return;
     }
 
-    final likeRowId = '${roomId}_${messageId}_${user.id}';
-    final existing = await _db.getRow(
-      databaseId: appwriteDatabaseId,
-      tableId: appwriteChatMessageLikesTableId,
-      rowId: likeRowId,
-    ).catchError((_) => null);
+    final likeRowId = _chatLikeRowId(
+      roomId: roomId,
+      messageId: messageId,
+      userId: user.id,
+    );
+    final existing = await (() async {
+      try {
+        return await _db.getRow(
+          databaseId: appwriteDatabaseId,
+          tableId: appwriteChatMessageLikesTableId,
+          rowId: likeRowId,
+        );
+      } catch (_) {
+        return null;
+      }
+    })();
 
     if (existing == null) {
       final now = DateTime.now().toUtc().toIso8601String();
@@ -827,4 +837,22 @@ String _formatPickedGroupLabel(DateTime date) {
     return 'Yesterday';
   }
   return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')}';
+}
+
+String _chatLikeRowId({
+  required String roomId,
+  required String messageId,
+  required String userId,
+}) {
+  final input = '$roomId|$messageId|$userId';
+  var hash = 0xcbf29ce484222325;
+  const prime = 0x100000001b3;
+
+  for (final codeUnit in input.codeUnits) {
+    hash ^= codeUnit;
+    hash = (hash * prime) & 0xFFFFFFFFFFFFFFFF;
+  }
+
+  final hex = hash.toRadixString(16).padLeft(16, '0');
+  return 'cl_${hex.substring(hex.length - 16)}';
 }

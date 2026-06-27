@@ -18,28 +18,42 @@ function isWorldCupCompetitionName(value) {
 
 async function deepSeekChat(messages) {
   const baseUrl = (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '');
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${required('DEEPSEEK_API_KEY')}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
-      messages,
-      response_format: {
-        type: 'json_object',
+  const timeout = new AbortController();
+  const timeoutId = setTimeout(() => timeout.abort(new Error('DeepSeek request timed out after 15000ms')), 15000);
+
+  try {
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${required('DEEPSEEK_API_KEY')}`,
+        'Content-Type': 'application/json',
       },
-      temperature: 0.2,
-      max_tokens: 700,
-    }),
-  });
+      signal: timeout.signal,
+      body: JSON.stringify({
+        model: process.env.DEEPSEEK_MODEL || 'deepseek-chat',
+        messages,
+        response_format: {
+          type: 'json_object',
+        },
+        temperature: 0.2,
+        max_tokens: 700,
+      }),
+    });
 
-  if (!response.ok) {
-    throw new Error(`DeepSeek request failed with status ${response.status}`);
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`DeepSeek request failed with status ${response.status}: ${text}`);
+    }
+
+    return response.json();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const wrapped = new Error(`DeepSeek fetch failed for ${baseUrl}/chat/completions: ${message}`);
+    wrapped.cause = error;
+    throw wrapped;
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  return response.json();
 }
 
 function buildPrompt(fixture, oddsRows, h2hRows) {

@@ -22,15 +22,49 @@ function normalizePrivateKey(value) {
   return String(value || '').replace(/\\n/g, '\n').trim();
 }
 
+function cleanJsonText(raw) {
+  let text = String(raw || '').trim();
+
+  if (text.startsWith('```')) {
+    text = text.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+  }
+
+  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+    text = text.slice(1, -1).trim();
+  }
+
+  return text;
+}
+
+function parseServiceAccountJson(rawJson) {
+  const text = cleanJsonText(rawJson);
+  const parsed = JSON.parse(text);
+  return typeof parsed === 'string' ? JSON.parse(cleanJsonText(parsed)) : parsed;
+}
+
 function buildServiceAccount() {
   if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-    const parsed = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+    const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+    logStep('firebase.service_account.preview', {
+      source: 'json',
+      rawLength: String(raw || '').length,
+      rawPreview: String(raw || '').slice(0, 120),
+    });
+
+    const parsed = parseServiceAccountJson(raw);
     return {
       projectId: parsed.projectId ?? parsed.project_id,
       clientEmail: parsed.clientEmail ?? parsed.client_email,
       privateKey: normalizePrivateKey(parsed.privateKey ?? parsed.private_key),
     };
   }
+
+  logStep('firebase.service_account.preview', {
+    source: 'split-env',
+    hasProjectId: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_PROJECT_ID),
+    hasClientEmail: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_CLIENT_EMAIL),
+    hasPrivateKey: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_PRIVATE_KEY),
+  });
 
   return {
     projectId: required('FIREBASE_SERVICE_ACCOUNT_PROJECT_ID'),

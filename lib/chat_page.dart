@@ -268,9 +268,14 @@ class _ChatPageState extends State<ChatPage> {
                     stream: SocialEngagementService.instance.watchChatMessages(roomId: appwriteChatRoomId),
                     builder: (context, snapshot) {
                       final messages = snapshot.data ?? const <ChatMessageRecord>[];
-                      final rootMessages = messages.where((message) => message.parentMessageId == null).toList()
-                        ..sort((left, right) => (right.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0))
-                            .compareTo(left.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0)));
+                      final rootMessages = messages
+                          .where((message) => message.parentMessageId == null)
+                          .toList()
+                        ..sort((left, right) {
+                          final leftTime = left.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+                          final rightTime = right.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+                          return leftTime.compareTo(rightTime);
+                        });
 
                       final repliesByParent = <String, List<ChatMessageRecord>>{};
                       for (final message in messages) {
@@ -279,6 +284,14 @@ class _ChatPageState extends State<ChatPage> {
                           continue;
                         }
                         repliesByParent.putIfAbsent(parentId, () => <ChatMessageRecord>[]).add(message);
+                      }
+
+                      for (final replies in repliesByParent.values) {
+                        replies.sort((left, right) {
+                          final leftTime = left.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+                          final rightTime = right.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+                          return leftTime.compareTo(rightTime);
+                        });
                       }
 
                       return RefreshIndicator(
