@@ -1841,14 +1841,12 @@ export default async function main(context) {
     // Each hour runs concurrently. Within each hour fixtures are scored in
     // batches of 10 to keep API calls manageable.
     // Popular-league fixtures (POPULAR_LEAGUE_IDS) always get a +30 bonus.
-
-    async function scoreOneFixture(f) {
+    async function scoreOneFixtureSafe(f) {
       const fixtureId = String(f?.fixture?.id ?? "");
-      const homeId = String(f?.teams?.home?.id ?? "");
-      const awayId = String(f?.teams?.away?.id ?? "");
       const leagueId = f?.league?.id ?? null;
       let oddsRows = [];
-      let h2hFixtures = [];
+      const h2hFixtures = [];
+
       try {
         const oddsPayload = await fetchApiFootballJson("/odds", {
           fixture: fixtureId,
@@ -1861,28 +1859,25 @@ export default async function main(context) {
             : []) {
             for (const bet of Array.isArray(bk?.bets) ? bk.bets : []) {
               for (const val of Array.isArray(bet?.values) ? bet.values : []) {
-                if (val?.value != null)
+                if (val?.value != null) {
                   oddsRows.push({
                     market_name: bet?.name,
                     selection_name: String(val.value),
                   });
+                }
               }
             }
           }
         }
-        h2hFixtures = Array.isArray(h2hPayload?.response)
-          ? h2hPayload.response
-          : [];
       } catch (_) {
-        return null; // API error — skip this fixture
+        oddsRows = [];
       }
+
       const { score, reasons } = scoreFixture({
         oddsRows,
         leagueId,
       });
-      if (h2hFixtures.length === 0) {
-        reasons.push("no-h2h-available");
-      }
+
       return { fixture: f, score, reasons, oddsRows, h2hFixtures };
     }
 
@@ -1891,8 +1886,25 @@ export default async function main(context) {
       const results = [];
       for (let i = 0; i < hourFixtures.length; i += BATCH) {
         const batch = hourFixtures.slice(i, i + BATCH);
-        const batchResults = await Promise.all(batch.map(scoreOneFixture));
-        for (const r of batchResults) if (r != null) results.push(r);
+        const batchResults = await Promise.all(
+          batch.map(async (fixture) => {
+            const result = await scoreOneFixtureSafe(fixture);
+            return (
+              result ?? {
+                fixture,
+                score: 0,
+                reasons: ['scoring-fallback'],
+                oddsRows: [],
+                h2hFixtures: [],
+              }
+            );
+          }),
+        );
+        for (const r of batchResults) {
+          if (r != null) {
+            results.push(r);
+          }
+        }
       }
       return results;
     }
@@ -2290,3 +2302,4 @@ export default async function main(context) {
     throw error;
   }
 }
+

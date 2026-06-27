@@ -530,7 +530,6 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
             );
           },
           onLogout: () async {
-            await AdminAccessService.instance.revoke();
             await AppAuthService.instance.signOut();
           },
         ),
@@ -3264,7 +3263,6 @@ class _PolicyPageStatefulState extends State<_PolicyPageStateful> {
               const SizedBox(width: 12),
               GestureDetector(
                 onTap: () async {
-                  await AdminAccessService.instance.revoke();
                   if (!context.mounted) {
                     return;
                   }
