@@ -104,7 +104,6 @@ class SocialEngagementService {
       'points': _asInt(existing?.data['points']),
       'coins': _asInt(existing?.data['coins']),
       'streak_days': _asString(existing?.data['streak_days']) ?? '0',
-      'is_admin': existing?.data['is_admin'] ?? false,
       'last_checkin_at': existing?.data['last_checkin_at'],
       'created_at': existing?.data['created_at'] ?? now,
       'updated_at': now,

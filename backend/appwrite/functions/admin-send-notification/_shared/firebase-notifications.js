@@ -1,5 +1,4 @@
-const { getApps, initializeApp, cert } = require('firebase-admin/app');
-const { getMessaging } = require('firebase-admin/messaging');
+const crypto = require('crypto');
 
 function logStep(step, details = {}) {
   console.log(JSON.stringify({
@@ -20,7 +19,7 @@ function required(name) {
 }
 
 function normalizePrivateKey(value) {
-  return String(value || '').replace(/\\n/g, '\n');
+  return String(value || '').replace(/\\n/g, '\n').trim();
 }
 
 function buildServiceAccount() {
@@ -40,25 +39,66 @@ function buildServiceAccount() {
   };
 }
 
-function getFirebaseMessaging() {
-  if (!getApps().length) {
-    logStep('firebase.initialize.start', {
-      hasProjectId: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_PROJECT_ID),
-      hasClientEmail: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_CLIENT_EMAIL),
-      hasPrivateKey: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_PRIVATE_KEY),
-      hasServiceAccountJson: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON),
-    });
+function base64UrlEncode(input) {
+  return Buffer.from(input)
+    .toString('base64')
+    .replace(/=/g, '')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_');
+}
 
-    initializeApp({
-      credential: cert(buildServiceAccount()),
-    });
+function signJwt(payload, privateKey) {
+  const header = {
+    alg: 'RS256',
+    typ: 'JWT',
+  };
 
-    logStep('firebase.initialize.success', {
-      appCount: getApps().length,
-    });
+  const encodedHeader = base64UrlEncode(JSON.stringify(header));
+  const encodedPayload = base64UrlEncode(JSON.stringify(payload));
+  const signingInput = `${encodedHeader}.${encodedPayload}`;
+  const signer = crypto.createSign('RSA-SHA256');
+  signer.update(signingInput);
+  signer.end();
+
+  const signature = signer.sign(privateKey);
+  return `${signingInput}.${base64UrlEncode(signature)}`;
+}
+
+async function getAccessToken(serviceAccount) {
+  const now = Math.floor(Date.now() / 1000);
+  const jwt = signJwt(
+    {
+      iss: serviceAccount.clientEmail,
+      scope: 'https://www.googleapis.com/auth/firebase.messaging',
+      aud: 'https://oauth2.googleapis.com/token',
+      iat: now,
+      exp: now + 3600,
+    },
+    serviceAccount.privateKey,
+  );
+
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: jwt,
+    }),
+  });
+
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`OAuth token request failed with status ${response.status}: ${text}`);
   }
 
-  return getMessaging();
+  const parsed = JSON.parse(text);
+  if (!parsed.access_token) {
+    throw new Error('OAuth token response did not include access_token.');
+  }
+
+  return parsed.access_token;
 }
 
 async function sendPredictionTopicNotification({
@@ -71,40 +111,77 @@ async function sendPredictionTopicNotification({
     throw new Error('Missing Firebase topic id.');
   }
 
-  logStep('firebase.messaging.send.start', {
+  const serviceAccount = buildServiceAccount();
+  logStep('firebase.token.request.start', {
+    projectId: serviceAccount.projectId,
     topicId,
     title,
     bodyLength: String(body || '').length,
     dataKeys: Object.keys(data || {}),
   });
 
-  const messaging = getFirebaseMessaging();
-  const messageId = await messaging.send({
-    topic: topicId,
-    notification: {
-      title,
-      body,
-    },
-    data: Object.fromEntries(
-      Object.entries(data).map(([key, value]) => [key, String(value ?? '')]),
-    ),
-    android: {
-      priority: 'high',
+  const accessToken = await getAccessToken(serviceAccount);
+
+  logStep('firebase.token.request.success', {
+    projectId: serviceAccount.projectId,
+    topicId,
+    tokenLength: accessToken.length,
+  });
+
+  const message = {
+    message: {
+      topic: topicId,
       notification: {
-        channelId: 'appwrite_predictions',
+        title,
+        body,
+      },
+      data: Object.fromEntries(
+        Object.entries(data).map(([key, value]) => [key, String(value ?? '')]),
+      ),
+      android: {
+        priority: 'high',
+        notification: {
+          channel_id: 'appwrite_predictions',
+        },
       },
     },
-  });
+  };
 
-  logStep('firebase.messaging.send.success', {
+  logStep('firebase.send.request.start', {
+    projectId: serviceAccount.projectId,
     topicId,
-    messageId,
+    payloadKeys: Object.keys(message.message || {}),
   });
 
-  return messageId;
+  const response = await fetch(
+    `https://fcm.googleapis.com/v1/projects/${serviceAccount.projectId}/messages:send`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(message),
+    },
+  );
+
+  const responseText = await response.text();
+  if (!response.ok) {
+    throw new Error(
+      `FCM request failed with status ${response.status}: ${responseText}`,
+    );
+  }
+
+  const parsed = JSON.parse(responseText);
+  logStep('firebase.send.request.success', {
+    projectId: serviceAccount.projectId,
+    topicId,
+    name: parsed.name || null,
+  });
+
+  return parsed.name || responseText;
 }
 
 module.exports = {
-  getFirebaseMessaging,
   sendPredictionTopicNotification,
 };

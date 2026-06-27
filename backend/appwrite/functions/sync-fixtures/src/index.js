@@ -1,4 +1,4 @@
-const { Client, TablesDB, ID } = require('node-appwrite');
+const { Client, TablesDB, ID } = require("node-appwrite");
 
 function required(name) {
   const value = process.env[name];
@@ -12,24 +12,27 @@ function buildClient() {
   const client = new Client();
 
   client
-    .setEndpoint(required('APPWRITE_FUNCTION_ENDPOINT'))
-    .setProject(required('APPWRITE_FUNCTION_PROJECT_ID'))
-    .setKey(required('APPWRITE_FUNCTION_API_KEY'));
+    .setEndpoint(required("APPWRITE_FUNCTION_ENDPOINT"))
+    .setProject(required("APPWRITE_FUNCTION_PROJECT_ID"))
+    .setKey(required("APPWRITE_FUNCTION_API_KEY"));
 
   return client;
 }
 
 function buildApiFootballHeaders() {
   return {
-    'x-apisports-key': required('API_FOOTBALL_KEY'),
-    'x-apisports-host': process.env.API_FOOTBALL_HOST || 'v3.football.api-sports.io',
+    "x-apisports-key": required("API_FOOTBALL_KEY"),
+    "x-apisports-host":
+      process.env.API_FOOTBALL_HOST || "v3.football.api-sports.io",
   };
 }
 
 function buildApiFootballUrl(path, query = {}) {
-  const url = new URL(`${required('API_FOOTBALL_BASE_URL').replace(/\/$/, '')}${path}`);
+  const url = new URL(
+    `${required("API_FOOTBALL_BASE_URL").replace(/\/$/, "")}${path}`,
+  );
   for (const [key, value] of Object.entries(query)) {
-    if (value != null && String(value).trim() !== '') {
+    if (value != null && String(value).trim() !== "") {
       url.searchParams.set(key, String(value));
     }
   }
@@ -42,18 +45,22 @@ async function fetchApiFootballJson(path, query = {}) {
   });
 
   if (!response.ok) {
-    throw new Error(`API-Football request failed with status ${response.status}`);
+    throw new Error(
+      `API-Football request failed with status ${response.status}`,
+    );
   }
 
   return response.json();
 }
 
 function safeIdPart(value) {
-  return String(value ?? '')
-    .trim()
-    .replace(/[^a-zA-Z0-9_-]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 80) || 'item';
+  return (
+    String(value ?? "")
+      .trim()
+      .replace(/[^a-zA-Z0-9_-]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 80) || "item"
+  );
 }
 
 function isoNow() {
@@ -61,18 +68,20 @@ function isoNow() {
 }
 
 function lagosDate(offsetDays = 0) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Africa/Lagos',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Lagos",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
   }).formatToParts(new Date());
   const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  const base = new Date(Date.UTC(Number(map.year), Number(map.month) - 1, Number(map.day)));
+  const base = new Date(
+    Date.UTC(Number(map.year), Number(map.month) - 1, Number(map.day)),
+  );
   base.setUTCDate(base.getUTCDate() + offsetDays);
   const year = base.getUTCFullYear();
-  const month = String(base.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(base.getUTCDate()).padStart(2, '0');
+  const month = String(base.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(base.getUTCDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 
@@ -115,7 +124,7 @@ function pickFixture(fixture, league, homeTeam, awayTeam) {
     season: String(league.season),
     round: fixture.league?.round || null,
     kickoff_at: fixture.fixture?.date || null,
-    status_short: fixture.fixture?.status?.short || 'NS',
+    status_short: fixture.fixture?.status?.short || "NS",
     status_long: fixture.fixture?.status?.long || null,
     home_team_api_id: String(homeTeam.id),
     away_team_api_id: String(awayTeam.id),
@@ -135,7 +144,7 @@ function toTextNumber(value) {
     return null;
   }
 
-  if (typeof value === 'number') {
+  if (typeof value === "number") {
     return Number.isNaN(value) ? null : String(value);
   }
 
@@ -148,40 +157,40 @@ function determineWinnerLabel(historicalFixture) {
   const awayWinner = historicalFixture?.teams?.away?.winner;
 
   if (homeWinner === true) {
-    return 'home';
+    return "home";
   }
 
   if (awayWinner === true) {
-    return 'away';
+    return "away";
   }
 
   const homeGoals = historicalFixture?.goals?.home;
   const awayGoals = historicalFixture?.goals?.away;
-  if (typeof homeGoals === 'number' && typeof awayGoals === 'number') {
+  if (typeof homeGoals === "number" && typeof awayGoals === "number") {
     if (homeGoals > awayGoals) {
-      return 'home';
+      return "home";
     }
     if (awayGoals > homeGoals) {
-      return 'away';
+      return "away";
     }
-    return 'draw';
+    return "draw";
   }
 
   return null;
 }
 
 function buildTeamPairKey(homeTeamId, awayTeamId) {
-  const home = String(homeTeamId || '').trim();
-  const away = String(awayTeamId || '').trim();
+  const home = String(homeTeamId || "").trim();
+  const away = String(awayTeamId || "").trim();
   if (!home || !away) {
     return null;
   }
 
-  return [home, away].sort().join('-');
+  return [home, away].sort().join("-");
 }
 
 function parsePositiveInteger(value, fallback) {
-  const parsed = Number.parseInt(String(value ?? ''), 10);
+  const parsed = Number.parseInt(String(value ?? ""), 10);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     return fallback;
   }
@@ -189,9 +198,14 @@ function parsePositiveInteger(value, fallback) {
 }
 
 function getH2hSeasonRange(fixtureSeason) {
-  const historyYears = parsePositiveInteger(process.env.H2H_HISTORY_YEARS || '7', 7);
-  const currentSeason = Number.parseInt(String(fixtureSeason || '').trim(), 10);
-  const anchorYear = Number.isFinite(currentSeason) ? currentSeason : new Date().getFullYear();
+  const historyYears = parsePositiveInteger(
+    process.env.H2H_HISTORY_YEARS || "7",
+    7,
+  );
+  const currentSeason = Number.parseInt(String(fixtureSeason || "").trim(), 10);
+  const anchorYear = Number.isFinite(currentSeason)
+    ? currentSeason
+    : new Date().getFullYear();
   const startYear = Math.max(1900, anchorYear - historyYears + 1);
   const seasons = [];
 
@@ -202,10 +216,17 @@ function getH2hSeasonRange(fixtureSeason) {
   return seasons;
 }
 
-async function fetchCachedH2HRowsForPair(tablesdb, databaseId, h2hTable, fixtureApiId, homeTeamId, awayTeamId) {
+async function fetchCachedH2HRowsForPair(
+  tablesdb,
+  databaseId,
+  h2hTable,
+  fixtureApiId,
+  homeTeamId,
+  awayTeamId,
+) {
   const currentFixtureRows = await fetchRows(tablesdb, databaseId, h2hTable, [
-    Query.equal('current_fixture_api_id', String(fixtureApiId)),
-    Query.orderAsc('$createdAt'),
+    Query.equal("current_fixture_api_id", String(fixtureApiId)),
+    Query.orderAsc("$createdAt"),
   ]);
 
   const pairKey = buildTeamPairKey(homeTeamId, awayTeamId);
@@ -214,13 +235,13 @@ async function fetchCachedH2HRowsForPair(tablesdb, databaseId, h2hTable, fixture
   }
 
   const pairRows = await fetchRows(tablesdb, databaseId, h2hTable, [
-    Query.equal('pair_key', pairKey),
-    Query.orderAsc('$createdAt'),
+    Query.equal("pair_key", pairKey),
+    Query.orderAsc("$createdAt"),
   ]);
 
   const rowsByHistoricalId = new Map();
   for (const row of [...currentFixtureRows, ...pairRows]) {
-    const key = String(row?.historical_fixture_api_id || row?.$id || '').trim();
+    const key = String(row?.historical_fixture_api_id || row?.$id || "").trim();
     if (!key || rowsByHistoricalId.has(key)) {
       continue;
     }
@@ -259,22 +280,22 @@ function compactH2HRow(row) {
 
 // Top leagues by API-Football ID that get a popularity bonus
 const POPULAR_LEAGUE_IDS = new Set([
-  39,   // Premier League
-  140,  // La Liga
-  135,  // Serie A
-  78,   // Bundesliga
-  61,   // Ligue 1
-  94,   // Primeira Liga
-  88,   // Eredivisie
-  203,  // Super Lig
-  144,  // Jupiler Pro League
-  71,   // Brasileirao
-  128,  // Argentine Primera Division
-  2,    // UEFA Champions League
-  3,    // UEFA Europa League
-  848,  // UEFA Conference League
-  1,    // World Cup
-  4,    // Euro Championship
+  39, // Premier League
+  140, // La Liga
+  135, // Serie A
+  78, // Bundesliga
+  61, // Ligue 1
+  94, // Primeira Liga
+  88, // Eredivisie
+  203, // Super Lig
+  144, // Jupiler Pro League
+  71, // Brasileirao
+  128, // Argentine Primera Division
+  2, // UEFA Champions League
+  3, // UEFA Europa League
+  848, // UEFA Conference League
+  1, // World Cup
+  4, // Euro Championship
 ]);
 
 // World Cup league ID
@@ -290,20 +311,20 @@ function countOddsSignals(oddsRows) {
   let signals = 0;
 
   for (const row of rows) {
-    const market = String(row?.market_name || '').toLowerCase();
-    const selection = String(row?.selection_name || '').toLowerCase();
+    const market = String(row?.market_name || "").toLowerCase();
+    const selection = String(row?.selection_name || "").toLowerCase();
     if (
-      market.includes('over') ||
-      market.includes('under') ||
-      market.includes('btts') ||
-      market.includes('both teams') ||
-      market.includes('double chance') ||
-      market.includes('corner') ||
-      market.includes('throw') ||
-      selection.includes('over') ||
-      selection.includes('under') ||
-      selection.includes('yes') ||
-      selection.includes('no')
+      market.includes("over") ||
+      market.includes("under") ||
+      market.includes("btts") ||
+      market.includes("both teams") ||
+      market.includes("double chance") ||
+      market.includes("corner") ||
+      market.includes("throw") ||
+      selection.includes("over") ||
+      selection.includes("under") ||
+      selection.includes("yes") ||
+      selection.includes("no")
     ) {
       signals += 1;
     }
@@ -319,22 +340,22 @@ function scoreFixtureForSync({ oddsRows, h2hRows, leagueId }) {
   const isWorldCup = Number(leagueId) === WORLD_CUP_LEAGUE_ID;
 
   let score = 50; // Base score for all fixtures
-  const reasons = ['auto-qualified'];
+  const reasons = ["auto-qualified"];
 
   // Add bonus points but don't restrict
   if (isWorldCup) {
     score += 100;
-    reasons.push('world-cup');
+    reasons.push("world-cup");
   }
 
   if (h2hCount > 0) {
     score += h2hCount * 5; // More H2H = higher score
-    reasons.push('has-h2h');
+    reasons.push("has-h2h");
   }
 
   if (oddsCount > 0) {
     score += 20;
-    reasons.push('has-odds');
+    reasons.push("has-odds");
   }
 
   return {
@@ -350,11 +371,11 @@ async function fetchFixtureH2HHistory({
   databaseId,
   h2hTable,
 }) {
-  const fixtureApiId = String(fixture.api_fixture_id || '').trim();
-  const homeTeamId = String(fixture.home_team_api_id || '').trim();
-  const awayTeamId = String(fixture.away_team_api_id || '').trim();
-  const leagueId = String(fixture.league_api_id || '').trim();
-  const season = String(fixture.season || '').trim();
+  const fixtureApiId = String(fixture.api_fixture_id || "").trim();
+  const homeTeamId = String(fixture.home_team_api_id || "").trim();
+  const awayTeamId = String(fixture.away_team_api_id || "").trim();
+  const leagueId = String(fixture.league_api_id || "").trim();
+  const season = String(fixture.season || "").trim();
   const pairKey = buildTeamPairKey(homeTeamId, awayTeamId);
 
   // Always return something, even if data is missing
@@ -363,18 +384,25 @@ async function fetchFixtureH2HHistory({
   }
 
   // Continue even if team IDs are missing - use fallbacks
-  const safeHomeTeamId = homeTeamId || 'home_unknown';
-  const safeAwayTeamId = awayTeamId || 'away_unknown';
+  const safeHomeTeamId = homeTeamId || "home_unknown";
+  const safeAwayTeamId = awayTeamId || "away_unknown";
 
   const now = isoNow();
   const targetSeasons = getH2hSeasonRange(season);
-  const cachedRows = await fetchCachedH2HRowsForPair(tablesdb, databaseId, h2hTable, fixtureApiId, homeTeamId, awayTeamId);
-  const existingSeasons = new Set(
-    cachedRows
-      .map((row) => String(row?.season || '').trim())
-      .filter(Boolean),
+  const cachedRows = await fetchCachedH2HRowsForPair(
+    tablesdb,
+    databaseId,
+    h2hTable,
+    fixtureApiId,
+    homeTeamId,
+    awayTeamId,
   );
-  const missingSeasons = targetSeasons.filter((seasonYear) => !existingSeasons.has(String(seasonYear)));
+  const existingSeasons = new Set(
+    cachedRows.map((row) => String(row?.season || "").trim()).filter(Boolean),
+  );
+  const missingSeasons = targetSeasons.filter(
+    (seasonYear) => !existingSeasons.has(String(seasonYear)),
+  );
   const rows = [...cachedRows];
   let saved = 0;
 
@@ -389,14 +417,19 @@ async function fetchFixtureH2HHistory({
     const requestQuery = {
       h2h: `${homeTeamId}-${awayTeamId}`,
       season: String(seasonYear),
-      last: '20',
+      last: "20",
     };
     if (leagueId) {
       requestQuery.league = leagueId;
     }
 
-    const payload = await fetchApiFootballJson('/fixtures/headtohead', requestQuery);
-    const historicalFixtures = Array.isArray(payload?.response) ? payload.response : [];
+    const payload = await fetchApiFootballJson(
+      "/fixtures/headtohead",
+      requestQuery,
+    );
+    const historicalFixtures = Array.isArray(payload?.response)
+      ? payload.response
+      : [];
 
     for (const historicalFixture of historicalFixtures) {
       const historicalFixtureApiId = historicalFixture?.fixture?.id ?? null;
@@ -405,22 +438,31 @@ async function fetchFixtureH2HHistory({
       }
 
       const historicalFixtureId = String(historicalFixtureApiId);
-      const seasonLabel = String(historicalFixture?.league?.season ?? seasonYear);
+      const seasonLabel = String(
+        historicalFixture?.league?.season ?? seasonYear,
+      );
       const compositeHistoricalId = `${pairKey || fixtureApiId}_${seasonLabel}_${historicalFixtureId}`;
       rows.push({
         rowId: `h2h_${safeIdPart(pairKey || fixtureApiId)}_${safeIdPart(seasonLabel)}_${safeIdPart(historicalFixtureId)}`,
         data: {
           current_fixture_api_id: fixtureApiId,
           historical_fixture_api_id: compositeHistoricalId,
-          home_team_api_id: String(historicalFixture?.teams?.home?.id ?? homeTeamId),
-          away_team_api_id: String(historicalFixture?.teams?.away?.id ?? awayTeamId),
+          home_team_api_id: String(
+            historicalFixture?.teams?.home?.id ?? homeTeamId,
+          ),
+          away_team_api_id: String(
+            historicalFixture?.teams?.away?.id ?? awayTeamId,
+          ),
           pair_key: pairKey,
           kickoff_at: historicalFixture?.fixture?.date || null,
           home_score: toTextNumber(historicalFixture?.goals?.home),
           away_score: toTextNumber(historicalFixture?.goals?.away),
           winner: determineWinnerLabel(historicalFixture),
-          status_short: historicalFixture?.fixture?.status?.short || 'NS',
-          league_api_id: historicalFixture?.league?.id != null ? String(historicalFixture.league.id) : null,
+          status_short: historicalFixture?.fixture?.status?.short || "NS",
+          league_api_id:
+            historicalFixture?.league?.id != null
+              ? String(historicalFixture.league.id)
+              : null,
           season: seasonLabel,
           created_at: now,
           updated_at: now,
@@ -441,17 +483,15 @@ async function fetchFixtureH2HHistory({
   };
 }
 
-async function fetchFixtureOdds({
-  fixture,
-}) {
-  const fixtureApiId = String(fixture.api_fixture_id || '').trim();
+async function fetchFixtureOdds({ fixture }) {
+  const fixtureApiId = String(fixture.api_fixture_id || "").trim();
 
   // Always return something, even if no fixtureApiId
   if (!fixtureApiId) {
     return { saved: 0, rows: [] };
   }
 
-  const payload = await fetchApiFootballJson('/odds', {
+  const payload = await fetchApiFootballJson("/odds", {
     fixture: fixtureApiId,
   });
 
@@ -460,13 +500,16 @@ async function fetchFixtureOdds({
   const rows = [];
 
   for (const fixtureOdds of fixtures) {
-    const bookmakers = Array.isArray(fixtureOdds?.bookmakers) ? fixtureOdds.bookmakers : [];
+    const bookmakers = Array.isArray(fixtureOdds?.bookmakers)
+      ? fixtureOdds.bookmakers
+      : [];
     for (const bookmaker of bookmakers) {
       const bets = Array.isArray(bookmaker?.bets) ? bookmaker.bets : [];
       for (const bet of bets) {
         const values = Array.isArray(bet?.values) ? bet.values : [];
         for (const value of values) {
-          const selectionName = value?.value != null ? String(value.value) : null;
+          const selectionName =
+            value?.value != null ? String(value.value) : null;
           if (!selectionName) {
             continue;
           }
@@ -476,12 +519,19 @@ async function fetchFixtureOdds({
             data: {
               fixture_api_id: fixtureApiId,
               bookmaker_name: bookmaker?.name || null,
-              bookmaker_api_id: bookmaker?.id != null ? String(bookmaker.id) : null,
+              bookmaker_api_id:
+                bookmaker?.id != null ? String(bookmaker.id) : null,
               market_name: bet?.name || null,
               selection_name: selectionName,
               odd_value: toTextNumber(value?.odd),
-              line_value: value?.handicap != null ? String(value.handicap) : (value?.value != null ? String(value.value) : null),
-              last_update_at: bookmaker?.last_update || fixtureOdds?.update || null,
+              line_value:
+                value?.handicap != null
+                  ? String(value.handicap)
+                  : value?.value != null
+                    ? String(value.value)
+                    : null,
+              last_update_at:
+                bookmaker?.last_update || fixtureOdds?.update || null,
               created_at: now,
               updated_at: now,
             },
@@ -513,7 +563,10 @@ async function upsertRow(tablesdb, databaseId, tableId, rowId, data) {
       data,
     });
   } catch (error) {
-    if (String(error?.code) !== '404' && !String(error?.message || '').includes('Row not found')) {
+    if (
+      String(error?.code) !== "404" &&
+      !String(error?.message || "").includes("Row not found")
+    ) {
       throw error;
     }
     return tablesdb.createRow({
@@ -538,30 +591,37 @@ async function main() {
   const client = buildClient();
   const tablesdb = new TablesDB(client);
 
-  const databaseId = required('APPWRITE_DATABASE_ID');
-  const teamsTable = required('APPWRITE_TABLE_TEAMS');
-  const leaguesTable = required('APPWRITE_TABLE_LEAGUES');
-  const fixturesTable = required('APPWRITE_TABLE_FIXTURES');
-  const oddsTable = required('APPWRITE_TABLE_FIXTURE_ODDS');
-  const h2hTable = required('APPWRITE_TABLE_FIXTURE_H2H_HISTORY');
-  const syncRunsTable = required('APPWRITE_TABLE_SYNC_RUNS');
+  const databaseId = required("APPWRITE_DATABASE_ID");
+  const teamsTable = required("APPWRITE_TABLE_TEAMS");
+  const leaguesTable = required("APPWRITE_TABLE_LEAGUES");
+  const fixturesTable = required("APPWRITE_TABLE_FIXTURES");
+  const oddsTable = required("APPWRITE_TABLE_FIXTURE_ODDS");
+  const h2hTable = required("APPWRITE_TABLE_FIXTURE_H2H_HISTORY");
+  const syncRunsTable = required("APPWRITE_TABLE_SYNC_RUNS");
 
-  const league = process.env.API_FOOTBALL_LEAGUE ? Number(process.env.API_FOOTBALL_LEAGUE) : null;
-  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(1);
+  const league = process.env.API_FOOTBALL_LEAGUE
+    ? Number(process.env.API_FOOTBALL_LEAGUE)
+    : null;
+  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(0);
 
-  const url = new URL(`${required('API_FOOTBALL_BASE_URL').replace(/\/$/, '')}/fixtures`);
-  url.searchParams.set('date', fetchDate);
+  const url = new URL(
+    `${required("API_FOOTBALL_BASE_URL").replace(/\/$/, "")}/fixtures`,
+  );
+  url.searchParams.set("date", fetchDate);
   if (league) {
-    url.searchParams.set('league', String(league));
+    url.searchParams.set("league", String(league));
   }
 
   const startedAt = isoNow();
-  const syncRunId = `sync_${new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)}`;
+  const syncRunId = `sync_${new Date()
+    .toISOString()
+    .replace(/[-:TZ.]/g, "")
+    .slice(0, 14)}`;
   let itemsSaved = 0;
   let h2hPassedCount = 0;
   let scorePassedCount = 0;
   let h2hSkippedCount = 0;
-  const minimumH2hRows = Number.parseInt(process.env.H2H_MIN_ROWS || '2', 10);
+  const minimumH2hRows = Number.parseInt(process.env.H2H_MIN_ROWS || "2", 10);
 
   try {
     const response = await fetch(url.toString(), {
@@ -569,19 +629,23 @@ async function main() {
     });
 
     if (!response.ok) {
-      throw new Error(`API-Football request failed with status ${response.status}`);
+      throw new Error(
+        `API-Football request failed with status ${response.status}`,
+      );
     }
 
     const payload = await response.json();
     const fixtures = Array.isArray(payload?.response) ? payload.response : [];
 
-    console.log(JSON.stringify({
-      job: 'sync-fixtures',
-      stage: 'fixtures-fetched',
-      fetched: fixtures.length,
-      date: fetchDate,
-      league: league || null,
-    }));
+    console.log(
+      JSON.stringify({
+        job: "sync-fixtures",
+        stage: "fixtures-fetched",
+        fetched: fixtures.length,
+        date: fetchDate,
+        league: league || null,
+      }),
+    );
 
     // Process ALL fixtures without any restrictions
     const allFixtures = [];
@@ -594,19 +658,27 @@ async function main() {
 
       // Only skip if absolutely essential data is missing
       if (!fixtureApiId) {
-        console.log(JSON.stringify({
-          job: 'sync-fixtures',
-          stage: 'fixture-skip',
-          reason: 'missing-fixture-id',
-          fixture: fixture
-        }));
+        console.log(
+          JSON.stringify({
+            job: "sync-fixtures",
+            stage: "fixture-skip",
+            reason: "missing-fixture-id",
+            fixture: fixture,
+          }),
+        );
         continue;
       }
 
       // Use fallback values for missing data instead of skipping
-      const safeLeagueInfo = leagueInfo || { id: 'unknown', season: '2024' };
-      const safeHomeTeam = homeTeam || { id: 'home_unknown', name: 'Home Team' };
-      const safeAwayTeam = awayTeam || { id: 'away_unknown', name: 'Away Team' };
+      const safeLeagueInfo = leagueInfo || { id: "unknown", season: "2024" };
+      const safeHomeTeam = homeTeam || {
+        id: "home_unknown",
+        name: "Home Team",
+      };
+      const safeAwayTeam = awayTeam || {
+        id: "away_unknown",
+        name: "Away Team",
+      };
 
       const fixtureStub = {
         api_fixture_id: String(fixtureApiId),
@@ -669,13 +741,15 @@ async function main() {
     let selectedCount;
     if (totalAvailable < minRequired) {
       selectedCount = totalAvailable; // Take all available
-      console.log(JSON.stringify({
-        job: 'sync-fixtures',
-        stage: 'insufficient-fixtures',
-        available: totalAvailable,
-        required: minRequired,
-        message: `Only ${totalAvailable} fixtures available, less than required ${minRequired}`
-      }));
+      console.log(
+        JSON.stringify({
+          job: "sync-fixtures",
+          stage: "insufficient-fixtures",
+          available: totalAvailable,
+          required: minRequired,
+          message: `Only ${totalAvailable} fixtures available, less than required ${minRequired}`,
+        }),
+      );
     } else if (totalAvailable > maxAllowed) {
       selectedCount = maxAllowed; // Cap at maximum
     } else {
@@ -684,27 +758,43 @@ async function main() {
 
     const finalSelectedFixtures = allFixtures.slice(0, selectedCount);
 
-    console.log(JSON.stringify({
-      job: 'sync-fixtures',
-      stage: 'fixtures-selected',
-      total_fetched: fixtures.length,
-      total_processed: allFixtures.length,
-      world_cup_count: allFixtures.filter(f => f.isWorldCup).length,
-      with_h2h_count: allFixtures.filter(f => f.hasH2h).length,
-      final_selected: finalSelectedFixtures.length,
-      minimum_required: minRequired,
-      maximum_allowed: maxAllowed,
-    }));
+    console.log(
+      JSON.stringify({
+        job: "sync-fixtures",
+        stage: "fixtures-selected",
+        total_fetched: fixtures.length,
+        total_processed: allFixtures.length,
+        world_cup_count: allFixtures.filter((f) => f.isWorldCup).length,
+        with_h2h_count: allFixtures.filter((f) => f.hasH2h).length,
+        final_selected: finalSelectedFixtures.length,
+        minimum_required: minRequired,
+        maximum_allowed: maxAllowed,
+      }),
+    );
 
     for (const qualified of finalSelectedFixtures) {
       const fixture = qualified.fixture;
-      const leagueInfo = fixture.league || { id: 'unknown', season: '2024' };
-      const homeTeam = fixture.teams?.home || { id: 'home_unknown', name: 'Home Team' };
-      const awayTeam = fixture.teams?.away || { id: 'away_unknown', name: 'Away Team' };
+      const leagueInfo = fixture.league || { id: "unknown", season: "2024" };
+      const homeTeam = fixture.teams?.home || {
+        id: "home_unknown",
+        name: "Home Team",
+      };
+      const awayTeam = fixture.teams?.away || {
+        id: "away_unknown",
+        name: "Away Team",
+      };
       const fixtureApiId = String(fixture.fixture.id);
       const teamRows = [
-        { tableId: teamsTable, rowId: `team_${homeTeam.id}`, data: pickTeam(homeTeam) },
-        { tableId: teamsTable, rowId: `team_${awayTeam.id}`, data: pickTeam(awayTeam) },
+        {
+          tableId: teamsTable,
+          rowId: `team_${homeTeam.id}`,
+          data: pickTeam(homeTeam),
+        },
+        {
+          tableId: teamsTable,
+          rowId: `team_${awayTeam.id}`,
+          data: pickTeam(awayTeam),
+        },
       ];
 
       const leagueRow = {
@@ -713,7 +803,10 @@ async function main() {
         data: pickLeague(leagueInfo, fixture.league.season),
       };
 
-      const mergedSummary = buildFixtureMergeSummary(qualified.oddsRows, qualified.h2hRows);
+      const mergedSummary = buildFixtureMergeSummary(
+        qualified.oddsRows,
+        qualified.h2hRows,
+      );
       const fixtureRow = {
         tableId: fixturesTable,
         rowId: `fixture_${fixtureApiId}`,
@@ -746,10 +839,12 @@ async function main() {
 
       const h2hRowsToSave = qualified.h2hRows.map((row) => ({
         tableId: h2hTable,
-        rowId: `h2h_${safeIdPart(fixtureApiId)}_${safeIdPart(row.historical_fixture_api_id || `${row.kickoff_at || ''}_${row.home_score || ''}_${row.away_score || ''}_${row.winner || ''}`)}`,
+        rowId: `h2h_${safeIdPart(fixtureApiId)}_${safeIdPart(row.historical_fixture_api_id || `${row.kickoff_at || ""}_${row.home_score || ""}_${row.away_score || ""}_${row.winner || ""}`)}`,
         data: {
           current_fixture_api_id: fixtureApiId,
-          historical_fixture_api_id: row.historical_fixture_api_id || `${fixtureApiId}_${safeIdPart(`${row.kickoff_at || ''}_${row.home_score || ''}_${row.away_score || ''}_${row.winner || ''}`)}`,
+          historical_fixture_api_id:
+            row.historical_fixture_api_id ||
+            `${fixtureApiId}_${safeIdPart(`${row.kickoff_at || ""}_${row.home_score || ""}_${row.away_score || ""}_${row.winner || ""}`)}`,
           home_team_api_id: String(homeTeam.id),
           away_team_api_id: String(awayTeam.id),
           kickoff_at: row.kickoff_at,
@@ -764,7 +859,13 @@ async function main() {
         },
       }));
 
-      for (const row of [...teamRows, leagueRow, fixtureRow, ...oddsRowsToSave, ...h2hRowsToSave]) {
+      for (const row of [
+        ...teamRows,
+        leagueRow,
+        fixtureRow,
+        ...oddsRowsToSave,
+        ...h2hRowsToSave,
+      ]) {
         await upsertRow(tablesdb, databaseId, row.tableId, row.rowId, row.data);
       }
 
@@ -772,9 +873,9 @@ async function main() {
     }
 
     await createRun(tablesdb, databaseId, syncRunsTable, {
-      job_name: 'sync-fixtures',
+      job_name: "sync-fixtures",
       sync_run_id: syncRunId,
-      status: 'success',
+      status: "success",
       started_at: startedAt,
       finished_at: isoNow(),
       items_seen: finalSelectedFixtures.length,
@@ -791,9 +892,9 @@ async function main() {
     };
   } catch (error) {
     await createRun(tablesdb, databaseId, syncRunsTable, {
-      job_name: 'sync-fixtures',
+      job_name: "sync-fixtures",
       sync_run_id: syncRunId,
-      status: 'failed',
+      status: "failed",
       started_at: startedAt,
       finished_at: isoNow(),
       items_seen: itemsSaved,
@@ -814,5 +915,5 @@ main().then(
   (error) => {
     console.error(error);
     process.exit(1);
-  }
+  },
 );

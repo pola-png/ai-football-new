@@ -81,7 +81,7 @@ function buildPrompt(fixture, oddsRows, h2hRows) {
   return [
     'You are a football prediction assistant.',
     'CRITICAL REQUIREMENT: You MUST return ONLY valid JSON. No explanatory text, no markdown, no code blocks - just pure JSON.',
-    'Use the fixture, odds, and h2h history to produce a single JSON object.',
+    'Use the fixture and odds context to produce a single JSON object. Optional h2h history may be provided, but it is not required.',
     'MANDATORY JSON structure: {"predicted_winner": "string", "confidence": number, "confidence_label": "string", "picks": [{"selection": "string", "confidence": number, "reason": "string"}]}',
     'The picks array must contain exactly 1 entry.',
     'That single pick must include: selection, confidence, reason.',
@@ -91,7 +91,7 @@ function buildPrompt(fixture, oddsRows, h2hRows) {
     'Target at least 10 predictions with confidence from 0.87 to 1.00 and at least 5 additional predictions with confidence from 0.85 to 0.869 when enough fixtures exist.',
     'Do not lower confidence just to hit a quota if the fixture does not support it.',
     'If Under 1.5, Under 2.5, or Over 3.5 is not at least 0.90 confident, do not save it and let the backend replace it with a safer pick.',
-    'When choosing an Over/Under goals market, pick the line that best fits the h2h average goals. Use Over 3.5 if average is near 4, Over 2.5 if near 3, Over 1.5 if near 2. For Under markets, use Under 1.5 if average is below 1, Under 2.5 if average is near 2, Under 3.5 if near 3. Never default to a fixed line — always derive it from the data.',
+    'When choosing an Over/Under goals market, use the available match context and odds. Prefer the safest line that fits the overall signals. Never default to a fixed line - always derive it from the data you have.',
     'Do not choose a straight win or draw selection unless you are at least 0.90 confident.',
     'If confidence is below 0.90, avoid home win, away win, draw, or team-name winner picks and choose a non-win market instead.',
     'If throw-in data is not available, skip it.',
@@ -351,38 +351,15 @@ function countOddsSignals(oddsRows) {
   return signals;
 }
 
-function scoreFixtureForAi({ fixture, oddsRows, h2hRows }) {
-  const h2hCount = Array.isArray(h2hRows) ? h2hRows.length : 0;
+function scoreFixtureForAi({ fixture }) {
   const leagueId = Number(fixture?.league_api_id);
   const isWorldCup = leagueId === 1;
+  const reasons = isWorldCup ? ['world-cup-match'] : ['ai-enabled'];
 
-  const reasons = [];
-
-  // World Cup matches always qualify for AI prediction
-  if (isWorldCup) {
-    reasons.push('world-cup-match');
-    return {
-      score: 100,
-      shouldCallAi: true,
-      reasons,
-    };
-  }
-
-  // For regular matches, only require H2H if available
-  if (h2hCount >= 1) {
-    reasons.push('has-h2h-data');
-    return {
-      score: 100,
-      shouldCallAi: true,
-      reasons,
-    };
-  }
-
-  // Skip only if no H2H and not World Cup
   return {
-    score: 0,
-    shouldCallAi: false,
-    reasons: ['missing-h2h'],
+    score: isWorldCup ? 100 : 50,
+    shouldCallAi: true,
+    reasons,
   };
 }
 
@@ -431,20 +408,6 @@ async function main() {
       ]);
 
       const aiGate = scoreFixtureForAi({ fixture, oddsRows, h2hRows });
-      if (!aiGate.shouldCallAi) {
-        skipped += 1;
-        console.error(
-          JSON.stringify({
-            job: 'generate-predictions',
-            fixture_api_id: fixture.api_fixture_id,
-            stage: 'ai-skip',
-            score: aiGate.score,
-            reasons: aiGate.reasons,
-            message: 'Skipping AI call because fixture did not meet the non-win threshold.',
-          }),
-        );
-        continue;
-      }
 
       const prompt = buildPrompt(fixture, oddsRows, h2hRows);
       const aiResponse = await deepSeekChat([
