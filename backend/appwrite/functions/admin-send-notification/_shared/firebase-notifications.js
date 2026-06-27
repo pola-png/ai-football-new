@@ -1,4 +1,4 @@
-const crypto = require('crypto');
+import crypto from 'crypto';
 
 function logStep(step, details = {}) {
   console.log(JSON.stringify({
@@ -47,7 +47,7 @@ function base64UrlEncode(input) {
     .replace(/\//g, '_');
 }
 
-function createTimeoutSignal(timeoutMs, step) {
+function createTimeoutSignal(timeoutMs) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
     controller.abort(new Error(`Timed out after ${timeoutMs}ms`));
@@ -96,7 +96,7 @@ async function getAccessToken(serviceAccount) {
     jwtLength: jwt.length,
   });
 
-  const timeout = createTimeoutSignal(15000, 'firebase.token.http.timeout');
+  const timeout = createTimeoutSignal(15000);
   const response = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: {
@@ -129,7 +129,7 @@ async function getAccessToken(serviceAccount) {
   return parsed.access_token;
 }
 
-async function sendPredictionTopicNotification({
+export async function sendPredictionTopicNotification({
   topicId,
   title,
   body,
@@ -181,7 +181,7 @@ async function sendPredictionTopicNotification({
     payloadKeys: Object.keys(message.message || {}),
   });
 
-  const sendTimeout = createTimeoutSignal(15000, 'firebase.send.http.timeout');
+  const sendTimeout = createTimeoutSignal(15000);
   const response = await fetch(
     `https://fcm.googleapis.com/v1/projects/${serviceAccount.projectId}/messages:send`,
     {
@@ -203,10 +203,9 @@ async function sendPredictionTopicNotification({
     ok: response.ok,
     responseLength: responseText.length,
   });
+
   if (!response.ok) {
-    throw new Error(
-      `FCM request failed with status ${response.status}: ${responseText}`,
-    );
+    throw new Error(`FCM request failed with status ${response.status}: ${responseText}`);
   }
 
   const parsed = JSON.parse(responseText);
@@ -218,7 +217,3 @@ async function sendPredictionTopicNotification({
 
   return parsed.name || responseText;
 }
-
-module.exports = {
-  sendPredictionTopicNotification,
-};

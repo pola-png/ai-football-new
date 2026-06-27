@@ -71,12 +71,12 @@ function parsePayload() {
   }
 }
 
-function loadSender() {
+async function loadSender() {
   logStep('module.load.start', {
     module: '../_shared/firebase-notifications.js',
   });
 
-  const mod = require('../_shared/firebase-notifications.js');
+  const mod = await import('../_shared/firebase-notifications.js');
 
   logStep('module.load.success', {
     module: '../_shared/firebase-notifications.js',
@@ -99,7 +99,7 @@ function sendWithTimeout(sendFn, payload, timeoutMs = 20000) {
   ]);
 }
 
-async function main() {
+export default async function main(context = {}) {
   logStep('function.start', {
     runtime: process.version,
     functionId: process.env.APPWRITE_FUNCTION_ID || null,
@@ -116,7 +116,7 @@ async function main() {
 
   let sendPredictionTopicNotification;
   try {
-    sendPredictionTopicNotification = loadSender();
+    sendPredictionTopicNotification = await loadSender();
   } catch (error) {
     logError('module.load.failed', error, {
       module: '../_shared/firebase-notifications.js',
@@ -182,5 +182,3 @@ async function main() {
     throw error;
   }
 }
-
-exports.main = main;
