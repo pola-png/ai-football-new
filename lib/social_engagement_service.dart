@@ -592,6 +592,33 @@ class SocialEngagementService {
     return counts;
   }
 
+  Future<Set<String>> fetchMyLikedChatMessageIds({String roomId = appwriteChatRoomId}) async {
+    final user = AppAuthService.instance.currentUser;
+    if (user == null) {
+      return const <String>{};
+    }
+
+    final rows = await _listAllRowsHelper(
+      db: _db,
+      databaseId: appwriteDatabaseId,
+      tableId: appwriteChatMessageLikesTableId,
+      queries: [
+        Query.equal('room_id', roomId),
+        Query.equal('user_id', user.id),
+      ],
+    );
+
+    final likedIds = <String>{};
+    for (final row in rows.rows) {
+      final messageId = _asString(row.data['message_id'])?.trim();
+      if (messageId == null || messageId.isEmpty) {
+        continue;
+      }
+      likedIds.add(messageId);
+    }
+    return likedIds;
+  }
+
   Future<void> sendChatMessage({
     String roomId = appwriteChatRoomId,
     required String message,

@@ -33,8 +33,12 @@ process.on('unhandledRejection', (reason) => {
   logError('process.unhandledRejection', reason);
 });
 
-function readPayload() {
+function readPayload(context = {}) {
+  const req = context?.req || {};
   return (
+    req.bodyText ||
+    req.body ||
+    (req.bodyJson ? JSON.stringify(req.bodyJson) : '') ||
     process.env.APPWRITE_FUNCTION_DATA ||
     process.env.APPWRITE_FUNCTION_BODY ||
     process.env.APPWRITE_FUNCTION_PAYLOAD ||
@@ -43,11 +47,19 @@ function readPayload() {
   );
 }
 
-function parsePayload() {
-  const rawPayload = readPayload();
+function parsePayload(context = {}) {
+  const req = context?.req || {};
+  logStep('payload.source', {
+    hasReq: Boolean(req),
+    hasBodyText: Boolean(req?.bodyText),
+    hasBodyJson: Boolean(req?.bodyJson),
+    hasBody: Boolean(req?.body),
+  });
+
+  const rawPayload = readPayload(context);
 
   if (!rawPayload) {
-    logStep('payload.empty', { source: 'appwrite-env' });
+    logStep('payload.empty', { source: 'context-or-env' });
     return {};
   }
 
@@ -124,7 +136,7 @@ export default async function main(context = {}) {
     throw error;
   }
 
-  const payload = parsePayload();
+  const payload = parsePayload(context);
   const title = String(payload.title || payload.notification?.title || 'AI Football Prediction').trim();
   const body = String(payload.body || payload.notification?.body || 'A new notification is available.').trim();
   const data = payload.data && typeof payload.data === 'object' ? payload.data : {};

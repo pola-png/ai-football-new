@@ -970,8 +970,8 @@ class _MainMenuPage extends StatelessWidget {
               border: border,
               textColor: primaryText,
               onTap: () {
-                onOpenPicked();
                 Navigator.of(context).pop();
+                Future.microtask(onOpenPicked);
               },
             ),
             _menuTile(

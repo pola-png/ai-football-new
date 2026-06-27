@@ -23,6 +23,35 @@ class _ChatPageState extends State<ChatPage> {
   String? _replyingToUserName;
   PickedMatchRecord? _attachedPick;
   bool _sending = false;
+  Future<_ChatMeta>? _chatMetaFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _chatMetaFuture = _loadChatMeta();
+  }
+
+  Future<_ChatMeta> _loadChatMeta() async {
+    final results = await Future.wait([
+      SocialEngagementService.instance.fetchChatLikeCounts(roomId: appwriteChatRoomId),
+      SocialEngagementService.instance.fetchMyLikedChatMessageIds(roomId: appwriteChatRoomId),
+    ]);
+
+    return _ChatMeta(
+      likeCounts: results[0] as Map<String, int>,
+      likedMessageIds: results[1] as Set<String>,
+    );
+  }
+
+  void _reloadChatMeta() {
+    setState(() {
+      _chatMetaFuture = _loadChatMeta();
+    });
+  }
+
+  Future<_ChatMeta> _ensureChatMetaFuture() {
+    return _chatMetaFuture ??= _loadChatMeta();
+  }
 
   @override
   void dispose() {
@@ -73,6 +102,7 @@ class _ChatPageState extends State<ChatPage> {
         _replyingToUserName = null;
         _attachedPick = null;
       });
+      _reloadChatMeta();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Message posted.')),
       );
@@ -106,6 +136,7 @@ class _ChatPageState extends State<ChatPage> {
         roomId: appwriteChatRoomId,
         messageId: message.id,
       );
+      _reloadChatMeta();
     } catch (error) {
       if (!mounted) {
         return;
@@ -260,10 +291,13 @@ class _ChatPageState extends State<ChatPage> {
             ),
             const SizedBox(height: 12),
             Expanded(
-              child: FutureBuilder<Map<String, int>>(
-                future: SocialEngagementService.instance.fetchChatLikeCounts(roomId: appwriteChatRoomId),
+              child: FutureBuilder<_ChatMeta>(
+                future: _ensureChatMetaFuture(),
                 builder: (context, likeSnapshot) {
-                  final likeCounts = likeSnapshot.data ?? const <String, int>{};
+                  final meta = likeSnapshot.data ?? const _ChatMeta(
+                    likeCounts: <String, int>{},
+                    likedMessageIds: <String>{},
+                  );
                   return StreamBuilder<List<ChatMessageRecord>>(
                     stream: SocialEngagementService.instance.watchChatMessages(roomId: appwriteChatRoomId),
                     builder: (context, snapshot) {
@@ -296,7 +330,7 @@ class _ChatPageState extends State<ChatPage> {
 
                       return RefreshIndicator(
                         onRefresh: () async {
-                          setState(() {});
+                          _reloadChatMeta();
                         },
                         child: messages.isEmpty
                             ? ListView(
@@ -343,8 +377,10 @@ class _ChatPageState extends State<ChatPage> {
                                   return Padding(
                                     padding: const EdgeInsets.only(bottom: 12),
                                     child: _ChatMessageCard(
+                                      key: ValueKey(message.id),
                                       message: message,
-                                      likeCount: likeCounts[message.id] ?? 0,
+                                      likeCount: meta.likeCounts[message.id] ?? 0,
+                                      isLiked: meta.likedMessageIds.contains(message.id),
                                       replies: replies,
                                       onLike: () => _toggleLike(message),
                                       onReply: () => _replyTo(message),
@@ -386,8 +422,10 @@ class _ChatPageState extends State<ChatPage> {
 
 class _ChatMessageCard extends StatelessWidget {
   const _ChatMessageCard({
+    super.key,
     required this.message,
     required this.likeCount,
+    required this.isLiked,
     required this.replies,
     required this.onLike,
     required this.onReply,
@@ -395,12 +433,56 @@ class _ChatMessageCard extends StatelessWidget {
 
   final ChatMessageRecord message;
   final int likeCount;
+  final bool isLiked;
   final List<ChatMessageRecord> replies;
   final VoidCallback onLike;
   final VoidCallback onReply;
 
   @override
   Widget build(BuildContext context) {
+    return _ChatMessageCardShell(
+      message: message,
+      likeCount: likeCount,
+      isLiked: isLiked,
+      replies: replies,
+      onLike: onLike,
+      onReply: onReply,
+    );
+  }
+}
+
+class _ChatMessageCardShell extends StatefulWidget {
+  const _ChatMessageCardShell({
+    required this.message,
+    required this.likeCount,
+    required this.isLiked,
+    required this.replies,
+    required this.onLike,
+    required this.onReply,
+  });
+
+  final ChatMessageRecord message;
+  final int likeCount;
+  final bool isLiked;
+  final List<ChatMessageRecord> replies;
+  final VoidCallback onLike;
+  final VoidCallback onReply;
+
+  @override
+  State<_ChatMessageCardShell> createState() => _ChatMessageCardShellState();
+}
+
+class _ChatMessageCardShellState extends State<_ChatMessageCardShell> {
+  bool _showReplies = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final message = widget.message;
+    final likeCount = widget.likeCount;
+    final isLiked = widget.isLiked;
+    final replies = widget.replies;
+    final onLike = widget.onLike;
+    final onReply = widget.onReply;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final surface = isDark ? const Color(0xFF121B2E) : Colors.white;
     final border = isDark ? const Color(0xFF1E2B4C) : const Color(0xFFE2EAF2);
@@ -481,52 +563,99 @@ class _ChatMessageCard extends StatelessWidget {
               children: [
                 TextButton.icon(
                   onPressed: onLike,
-                  icon: const Icon(Icons.favorite_border, size: 18),
+                  icon: Icon(
+                    isLiked ? Icons.favorite : Icons.favorite_border,
+                    size: 18,
+                  ),
                   label: Text('$likeCount'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: isLiked ? Colors.redAccent : secondaryText,
+                  ),
                 ),
                 TextButton.icon(
                   onPressed: onReply,
                   icon: const Icon(Icons.reply, size: 18),
                   label: const Text('Reply'),
                 ),
+                if (replies.isNotEmpty)
+                  TextButton.icon(
+                    onPressed: () {
+                      setState(() {
+                        _showReplies = !_showReplies;
+                      });
+                    },
+                    icon: Icon(
+                      _showReplies ? Icons.expand_less : Icons.expand_more,
+                      size: 18,
+                    ),
+                    label: Text(_showReplies ? 'Hide replies' : 'Replies (${replies.length})'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: secondaryText,
+                    ),
+                  ),
               ],
             ),
-            if (replies.isNotEmpty) ...[
+            if (_showReplies && replies.isNotEmpty) ...[
               const SizedBox(height: 4),
-              for (final reply in replies) ...[
-                Container(
-                  margin: const EdgeInsets.only(top: 8),
-                  padding: const EdgeInsets.all(12),
+              Padding(
+                padding: const EdgeInsets.only(left: 12),
+                child: Container(
                   decoration: BoxDecoration(
-                    color: const Color(0xFF00D4AA).withAlpha(10),
-                    borderRadius: BorderRadius.circular(14),
+                    border: Border(left: BorderSide(color: const Color(0xFF00D4AA).withAlpha(120), width: 2)),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        reply.userName,
-                        style: TextStyle(
-                          color: primaryText,
-                          fontWeight: FontWeight.w800,
-                          fontSize: 12,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        reply.message,
-                        style: TextStyle(color: secondaryText, height: 1.4),
-                      ),
-                    ],
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 12),
+                    child: Column(
+                      children: [
+                        for (final reply in replies) ...[
+                          Container(
+                            margin: const EdgeInsets.only(top: 8),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF00D4AA).withAlpha(10),
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  reply.userName,
+                                  style: TextStyle(
+                                    color: primaryText,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  reply.message,
+                                  style: TextStyle(color: secondaryText, height: 1.4),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
                 ),
-              ],
+              ),
             ],
           ],
         ),
       ),
     );
   }
+}
+
+class _ChatMeta {
+  const _ChatMeta({
+    required this.likeCounts,
+    required this.likedMessageIds,
+  });
+
+  final Map<String, int> likeCounts;
+  final Set<String> likedMessageIds;
 }
 
 class _ComposerBar extends StatelessWidget {
