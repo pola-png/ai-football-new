@@ -175,6 +175,6 @@ main().then(
   },
   (error) => {
     logError('function.failed', error);
-    process.exit(1);
+    process.exitCode = 1;
   },
 );

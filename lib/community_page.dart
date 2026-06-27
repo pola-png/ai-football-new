@@ -106,7 +106,7 @@ class CommunityPage extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        'Community',
+                        'Group',
                         style: TextStyle(
                           color: _primaryText(context),
                           fontSize: 28,
@@ -119,7 +119,7 @@ class CommunityPage extends StatelessWidget {
                 const SizedBox(height: 8),
                 Text(
                   !hasSession
-                      ? 'Sign in to join the live community features.'
+                      ? 'Sign in to join the live group features.'
                       : 'Welcome back.',
                   style: TextStyle(
                     color: _secondaryText(context),

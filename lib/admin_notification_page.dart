@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:appwrite/appwrite.dart' as appwrite;
 import 'package:flutter/material.dart';
 
 import 'admin_access_service.dart';
@@ -78,7 +79,7 @@ class _AdminNotificationPageState extends State<AdminNotificationPage> {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to send notification: $error')),
+        SnackBar(content: Text('Failed to send notification: ${_formatError(error)}')),
       );
     } finally {
       if (mounted) {
@@ -87,6 +88,22 @@ class _AdminNotificationPageState extends State<AdminNotificationPage> {
         });
       }
     }
+  }
+
+  String _formatError(Object error) {
+    if (error is appwrite.AppwriteException) {
+      final details = <String>[
+        if (error.type != null && error.type!.isNotEmpty) error.type!,
+        if (error.message != null && error.message!.isNotEmpty) error.message!,
+        if (error.code != null) 'Code ${error.code}',
+      ];
+      if (details.isNotEmpty) {
+        return details.join(' - ');
+      }
+      return error.toString();
+    }
+
+    return error.toString();
   }
 
   @override

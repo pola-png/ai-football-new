@@ -586,7 +586,14 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
   }
 
   void _openPickedTab() {
-    _setIndex(2);
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => PickedMatchesPage(
+          selectedPredictions: _selectedItems,
+          onClearAll: _selectedItems.isEmpty ? null : _clearSelections,
+        ),
+      ),
+    );
   }
 
   void _maybeShowAdFreeUpsell(bool adFree) {
@@ -778,12 +785,6 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
                     isAdmin: isAdmin,
                     currentPlans: GooglePlayBillingService.instance.plans,
                   ),
-                  PickedMatchesPage(
-                    selectedPredictions: _selectedItems,
-                    onClearAll: _selectedItems.isEmpty
-                        ? null
-                        : _clearSelections,
-                  ),
                   const CommunityPage(),
                 ],
               ),
@@ -833,20 +834,12 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
                               label: 'Premium Plan',
                             ),
                             NavigationDestination(
-                              icon: const Icon(Icons.fact_check_outlined),
+                              icon: const Icon(Icons.chat_bubble_outline),
                               selectedIcon: _PulsingIcon(
-                                icon: Icons.fact_check,
+                                icon: Icons.chat_bubble,
                                 isActive: _currentIndex == 2,
                               ),
-                              label: 'Picked',
-                            ),
-                            NavigationDestination(
-                              icon: const Icon(Icons.people_outline),
-                              selectedIcon: _PulsingIcon(
-                                icon: Icons.people,
-                                isActive: _currentIndex == 3,
-                              ),
-                              label: 'Community',
+                              label: 'Group',
                             ),
                           ],
                         ),
@@ -958,12 +951,12 @@ class _MainMenuPage extends StatelessWidget {
             _menuTile(
               context,
               icon: Icons.people_outline,
-              title: 'Community',
+              title: 'Group',
               subtitle: 'Leaderboard and check-ins',
               border: border,
               textColor: primaryText,
               onTap: () {
-                onNavigate(3);
+                onNavigate(2);
                 Navigator.of(context).pop();
               },
             ),
@@ -3419,18 +3412,19 @@ List<Widget> _buildGroupedPredictionWidgets(
       widgets.add(
         Padding(
           padding: horizontalPadding,
-          child: PredictionGroupCard(
-            prediction: prediction,
-            isLocked: !isPickUnlocked(_predictionUnlockKey(prediction)),
-            isUnlocking: unlockingPickKey == _predictionUnlockKey(prediction),
-            onUnlockPressed: () => onUnlockPick(prediction),
-            isSelected: isSelected(prediction),
-            canSelect:
-                adFree || isPickUnlocked(_predictionUnlockKey(prediction)),
-            onSelectionPressed: () => onToggleSelection(prediction),
-            onOpenComments: () => onOpenComments(prediction),
+            child: PredictionGroupCard(
+              prediction: prediction,
+              isLocked: !isPickUnlocked(_predictionUnlockKey(prediction)),
+              isUnlocking: unlockingPickKey == _predictionUnlockKey(prediction),
+              onUnlockPressed: () => onUnlockPick(prediction),
+              isSelected: isSelected(prediction),
+              canSelect:
+                  (adFree || isPickUnlocked(_predictionUnlockKey(prediction))) &&
+                  !_isFinishedPrediction(prediction, DateTime.now().toLocal()),
+              onSelectionPressed: () => onToggleSelection(prediction),
+              onOpenComments: () => onOpenComments(prediction),
+            ),
           ),
-        ),
       );
       if (i < section.predictions.length - 1) {
         widgets.add(const SizedBox(height: 12));
@@ -3521,7 +3515,9 @@ List<Widget> _buildTodayStatusWidgets(
           isUnlocking: unlockingPickKey == _predictionUnlockKey(prediction),
           onUnlockPressed: () => onUnlockPick(prediction),
           isSelected: isSelected(prediction),
-          canSelect: adFree || isPickUnlocked(_predictionUnlockKey(prediction)),
+          canSelect:
+              (adFree || isPickUnlocked(_predictionUnlockKey(prediction))) &&
+              !_isFinishedPrediction(prediction, DateTime.now().toLocal()),
           onSelectionPressed: () => onToggleSelection(prediction),
           onOpenComments: () => onOpenComments(prediction),
         ),
@@ -4176,7 +4172,7 @@ class PredictionGroupCard extends StatelessWidget {
                           data: primaryPick,
                         ),
                 ),
-                if (canSelect) ...[
+                if (canSelect && !isFinishedPrediction(prediction, DateTime.now().toLocal())) ...[
                   const SizedBox(height: 12),
                   Align(
                     alignment: Alignment.centerRight,
@@ -5077,12 +5073,13 @@ enum _PickVerdict { pending, correct, wrong }
 
 _PickVerdict _pickVerdict(PredictionRecord prediction) {
   final outcome = prediction.matchOutcome?.trim().toLowerCase();
-  if (outcome == null || outcome.isEmpty) {
-    return _PickVerdict.pending;
-  }
-
   if (outcome == 'void') {
     return _PickVerdict.correct;
+  }
+
+  final isFinished = _isFinishedPrediction(prediction, DateTime.now().toLocal());
+  if (outcome == null || outcome.isEmpty) {
+    return isFinished ? _PickVerdict.correct : _PickVerdict.pending;
   }
 
   final selection = _normalizeSelection(prediction);

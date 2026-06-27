@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:appwrite/appwrite.dart' as appwrite;
 import 'package:appwrite/enums.dart' as appwrite_enums;
 
@@ -26,11 +27,23 @@ class AdminNotificationService {
       if (data != null && data.isNotEmpty) 'data': data,
     };
 
-    await _functions.createExecution(
-      functionId: appwriteAdminNotificationFunctionId,
-      method: appwrite_enums.ExecutionMethod.pOST,
-      xasync: true,
-      body: jsonEncode(payload),
-    );
+    try {
+      final execution = await _functions.createExecution(
+        functionId: appwriteAdminNotificationFunctionId,
+        method: appwrite_enums.ExecutionMethod.pOST,
+        body: jsonEncode(payload),
+      );
+
+      debugPrint(
+        'Admin notification execution started: '
+        'id=${execution.$id}, status=${execution.status.value}, '
+        'responseStatus=${execution.responseStatusCode}, '
+        'responseBody=${execution.responseBody}, '
+        'errors=${execution.errors}, logs=${execution.logs}',
+      );
+    } catch (error) {
+      debugPrint('Admin notification execution failed: $error');
+      rethrow;
+    }
   }
 }
