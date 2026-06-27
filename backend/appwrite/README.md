@@ -87,6 +87,7 @@ Recommended split for the current codebase:
 - `daily-sync-generate`
 - `generate-predictions`
 - `publish-and-maintain` if you still want a publish/reconcile pass
+- `delete-account` for permanent account deletion and user-data cleanup
 
 Function responsibilities:
 
@@ -128,6 +129,12 @@ Optional batch setting:
 - `APPWRITE_PREDICTION_CONCURRENCY`
 - Default is `1`, which processes fixtures one after the other.
 - Set it higher if you want multiple fixtures handled at the same time.
+
+Account deletion function:
+
+- `delete-account` expects an authenticated function execution from the signed-in user.
+- Configure `APPWRITE_FUNCTION_ENDPOINT`, `APPWRITE_FUNCTION_PROJECT_ID`, `APPWRITE_FUNCTION_API_KEY`, `APPWRITE_DATABASE_ID`, and either `APPWRITE_FUNCTION_USER_ID` or `APPWRITE_FUNCTION_JWT`.
+- The function removes rows from `user_profiles`, `prediction_comments`, `prediction_selections`, `daily_checkins`, and `challenge_entries` before deleting the auth account.
 
 ## Fetch schedule
 

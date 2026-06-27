@@ -11,6 +11,7 @@ import 'app_auth_service.dart';
 import 'admin_access_service.dart';
 import 'admin_notification_page.dart';
 import 'ad_gate_service.dart';
+import 'account_deletion_page.dart';
 import 'appwrite_subscription_service.dart';
 import 'community_page.dart';
 import 'feed_banner_ad.dart';
@@ -522,6 +523,13 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
               ),
             );
           },
+          onOpenDeleteAccount: () {
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const AccountDeletionPage(),
+              ),
+            );
+          },
           onOpenAdminNotification: () {
             Navigator.of(context).push(
               MaterialPageRoute<void>(
@@ -871,6 +879,7 @@ class _MainMenuPage extends StatelessWidget {
     required this.isAdmin,
     required this.onNavigate,
     required this.onOpenPolicy,
+    required this.onOpenDeleteAccount,
     required this.onOpenAdminNotification,
     required this.onLogout,
   });
@@ -878,6 +887,7 @@ class _MainMenuPage extends StatelessWidget {
   final bool isAdmin;
   final ValueChanged<int> onNavigate;
   final VoidCallback onOpenPolicy;
+  final VoidCallback onOpenDeleteAccount;
   final VoidCallback onOpenAdminNotification;
   final Future<void> Function() onLogout;
 
@@ -970,6 +980,19 @@ class _MainMenuPage extends StatelessWidget {
               onTap: () {
                 Navigator.of(context).pop();
                 onOpenPolicy();
+              },
+            ),
+            _menuTile(
+              context,
+              icon: Icons.delete_forever_outlined,
+              title: 'Delete Account',
+              subtitle: 'Permanently remove your account',
+              border: border,
+              textColor: const Color(0xFFFF6B6B),
+              destructive: true,
+              onTap: () {
+                Navigator.of(context).pop();
+                onOpenDeleteAccount();
               },
             ),
             if (isAdmin)
@@ -3107,6 +3130,30 @@ class PolicyPage extends StatelessWidget {
                 'The app may use account, notification, and analytics-related services needed to deliver predictions and alerts. We do not sell user betting choices or ask for payment to access basic prediction content.',
           ),
           const SizedBox(height: 20),
+          FilledButton.tonalIcon(
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const AccountDeletionPage(),
+                ),
+              );
+            },
+            icon: const Icon(Icons.delete_forever_outlined),
+            label: const Text('Delete my account'),
+            style: FilledButton.styleFrom(
+              foregroundColor: const Color(0xFFFF4D4D),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'You can also reach the deletion page from the app menu.',
+            style: TextStyle(
+              color: secondaryText,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 18),
           FilledButton.icon(
             onPressed: _openPolicyUrl,
             icon: const Icon(Icons.open_in_new),
@@ -4172,7 +4219,7 @@ class PredictionGroupCard extends StatelessWidget {
                           data: primaryPick,
                         ),
                 ),
-                if (canSelect && !isFinishedPrediction(prediction, DateTime.now().toLocal())) ...[
+                if (canSelect && !_isFinishedPrediction(prediction, DateTime.now().toLocal())) ...[
                   const SizedBox(height: 12),
                   Align(
                     alignment: Alignment.centerRight,

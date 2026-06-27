@@ -57,3 +57,8 @@ const String appwriteAdminNotificationFunctionId = String.fromEnvironment(
   'APPWRITE_ADMIN_NOTIFICATION_FUNCTION_ID',
   defaultValue: '6a3e7c3b0022eeb7795a',
 );
+
+const String appwriteDeleteAccountFunctionId = String.fromEnvironment(
+  'APPWRITE_DELETE_ACCOUNT_FUNCTION_ID',
+  defaultValue: 'delete-account',
+);
