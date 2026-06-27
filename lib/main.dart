@@ -1237,6 +1237,21 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
     widget.onToggleSelection(prediction);
   }
 
+  Future<void> _handleAdminPlanOverride(PredictionRecord prediction, String? plan, double? confidence) async {
+    final recordId = prediction.recordId;
+    if (recordId == null || recordId.isEmpty) return;
+    try {
+      await _repository.updatePredictionPlanOverride(recordId, plan, confidence);
+      await _reload();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to update plan: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _openComments(PredictionRecord prediction) {
     return showPredictionCommentsSheet(context, prediction);
   }
@@ -1408,6 +1423,8 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
                           _handleSelectPrediction,
                           _openComments,
                           !widget.adFree,
+                          widget.isAdmin,
+                          _handleAdminPlanOverride,
                         ),
                       ),
                     ),
@@ -3602,6 +3619,8 @@ List<Widget> _buildGroupedPredictionWidgets(
   void Function(PredictionRecord prediction) onToggleSelection,
   Future<void> Function(PredictionRecord prediction) onOpenComments,
   bool showAds,
+  bool isAdmin,
+  Future<void> Function(PredictionRecord, String?, double?) onAdminPlanOverride,
 ) {
   final sections = _groupPredictionsByDate(predictions);
   final widgets = <Widget>[];
@@ -3649,6 +3668,8 @@ List<Widget> _buildGroupedPredictionWidgets(
           onToggleSelection,
           onOpenComments,
           showAds,
+          isAdmin,
+          onAdminPlanOverride,
         ),
       );
       continue;
@@ -3670,6 +3691,10 @@ List<Widget> _buildGroupedPredictionWidgets(
                   !_isFinishedPrediction(prediction, DateTime.now().toLocal()),
               onSelectionPressed: () => onToggleSelection(prediction),
               onOpenComments: () => onOpenComments(prediction),
+              isAdmin: isAdmin,
+              onAdminPlanOverride: isAdmin
+                  ? (plan, confidence) => onAdminPlanOverride(prediction, plan, confidence)
+                  : null,
             ),
           ),
       );
@@ -3700,6 +3725,8 @@ List<Widget> _buildTodayStatusWidgets(
   void Function(PredictionRecord prediction) onToggleSelection,
   Future<void> Function(PredictionRecord prediction) onOpenComments,
   bool showAds,
+  bool isAdmin,
+  Future<void> Function(PredictionRecord, String?, double?) onAdminPlanOverride,
 ) {
   final now = DateTime.now();
   final grouped = <_TodayBucket, List<PredictionRecord>>{
@@ -3767,6 +3794,10 @@ List<Widget> _buildTodayStatusWidgets(
               !_isFinishedPrediction(prediction, DateTime.now().toLocal()),
           onSelectionPressed: () => onToggleSelection(prediction),
           onOpenComments: () => onOpenComments(prediction),
+          isAdmin: isAdmin,
+          onAdminPlanOverride: isAdmin
+              ? (plan, confidence) => onAdminPlanOverride(prediction, plan, confidence)
+              : null,
         ),
       ),
     );
@@ -4322,6 +4353,8 @@ class PredictionGroupCard extends StatelessWidget {
     required this.onSelectionPressed,
     this.onOpenComments,
     this.isPopular,
+    this.isAdmin = false,
+    this.onAdminPlanOverride,
   });
 
   final PredictionRecord prediction;
@@ -4333,6 +4366,8 @@ class PredictionGroupCard extends StatelessWidget {
   final VoidCallback onSelectionPressed;
   final VoidCallback? onOpenComments;
   final bool? isPopular;
+  final bool isAdmin;
+  final Future<void> Function(String? plan, double? confidence)? onAdminPlanOverride;
 
   @override
   Widget build(BuildContext context) {
@@ -4479,6 +4514,13 @@ class PredictionGroupCard extends StatelessWidget {
                     onOpenComments: onOpenComments!,
                   ),
                 ],
+                if (isAdmin && onAdminPlanOverride != null) ...[
+                  const SizedBox(height: 10),
+                  _AdminPlanOverrideBar(
+                    currentOverride: prediction.adminPlanOverride,
+                    onSelect: onAdminPlanOverride!,
+                  ),
+                ],
               ],
             ),
           ),
@@ -4506,6 +4548,134 @@ class PredictionGroupCard extends StatelessWidget {
                 ),
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AdminPlanOverrideBar extends StatelessWidget {
+  const _AdminPlanOverrideBar({
+    required this.currentOverride,
+    required this.onSelect,
+  });
+
+  final String? currentOverride;
+  final Future<void> Function(String? plan, double? confidence) onSelect;
+
+  static const _plans = [
+    ('basic', 'Basic', 0.83),
+    ('standard', 'Standard', 0.86),
+    ('premium', 'Premium', 0.91),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final border = _screenBorder(context);
+    final accentText = _accentText(context);
+    final secondaryText = _secondaryText(context);
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFF6D00).withAlpha(14),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFFF6D00).withAlpha(60)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.admin_panel_settings, size: 14, color: Color(0xFFFF6D00)),
+              const SizedBox(width: 6),
+              Text(
+                'Admin: Assign plan',
+                style: TextStyle(
+                  color: const Color(0xFFFF6D00),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              if (currentOverride != null) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFF6D00).withAlpha(28),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    currentOverride!.toUpperCase(),
+                    style: const TextStyle(
+                      color: Color(0xFFFF6D00),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            children: [
+              ..._plans.map((entry) {
+                final (key, label, confidence) = entry;
+                final isActive = currentOverride == key;
+                return GestureDetector(
+                  onTap: () => onSelect(isActive ? null : key, isActive ? null : confidence),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: isActive
+                          ? const Color(0xFFFF6D00).withAlpha(40)
+                          : _screenSurface(context, elevated: true),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: isActive
+                            ? const Color(0xFFFF6D00)
+                            : border,
+                      ),
+                    ),
+                    child: Text(
+                      isActive ? '$label ✓' : label,
+                      style: TextStyle(
+                        color: isActive ? const Color(0xFFFF6D00) : secondaryText,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                );
+              }),
+              GestureDetector(
+                onTap: () => onSelect(null, null),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: currentOverride == null
+                        ? Colors.redAccent.withAlpha(30)
+                        : _screenSurface(context, elevated: true),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: currentOverride == null
+                          ? Colors.redAccent
+                          : border,
+                    ),
+                  ),
+                  child: Text(
+                    'Clear',
+                    style: TextStyle(
+                      color: currentOverride == null ? Colors.redAccent : secondaryText,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
