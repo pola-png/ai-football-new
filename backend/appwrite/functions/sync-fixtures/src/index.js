@@ -347,7 +347,7 @@ function countOddsSignals(oddsRows) {
   return signals;
 }
 
-function scoreFixtureForSync({ oddsRows, h2hRows, leagueId, leagueName }) {
+function scoreFixtureForSync({ oddsRows, h2hRows, leagueId, leagueName, isCountry }) {
   // No restrictions - all fixtures qualify
   const h2hCount = Array.isArray(h2hRows) ? h2hRows.length : 0;
   const oddsCount = Array.isArray(oddsRows) ? oddsRows.length : 0;
@@ -362,6 +362,11 @@ function scoreFixtureForSync({ oddsRows, h2hRows, leagueId, leagueName }) {
   if (isWorldCup) {
     score += 100;
     reasons.push("world-cup");
+  }
+
+  if (isCountry || isWorldCup) {
+    score += 60;
+    reasons.push("country-match");
   }
 
   if (h2hCount > 0) {
@@ -733,6 +738,7 @@ async function main() {
         h2hRows: h2hResult.rows || [],
         leagueId: safeLeagueInfo.id,
         leagueName: safeLeagueInfo.name,
+        isCountry: Boolean(safeHomeTeam.national || safeAwayTeam.national),
       });
 
       const fixtureData = {
@@ -752,10 +758,10 @@ async function main() {
     // Sort all fixtures by score (World Cup gets priority)
     allFixtures.sort((a, b) => (b.score || 0) - (a.score || 0));
 
-    // Simple selection: minimum 100, maximum 200
+    // Simple selection: minimum 200, maximum 300
     const totalAvailable = allFixtures.length;
-    const minRequired = 100;
-    const maxAllowed = 200;
+    const minRequired = 200;
+    const maxAllowed = Number.parseInt(process.env.MAX_FIXTURES || "300", 10);
 
     let selectedCount;
     if (totalAvailable < minRequired) {
@@ -899,7 +905,7 @@ async function main() {
       finished_at: isoNow(),
       items_seen: finalSelectedFixtures.length,
       items_saved: itemsSaved,
-      message: `Fetched ${fixtures.length} fixtures. ${h2hPassedCount} passed H2H. ${h2hSkippedCount} were skipped without H2H. ${scorePassedCount} passed the score gate. Saved ${itemsSaved} qualified fixtures (min: 100, max: 200).`,
+      message: `Fetched ${fixtures.length} fixtures. ${h2hPassedCount} passed H2H. ${h2hSkippedCount} were skipped without H2H. ${scorePassedCount} passed the score gate. Saved ${itemsSaved} qualified fixtures (min: 200, max: 300).`,
       created_at: isoNow(),
       updated_at: isoNow(),
     });

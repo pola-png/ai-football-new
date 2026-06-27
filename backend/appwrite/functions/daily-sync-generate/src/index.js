@@ -71,6 +71,14 @@ function popularityBonus(leagueId, leagueName = "") {
   return isWorldCupCompetitionName(leagueName) ? 30 : 0;
 }
 
+function isCountryMatch(fixture) {
+  return Boolean(
+    fixture?.teams?.home?.national ||
+      fixture?.teams?.away?.national ||
+      isWorldCupCompetitionName(fixture?.league?.name),
+  );
+}
+
 function countOddsSignalsLocal(oddsRows) {
   let signals = 0;
   for (const row of Array.isArray(oddsRows) ? oddsRows : []) {
@@ -94,7 +102,7 @@ function countOddsSignalsLocal(oddsRows) {
   return signals;
 }
 
-function scoreFixture({ oddsRows, leagueId }) {
+function scoreFixture({ oddsRows, h2hRows, leagueId, leagueName, isCountry }) {
   let score = 0;
   const reasons = [];
 
@@ -113,6 +121,17 @@ function scoreFixture({ oddsRows, leagueId }) {
   if (bonus > 0) {
     score += bonus;
     reasons.push("popular-league");
+  }
+
+  const h2hCount = Array.isArray(h2hRows) ? h2hRows.length : 0;
+  if (h2hCount > 0) {
+    score += Math.min(35, 10 + h2hCount * 3);
+    reasons.push("has-h2h");
+  }
+
+  if (isCountry || isWorldCupCompetitionName(leagueName)) {
+    score += 40;
+    reasons.push("country-match");
   }
 
   return { score, reasons };
@@ -885,7 +904,8 @@ export default async function main(context) {
       });
     }
 
-    const maxFixtures = Number.parseInt(process.env.MAX_FIXTURES || "130", 10);
+    const maxFixtures = Number.parseInt(process.env.MAX_FIXTURES || "300", 10);
+    const minSelectionTarget = 200;
     const minPerHour = Math.max(
       1,
       Number.parseInt(process.env.MIN_FIXTURES_PER_HOUR || "1", 10) || 1,
@@ -960,8 +980,10 @@ export default async function main(context) {
     async function scoreOneFixtureSafe(f) {
       const fixtureId = String(f?.fixture?.id ?? "");
       const leagueId = f?.league?.id ?? null;
+      const leagueName = f?.league?.name || "";
+      const countryMatch = isCountryMatch(f);
       let oddsRows = [];
-      const h2hFixtures = [];
+      let h2hFixtures = [];
 
       try {
         const oddsPayload = await fetchApiFootballJson("/odds", {
@@ -989,12 +1011,44 @@ export default async function main(context) {
         oddsRows = [];
       }
 
+      try {
+        h2hFixtures = await fetchCachedH2HRowsForPair(
+          tablesdb,
+          databaseId,
+          h2hTable,
+          fixtureId,
+          f?.teams?.home?.id ?? null,
+          f?.teams?.away?.id ?? null,
+        );
+      } catch (_) {
+        h2hFixtures = [];
+      }
+
+      const priorityBucket =
+        countryMatch ||
+        isWorldCupCompetitionName(leagueName) ||
+        popularityBonus(leagueId, leagueName) > 0
+          ? 0
+          : h2hFixtures.length > 0
+            ? 1
+            : 2;
+
       const { score, reasons } = scoreFixture({
         oddsRows,
+        h2hRows: h2hFixtures,
         leagueId,
+        leagueName,
+        isCountry: countryMatch,
       });
 
-      return { fixture: f, score, reasons, oddsRows, h2hFixtures };
+      return {
+        fixture: f,
+        score,
+        reasons,
+        oddsRows,
+        h2hFixtures,
+        priorityBucket,
+      };
     }
 
     async function scoreHour(hourFixtures) {
@@ -1099,46 +1153,12 @@ export default async function main(context) {
       return true;
     };
 
-    // Rule A - popular leagues first, even if they exceed the soft cap.
-    for (const hour of allHours) {
-      for (const item of scoredByHour.get(hour) ?? []) {
-        if (
-          popularityBonus(
-            item.fixture?.league?.id,
-            item.fixture?.league?.name,
-          ) === 0
-        ) {
-          continue;
-        }
-
-        selectItem(item, hour);
+    const comparePriority = (a, b) => {
+      const bucketDiff = (a.priorityBucket ?? 2) - (b.priorityBucket ?? 2);
+      if (bucketDiff !== 0) {
+        return bucketDiff;
       }
-    }
 
-    // Rule B - guarantee a minimum per hour before the global fill.
-    for (const hour of allHours) {
-      const pool = (scoredByHour.get(hour) ?? []).filter((item) => {
-        const id = String(item.fixture?.fixture?.id ?? "");
-        return id && !usedIds.has(id);
-      });
-
-      for (const item of pool.slice(0, minPerHour)) {
-        selectItem(item, hour);
-      }
-    }
-
-    const remaining = [];
-    for (const hour of allHours) {
-      for (const item of scoredByHour.get(hour) ?? []) {
-        const id = String(item.fixture?.fixture?.id ?? "");
-        if (!id || usedIds.has(id)) {
-          continue;
-        }
-        remaining.push({ ...item, hour });
-      }
-    }
-
-    remaining.sort((a, b) => {
       const scoreDiff = b.score - a.score;
       if (scoreDiff !== 0) {
         return scoreDiff;
@@ -1151,18 +1171,76 @@ export default async function main(context) {
         return popularityDiff;
       }
 
-      return String(a.fixture?.fixture?.id ?? "").localeCompare(String(b.fixture?.fixture?.id ?? ""));
-    });
+      return String(a.fixture?.fixture?.id ?? "").localeCompare(
+        String(b.fixture?.fixture?.id ?? ""),
+      );
+    };
 
-    for (const item of remaining) {
-      if (
-        selected.length >= maxFixtures &&
-        popularityBonus(item.fixture?.league?.id, item.fixture?.league?.name) === 0
-      ) {
-        break;
+    const selectBucket = (bucketValue) => {
+      for (const hour of allHours) {
+        const bucketItems = (scoredByHour.get(hour) ?? [])
+          .filter((item) => {
+            const id = String(item.fixture?.fixture?.id ?? "");
+            return (
+              id &&
+              !usedIds.has(id) &&
+              (item.priorityBucket ?? 2) === bucketValue
+            );
+          })
+          .sort(comparePriority);
+
+        for (const item of bucketItems) {
+          if (selected.length >= maxFixtures) {
+            return;
+          }
+          selectItem(item, hour);
+        }
       }
-      selectItem(item, item.hour);
+    };
+
+    // Priority order:
+    // 1) world cup / country / popular
+    // 2) fixtures with H2H
+    // 3) fixtures without H2H
+    selectBucket(0);
+    selectBucket(1);
+    selectBucket(2);
+
+    if (selected.length < minSelectionTarget) {
+      const topUpCandidates = [];
+      for (const hour of allHours) {
+        for (const item of scoredByHour.get(hour) ?? []) {
+          const id = String(item.fixture?.fixture?.id ?? "");
+          if (!id || usedIds.has(id)) {
+            continue;
+          }
+          topUpCandidates.push({ ...item, hour });
+        }
+      }
+
+      topUpCandidates.sort(comparePriority);
+
+      for (const item of topUpCandidates) {
+        if (selected.length >= Math.min(maxFixtures, minSelectionTarget)) {
+          break;
+        }
+        selectItem(item, item.hour);
+      }
     }
+
+    const selectionTargetReached =
+      selected.length >= Math.min(minSelectionTarget, upcomingFixtures.length);
+    appwriteLog(
+      JSON.stringify({
+        job: "daily-sync-generate",
+        stage: "step-4-selection-verify",
+        target_min_selected: minSelectionTarget,
+        total_available: upcomingFixtures.length,
+        selected_after_fill: selected.length,
+        target_reached: selectionTargetReached,
+      }),
+    );
+
     // Sort final list by kickoff time ascending
     selected.sort(
       (a, b) => (a.kickoff?.getTime() ?? 0) - (b.kickoff?.getTime() ?? 0),
@@ -1188,6 +1266,7 @@ export default async function main(context) {
         popular_included: popularCount,
         world_cup_included: worldCupCount,
         total_selected: selected.length,
+        target_min_selected: minSelectionTarget,
         max_cap: maxFixtures,
         min_per_hour: minPerHour,
         hours_represented: Object.keys(hourCounts).length,
