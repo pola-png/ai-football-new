@@ -3,6 +3,7 @@ import 'package:appwrite/appwrite.dart';
 
 import 'app_auth_service.dart';
 import 'appwrite_config.dart';
+import 'prediction_repository.dart';
 
 class PredictionComment {
   const PredictionComment({
@@ -64,6 +65,56 @@ class PredictionSocialSnapshot {
 
   final List<PredictionComment> comments;
   final Map<String, int> selectionCounts;
+}
+
+class ChatMessageRecord {
+  const ChatMessageRecord({
+    required this.id,
+    required this.roomId,
+    required this.userId,
+    required this.userName,
+    required this.message,
+    required this.createdAt,
+    required this.parentMessageId,
+    required this.selectionFixtureApiId,
+    required this.selectionText,
+  });
+
+  final String id;
+  final String roomId;
+  final String userId;
+  final String userName;
+  final String message;
+  final DateTime? createdAt;
+  final String? parentMessageId;
+  final String? selectionFixtureApiId;
+  final String? selectionText;
+}
+
+class PickedMatchRecord {
+  const PickedMatchRecord({
+    required this.selectionRowId,
+    required this.selectedAt,
+    required this.selection,
+    required this.prediction,
+  });
+
+  final String selectionRowId;
+  final DateTime? selectedAt;
+  final String selection;
+  final PredictionRecord prediction;
+}
+
+class PickedMatchGroup {
+  const PickedMatchGroup({
+    required this.date,
+    required this.label,
+    required this.picks,
+  });
+
+  final DateTime date;
+  final String label;
+  final List<PickedMatchRecord> picks;
 }
 
 class SocialEngagementService {
@@ -142,6 +193,15 @@ class SocialEngagementService {
     }
 
     final rowId = '${fixtureApiId}_${user.id}';
+    if (selection.trim().isEmpty) {
+      await _db.deleteRow(
+        databaseId: appwriteDatabaseId,
+        tableId: appwritePredictionSelectionsTableId,
+        rowId: rowId,
+      ).catchError((_) {});
+      return;
+    }
+
     final now = DateTime.now().toUtc().toIso8601String();
     await _db.createRow(
       databaseId: appwriteDatabaseId,
@@ -238,6 +298,28 @@ class SocialEngagementService {
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       },
     );
+  }
+
+  Future<void> clearSelectedPicks() async {
+    final user = AppAuthService.instance.currentUser;
+    if (user == null) {
+      return;
+    }
+
+    final rows = await _listAllRows(
+      tableId: appwritePredictionSelectionsTableId,
+      queries: [
+        Query.equal('user_id', user.id),
+      ],
+    );
+
+    for (final row in rows.rows) {
+      await _db.deleteRow(
+        databaseId: appwriteDatabaseId,
+        tableId: appwritePredictionSelectionsTableId,
+        rowId: row.$id,
+      ).catchError((_) {});
+    }
   }
 
   Future<List<LeaderboardEntry>> fetchLeaderboard() async {
@@ -380,6 +462,215 @@ class SocialEngagementService {
     );
   }
 
+  Future<List<PickedMatchGroup>> fetchPickedMatchesByDate() async {
+    final user = AppAuthService.instance.currentUser;
+    if (user == null) {
+      return const [];
+    }
+
+    final selectedRows = await _listAllRows(
+      tableId: appwritePredictionSelectionsTableId,
+      queries: [
+        Query.equal('user_id', user.id),
+        Query.orderDesc('created_at'),
+      ],
+    );
+
+    final activeSelections = selectedRows.rows.where((row) {
+      final selection = _asString(row.data['selection'])?.trim() ?? '';
+      return selection.isNotEmpty;
+    }).toList();
+
+    if (activeSelections.isEmpty) {
+      return const [];
+    }
+
+    final publishedPredictions = await PredictionRepository(client: _client)
+        .fetchPublishedPredictions();
+    final predictionByFixture = {
+      for (final prediction in publishedPredictions) prediction.fixtureApiId: prediction,
+    };
+
+    final grouped = <String, _PickedMatchGroupBuilder>{};
+    for (final row in activeSelections) {
+      final fixtureApiId = _asString(row.data['fixture_api_id'])?.trim() ?? '';
+      if (fixtureApiId.isEmpty) {
+        continue;
+      }
+
+      final prediction = predictionByFixture[fixtureApiId];
+      if (prediction == null) {
+        continue;
+      }
+
+      final selectedAt = DateTime.tryParse(_asString(row.data['created_at']) ?? '');
+      final groupDate = (prediction.kickoffAt ?? selectedAt ?? DateTime.now()).toLocal();
+      final dateKey = _dateOnlyKey(groupDate);
+      grouped.putIfAbsent(
+        dateKey,
+        () => _PickedMatchGroupBuilder(date: _dateOnly(groupDate)),
+      ).picks.add(
+        PickedMatchRecord(
+          selectionRowId: row.$id,
+          selectedAt: selectedAt,
+          selection: _asString(row.data['selection'])?.trim() ?? '',
+          prediction: prediction,
+        ),
+      );
+    }
+
+    final groups = grouped.values.toList()
+      ..sort((left, right) => left.date.compareTo(right.date));
+
+    return groups
+        .map((group) => PickedMatchGroup(
+              date: group.date,
+              label: _formatPickedGroupLabel(group.date),
+              picks: List<PickedMatchRecord>.from(group.picks)
+                ..sort((left, right) {
+                  final leftKickoff = left.prediction.kickoffAt ?? left.selectedAt;
+                  final rightKickoff = right.prediction.kickoffAt ?? right.selectedAt;
+                  if (leftKickoff == null && rightKickoff == null) {
+                    return left.prediction.fixtureApiId.compareTo(right.prediction.fixtureApiId);
+                  }
+                  if (leftKickoff == null) return 1;
+                  if (rightKickoff == null) return -1;
+                  return leftKickoff.toUtc().compareTo(rightKickoff.toUtc());
+                }),
+            ))
+        .toList();
+  }
+
+  Future<List<ChatMessageRecord>> fetchChatMessages({String roomId = appwriteChatRoomId}) async {
+    final rows = await _listAllRows(
+      tableId: appwriteChatMessagesTableId,
+      queries: [
+        Query.equal('room_id', roomId),
+        Query.orderAsc('created_at'),
+      ],
+    );
+
+    return rows.rows.map((row) {
+      return ChatMessageRecord(
+        id: row.$id,
+        roomId: _asString(row.data['room_id']) ?? roomId,
+        userId: _asString(row.data['user_id']) ?? '',
+        userName: _asString(row.data['user_name']) ?? 'User',
+        message: _asString(row.data['message']) ?? '',
+        createdAt: DateTime.tryParse(_asString(row.data['created_at']) ?? ''),
+        parentMessageId: _asString(row.data['parent_message_id']),
+        selectionFixtureApiId: _asString(row.data['selection_fixture_api_id']),
+        selectionText: _asString(row.data['selection_text']),
+      );
+    }).toList();
+  }
+
+  Future<Map<String, int>> fetchChatLikeCounts({String roomId = appwriteChatRoomId}) async {
+    final rows = await _listAllRows(
+      tableId: appwriteChatMessageLikesTableId,
+      queries: [
+        Query.equal('room_id', roomId),
+      ],
+    );
+
+    final counts = <String, int>{};
+    for (final row in rows.rows) {
+      final messageId = _asString(row.data['message_id'])?.trim();
+      if (messageId == null || messageId.isEmpty) {
+        continue;
+      }
+      counts[messageId] = (counts[messageId] ?? 0) + 1;
+    }
+    return counts;
+  }
+
+  Future<void> sendChatMessage({
+    String roomId = appwriteChatRoomId,
+    required String message,
+    String? parentMessageId,
+    String? selectionFixtureApiId,
+    String? selectionText,
+  }) async {
+    final user = AppAuthService.instance.currentUser;
+    if (user == null) {
+      return;
+    }
+
+    final text = message.trim();
+    if (text.isEmpty) {
+      return;
+    }
+
+    final now = DateTime.now().toUtc().toIso8601String();
+    await _db.createRow(
+      databaseId: appwriteDatabaseId,
+      tableId: appwriteChatMessagesTableId,
+      rowId: ID.unique(),
+      data: {
+        'room_id': roomId,
+        'user_id': user.id,
+        'user_name': user.name,
+        'message': text,
+        'parent_message_id': parentMessageId,
+        'selection_fixture_api_id': selectionFixtureApiId,
+        'selection_text': selectionText,
+        'created_at': now,
+        'updated_at': now,
+      },
+      permissions: [
+        Permission.read(Role.users()),
+        Permission.create(Role.user(user.id)),
+        Permission.update(Role.user(user.id)),
+        Permission.delete(Role.user(user.id)),
+      ],
+    );
+  }
+
+  Future<void> toggleChatLike({
+    String roomId = appwriteChatRoomId,
+    required String messageId,
+  }) async {
+    final user = AppAuthService.instance.currentUser;
+    if (user == null) {
+      return;
+    }
+
+    final likeRowId = '${roomId}_${messageId}_${user.id}';
+    final existing = await _db.getRow(
+      databaseId: appwriteDatabaseId,
+      tableId: appwriteChatMessageLikesTableId,
+      rowId: likeRowId,
+    ).catchError((_) => null);
+
+    if (existing == null) {
+      final now = DateTime.now().toUtc().toIso8601String();
+      await _db.createRow(
+        databaseId: appwriteDatabaseId,
+        tableId: appwriteChatMessageLikesTableId,
+        rowId: likeRowId,
+        data: {
+          'room_id': roomId,
+          'message_id': messageId,
+          'user_id': user.id,
+          'created_at': now,
+          'updated_at': now,
+        },
+        permissions: [
+          Permission.read(Role.users()),
+          Permission.create(Role.user(user.id)),
+          Permission.delete(Role.user(user.id)),
+        ],
+      );
+      return;
+    }
+
+    await _db.deleteRow(
+      databaseId: appwriteDatabaseId,
+      tableId: appwriteChatMessageLikesTableId,
+      rowId: likeRowId,
+    );
+  }
+
   Stream<PredictionSocialSnapshot> watchPrediction(String fixtureApiId) async* {
     yield PredictionSocialSnapshot(
       comments: await fetchComments(fixtureApiId),
@@ -401,6 +692,28 @@ class SocialEngagementService {
     } finally {
       subscription.close();
     }
+  }
+
+  Stream<List<ChatMessageRecord>> watchChatMessages({String roomId = appwriteChatRoomId}) async* {
+    yield await fetchChatMessages(roomId: roomId);
+
+    final subscription = _rt.subscribe([
+      'databases.$appwriteDatabaseId.tables.$appwriteChatMessagesTableId.rows',
+      'databases.$appwriteDatabaseId.tables.$appwriteChatMessageLikesTableId.rows',
+    ]);
+
+    try {
+      await for (final _ in subscription.stream) {
+        yield await fetchChatMessages(roomId: roomId);
+      }
+    } finally {
+      subscription.close();
+    }
+  }
+
+  Future<List<PredictionRecord>> fetchPickedPredictions() async {
+    final groups = await fetchPickedMatchesByDate();
+    return groups.expand((group) => group.picks.map((pick) => pick.prediction)).toList();
   }
 
   Stream<List<LeaderboardEntry>> watchLeaderboard() async* {
@@ -436,6 +749,13 @@ class SocialEngagementService {
   }
 }
 
+class _PickedMatchGroupBuilder {
+  _PickedMatchGroupBuilder({required this.date});
+
+  final DateTime date;
+  final List<PickedMatchRecord> picks = <PickedMatchRecord>[];
+}
+
 String? _asString(dynamic value) => value is String ? value : value?.toString();
 
 int _asInt(dynamic value) {
@@ -443,4 +763,77 @@ int _asInt(dynamic value) {
     return value;
   }
   return int.tryParse(_asString(value) ?? '') ?? 0;
+}
+
+Future<_ListRowsResult> _listAllRowsHelper({
+  required TablesDB db,
+  required String databaseId,
+  required String tableId,
+  required List<String> queries,
+}) async {
+  final rows = <dynamic>[];
+  var offset = 0;
+  while (true) {
+    final response = await db.listRows(
+      databaseId: databaseId,
+      tableId: tableId,
+      queries: [
+        ...queries,
+        Query.limit(100),
+        Query.offset(offset),
+      ],
+      total: false,
+    );
+    rows.addAll(response.rows);
+    if (response.rows.length < 100) {
+      break;
+    }
+    offset += 100;
+  }
+  return _ListRowsResult(rows);
+}
+
+extension on SocialEngagementService {
+  Future<_ListRowsResult> _listAllRows({
+    required String tableId,
+    required List<String> queries,
+  }) {
+    return _listAllRowsHelper(
+      db: _db,
+      databaseId: appwriteDatabaseId,
+      tableId: tableId,
+      queries: queries,
+    );
+  }
+}
+
+class _ListRowsResult {
+  _ListRowsResult(this.rows);
+  final List<dynamic> rows;
+}
+
+String _dateOnlyKey(DateTime date) {
+  final local = date.toLocal();
+  final year = local.year.toString().padLeft(4, '0');
+  final month = local.month.toString().padLeft(2, '0');
+  final day = local.day.toString().padLeft(2, '0');
+  return '$year-$month-$day';
+}
+
+DateTime _dateOnly(DateTime date) => DateTime(date.year, date.month, date.day);
+
+String _formatPickedGroupLabel(DateTime date) {
+  final now = DateTime.now();
+  final local = date.toLocal();
+  final diff = _dateOnly(local).difference(_dateOnly(now)).inDays;
+  if (diff == 0) {
+    return 'Today';
+  }
+  if (diff == 1) {
+    return 'Tomorrow';
+  }
+  if (diff == -1) {
+    return 'Yesterday';
+  }
+  return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')}';
 }

@@ -38,6 +38,21 @@ const String appwritePredictionSelectionsTableId = String.fromEnvironment(
   defaultValue: 'prediction_selections',
 );
 
+const String appwriteChatMessagesTableId = String.fromEnvironment(
+  'APPWRITE_CHAT_MESSAGES_TABLE_ID',
+  defaultValue: 'chat_messages',
+);
+
+const String appwriteChatMessageLikesTableId = String.fromEnvironment(
+  'APPWRITE_CHAT_MESSAGE_LIKES_TABLE_ID',
+  defaultValue: 'chat_message_likes',
+);
+
+const String appwriteChatRoomId = String.fromEnvironment(
+  'APPWRITE_CHAT_ROOM_ID',
+  defaultValue: 'general',
+);
+
 const String appwriteDailyCheckinsTableId = String.fromEnvironment(
   'APPWRITE_DAILY_CHECKINS_TABLE_ID',
   defaultValue: 'daily_checkins',

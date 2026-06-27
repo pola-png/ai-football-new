@@ -79,6 +79,7 @@ Optional:
 See [`schema.md`](./schema.md) for the exact tables and columns.
 
 For the app to read data directly from Appwrite, give `teams`, `leagues`, `fixtures`, `predictions`, and `results` read access for `Any` at the table level or equivalent row-level permissions. Keep `sync_runs` private.
+For the chat and social features, allow authenticated access to `chat_messages`, `chat_message_likes`, `prediction_comments`, `prediction_selections`, `daily_checkins`, `prediction_challenges`, and `challenge_entries`.
 
 ## Functions
 

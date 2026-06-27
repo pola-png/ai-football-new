@@ -9,8 +9,8 @@ Use one Appwrite database with the tables below.
 ## Table Permissions
 
 - Give read access to `teams`, `leagues`, `fixtures`, `fixture_odds`, `fixture_h2h_history`, `predictions`, and `results` so the Flutter app can read published data.
-- Give authenticated read access to `user_profiles`, `prediction_comments`, `prediction_selections`, `daily_checkins`, `prediction_challenges`, and `challenge_entries`.
-- Allow authenticated write access to `user_profiles`, `prediction_comments`, `prediction_selections`, `daily_checkins`, and `challenge_entries`.
+- Give authenticated read access to `user_profiles`, `prediction_comments`, `prediction_selections`, `chat_messages`, `chat_message_likes`, `daily_checkins`, `prediction_challenges`, and `challenge_entries`.
+- Allow authenticated write access to `user_profiles`, `prediction_comments`, `prediction_selections`, `chat_messages`, `chat_message_likes`, `daily_checkins`, and `challenge_entries`.
 - Keep `sync_runs` private.
 - Keep write access for the prediction tables limited to Appwrite Functions.
 
@@ -269,6 +269,34 @@ Columns:
 - `user_id` `text` required unique indexed
 - `user_name` `text` required indexed
 - `selection` `text` required indexed
+- `created_at` `datetime` required
+- `updated_at` `datetime` required
+
+## `chat_messages`
+
+Stores general chat messages, replies, and shared picks.
+
+Columns:
+
+- `room_id` `text` required indexed default `general`
+- `user_id` `text` required indexed
+- `user_name` `text` required indexed
+- `message` `mediumtext` required
+- `parent_message_id` `text` optional indexed
+- `selection_fixture_api_id` `text` optional indexed
+- `selection_text` `text` optional
+- `created_at` `datetime` required indexed
+- `updated_at` `datetime` required
+
+## `chat_message_likes`
+
+Stores likes for chat messages.
+
+Columns:
+
+- `room_id` `text` required indexed default `general`
+- `message_id` `text` required indexed
+- `user_id` `text` required indexed
 - `created_at` `datetime` required
 - `updated_at` `datetime` required
 

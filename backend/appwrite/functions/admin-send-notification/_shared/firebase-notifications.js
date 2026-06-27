@@ -47,6 +47,20 @@ function base64UrlEncode(input) {
     .replace(/\//g, '_');
 }
 
+function createTimeoutSignal(timeoutMs, step) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort(new Error(`Timed out after ${timeoutMs}ms`));
+  }, timeoutMs);
+
+  return {
+    signal: controller.signal,
+    clear() {
+      clearTimeout(timeoutId);
+    },
+  };
+}
+
 function signJwt(payload, privateKey) {
   const header = {
     alg: 'RS256',
@@ -77,18 +91,32 @@ async function getAccessToken(serviceAccount) {
     serviceAccount.privateKey,
   );
 
+  logStep('firebase.token.http.start', {
+    projectId: serviceAccount.projectId,
+    jwtLength: jwt.length,
+  });
+
+  const timeout = createTimeoutSignal(15000, 'firebase.token.http.timeout');
   const response = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
     },
+    signal: timeout.signal,
     body: new URLSearchParams({
       grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
       assertion: jwt,
     }),
-  });
+  }).finally(() => timeout.clear());
 
   const text = await response.text();
+  logStep('firebase.token.http.done', {
+    projectId: serviceAccount.projectId,
+    status: response.status,
+    ok: response.ok,
+    responseLength: text.length,
+  });
+
   if (!response.ok) {
     throw new Error(`OAuth token request failed with status ${response.status}: ${text}`);
   }
@@ -153,6 +181,7 @@ async function sendPredictionTopicNotification({
     payloadKeys: Object.keys(message.message || {}),
   });
 
+  const sendTimeout = createTimeoutSignal(15000, 'firebase.send.http.timeout');
   const response = await fetch(
     `https://fcm.googleapis.com/v1/projects/${serviceAccount.projectId}/messages:send`,
     {
@@ -162,10 +191,18 @@ async function sendPredictionTopicNotification({
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(message),
+      signal: sendTimeout.signal,
     },
-  );
+  ).finally(() => sendTimeout.clear());
 
   const responseText = await response.text();
+  logStep('firebase.send.request.done', {
+    projectId: serviceAccount.projectId,
+    topicId,
+    status: response.status,
+    ok: response.ok,
+    responseLength: responseText.length,
+  });
   if (!response.ok) {
     throw new Error(
       `FCM request failed with status ${response.status}: ${responseText}`,

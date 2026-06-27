@@ -12,6 +12,7 @@ import 'admin_access_service.dart';
 import 'admin_notification_page.dart';
 import 'ad_gate_service.dart';
 import 'account_deletion_page.dart';
+import 'chat_page.dart';
 import 'appwrite_subscription_service.dart';
 import 'community_page.dart';
 import 'feed_banner_ad.dart';
@@ -583,7 +584,7 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
     );
   }
 
-  void _clearSelections() {
+  Future<void> _clearSelections() async {
     if (_selectedPredictions.isEmpty) {
       return;
     }
@@ -591,6 +592,8 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
     setState(() {
       _selectedPredictions.clear();
     });
+
+    await SocialEngagementService.instance.clearSelectedPicks();
   }
 
   void _openPickedTab() {
@@ -598,7 +601,7 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
       MaterialPageRoute<void>(
         builder: (_) => PickedMatchesPage(
           selectedPredictions: _selectedItems,
-          onClearAll: _selectedItems.isEmpty ? null : _clearSelections,
+          onClearAll: _selectedItems.isEmpty ? null : () => unawaited(_clearSelections()),
         ),
       ),
     );
@@ -794,6 +797,9 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
                     currentPlans: GooglePlayBillingService.instance.plans,
                   ),
                   const CommunityPage(),
+                  ChatPage(
+                    hasAdFreeAccess: adFree || rewardedAdFree || isAdmin,
+                  ),
                 ],
               ),
               bottomNavigationBar: Column(
@@ -842,12 +848,20 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
                               label: 'Premium Plan',
                             ),
                             NavigationDestination(
-                              icon: const Icon(Icons.chat_bubble_outline),
+                              icon: const Icon(Icons.groups_outlined),
                               selectedIcon: _PulsingIcon(
-                                icon: Icons.chat_bubble,
+                                icon: Icons.groups,
                                 isActive: _currentIndex == 2,
                               ),
                               label: 'Group',
+                            ),
+                            NavigationDestination(
+                              icon: const Icon(Icons.chat_bubble_outline),
+                              selectedIcon: _PulsingIcon(
+                                icon: Icons.chat_bubble,
+                                isActive: _currentIndex == 3,
+                              ),
+                              label: 'Chat',
                             ),
                           ],
                         ),
@@ -1994,7 +2008,7 @@ class _DedicatedPlanScreenState extends State<_DedicatedPlanScreen> {
   }
 }
 
-class PickedMatchesPage extends StatelessWidget {
+class PickedMatchesPage extends StatefulWidget {
   const PickedMatchesPage({
     super.key,
     required this.selectedPredictions,
@@ -2005,12 +2019,47 @@ class PickedMatchesPage extends StatelessWidget {
   final VoidCallback? onClearAll;
 
   @override
+  State<PickedMatchesPage> createState() => _PickedMatchesPageState();
+}
+
+class _PickedMatchesPageState extends State<PickedMatchesPage> {
+  late Future<List<PickedMatchGroup>> _groupsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _groupsFuture = _loadGroups();
+  }
+
+  Future<List<PickedMatchGroup>> _loadGroups() async {
+    final backendGroups = await SocialEngagementService.instance.fetchPickedMatchesByDate();
+    if (backendGroups.isNotEmpty) {
+      return backendGroups;
+    }
+    return _buildFallbackGroups(widget.selectedPredictions);
+  }
+
+  Future<void> _refresh() async {
+    setState(() {
+      _groupsFuture = _loadGroups();
+    });
+    await _groupsFuture;
+  }
+
+  Future<void> _clearAll() async {
+    if (widget.onClearAll != null) {
+      widget.onClearAll!();
+    }
+    await _refresh();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final primaryText = _primaryText(context);
     final surface = _screenSurface(context);
     final border = _screenBorder(context);
     final headerSurface = _screenSurface(context, elevated: true);
-    final screenWidth = MediaQuery.sizeOf(context).width;
+
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -2020,166 +2069,242 @@ class PickedMatchesPage extends StatelessWidget {
         ),
       ),
       child: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(0, 12, 0, 20),
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Row(
+        child: RefreshIndicator(
+          onRefresh: _refresh,
+          child: FutureBuilder<List<PickedMatchGroup>>(
+            future: _groupsFuture,
+            builder: (context, snapshot) {
+              final groups = snapshot.data ?? const <PickedMatchGroup>[];
+              return ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(0, 12, 0, 20),
                 children: [
-                  Expanded(
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Picked Matches',
+                            style: TextStyle(
+                              color: _primaryText(context),
+                              fontSize: 28,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        if (groups.isNotEmpty)
+                          TextButton.icon(
+                            onPressed: _clearAll,
+                            icon: const Icon(Icons.delete_outline),
+                            label: const Text('Clear'),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: Text(
-                      'Picked Matches',
+                      'Your picks are saved in the backend and grouped by match date.',
                       style: TextStyle(
-                        color: _primaryText(context),
-                        fontSize: 28,
-                        fontWeight: FontWeight.w900,
+                        color: _secondaryText(context),
+                        fontSize: 13,
+                        height: 1.4,
                       ),
                     ),
                   ),
-                  if (onClearAll != null)
-                    TextButton.icon(
-                      onPressed: onClearAll,
-                      icon: const Icon(Icons.delete_outline),
-                      label: const Text('Clear'),
-                    ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Text(
-                'All selected matches are arranged below in table form.',
-                style: TextStyle(
-                  color: _secondaryText(context),
-                  fontSize: 13,
-                  height: 1.4,
-                ),
-              ),
-            ),
-            const SizedBox(height: 14),
-            if (selectedPredictions.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: _EmptyState(
-                  icon: Icons.fact_check_outlined,
-                  title: 'No picked matches yet',
-                  message: 'Select an unlocked match from Home to see it here.',
-                ),
-              )
-            else
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 0),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: surface,
-                    borderRadius: BorderRadius.zero,
-                    border: Border.symmetric(
-                      vertical: BorderSide(color: border),
-                    ),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: DataTable(
-                        columnSpacing: 8,
-                        horizontalMargin: 12,
-                        headingRowHeight: 38,
-                        dataRowMinHeight: 40,
-                        dataRowMaxHeight: 56,
-                        headingRowColor: WidgetStatePropertyAll(headerSurface),
-                        dataRowColor: WidgetStatePropertyAll(surface),
-                        columns: [
-                          DataColumn(
-                            label: Text(
-                              'Time',
-                              style: TextStyle(color: primaryText, fontSize: 11, fontWeight: FontWeight.w700),
-                            ),
+                  const SizedBox(height: 14),
+                  if (groups.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: _EmptyState(
+                        icon: Icons.fact_check_outlined,
+                        title: 'No picked matches yet',
+                        message: 'Select an unlocked match from Home to save it here by date.',
+                      ),
+                    )
+                  else
+                    ...groups.map((group) {
+                      return Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: surface,
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(color: border),
                           ),
-                          DataColumn(
-                            label: Text(
-                              'Match',
-                              style: TextStyle(color: primaryText, fontSize: 11, fontWeight: FontWeight.w700),
-                            ),
-                          ),
-                          DataColumn(
-                            label: Text(
-                              'Conf',
-                              style: TextStyle(color: primaryText, fontSize: 11, fontWeight: FontWeight.w700),
-                            ),
-                          ),
-                          DataColumn(
-                            label: Text(
-                              'Pick',
-                              style: TextStyle(color: primaryText, fontSize: 11, fontWeight: FontWeight.w700),
-                            ),
-                          ),
-                        ],
-                        rows: selectedPredictions.map((prediction) {
-                          final cellStyle = TextStyle(
-                            color: primaryText,
-                            fontSize: 11,
-                            height: 1.2,
-                          );
-                          return DataRow(
-                            cells: [
-                              DataCell(
-                                Text(
-                                  _formatTimeOnly(
-                                    prediction.kickoffAt ?? prediction.releaseAt,
-                                  ),
-                                  style: cellStyle,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                decoration: BoxDecoration(
+                                  color: headerSurface,
+                                  borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
                                 ),
-                              ),
-                              DataCell(
-                                ConstrainedBox(
-                                  constraints: BoxConstraints(
-                                    maxWidth: screenWidth * 0.28,
-                                  ),
-                                  child: Text(
-                                    '${prediction.homeTeamName ?? 'Home'} v ${prediction.awayTeamName ?? 'Away'}',
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: cellStyle,
-                                  ),
-                                ),
-                              ),
-                              DataCell(
-                                Text(
-                                  _confidenceBadgeLabel(prediction)[0].toUpperCase(),
-                                  style: cellStyle,
-                                ),
-                              ),
-                              DataCell(
-                                ConstrainedBox(
-                                  constraints: BoxConstraints(
-                                    maxWidth: screenWidth * 0.26,
-                                  ),
-                                  child: Text(
-                                    _finalSelection(
-                                      _PickCardData.fromPick(
-                                        'Primary pick',
-                                        prediction.primaryPick,
-                                        const Color(0xFF00D4AA),
-                                        prediction,
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        group.label,
+                                        style: TextStyle(
+                                          color: primaryText,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w800,
+                                        ),
                                       ),
                                     ),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: cellStyle,
-                                  ),
+                                    Text(
+                                      '${group.picks.length} picks',
+                                      style: TextStyle(
+                                        color: _secondaryText(context),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              SingleChildScrollView(
+                                scrollDirection: Axis.horizontal,
+                                child: DataTable(
+                                  columnSpacing: 12,
+                                  horizontalMargin: 12,
+                                  headingRowHeight: 38,
+                                  dataRowMinHeight: 40,
+                                  dataRowMaxHeight: 64,
+                                  headingRowColor: WidgetStatePropertyAll(headerSurface),
+                                  dataRowColor: WidgetStatePropertyAll(surface),
+                                  columns: [
+                                    DataColumn(
+                                      label: Text(
+                                        'Time',
+                                        style: TextStyle(color: primaryText, fontSize: 11, fontWeight: FontWeight.w700),
+                                      ),
+                                    ),
+                                    DataColumn(
+                                      label: Text(
+                                        'Match',
+                                        style: TextStyle(color: primaryText, fontSize: 11, fontWeight: FontWeight.w700),
+                                      ),
+                                    ),
+                                    DataColumn(
+                                      label: Text(
+                                        'Pick',
+                                        style: TextStyle(color: primaryText, fontSize: 11, fontWeight: FontWeight.w700),
+                                      ),
+                                    ),
+                                  ],
+                                  rows: group.picks.map((pick) {
+                                    final cellStyle = TextStyle(
+                                      color: primaryText,
+                                      fontSize: 11,
+                                      height: 1.2,
+                                    );
+                                    return DataRow(
+                                      cells: [
+                                        DataCell(
+                                          Text(
+                                            _formatTimeOnly(
+                                              pick.prediction.kickoffAt ?? pick.selectedAt,
+                                            ),
+                                            style: cellStyle,
+                                          ),
+                                        ),
+                                        DataCell(
+                                          ConstrainedBox(
+                                            constraints: BoxConstraints(
+                                              maxWidth: MediaQuery.sizeOf(context).width * 0.42,
+                                            ),
+                                            child: Text(
+                                              '${pick.prediction.homeTeamName ?? 'Home'} v ${pick.prediction.awayTeamName ?? 'Away'}',
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: cellStyle,
+                                            ),
+                                          ),
+                                        ),
+                                        DataCell(
+                                          ConstrainedBox(
+                                            constraints: BoxConstraints(
+                                              maxWidth: MediaQuery.sizeOf(context).width * 0.34,
+                                            ),
+                                            child: Text(
+                                              pick.selection,
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: cellStyle,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    );
+                                  }).toList(),
                                 ),
                               ),
                             ],
-                          );
-                        }).toList(),
-                      ),
-                ),
-              ),
-          ],
+                          ),
+                        ),
+                      );
+                    }),
+                ],
+              );
+            },
+          ),
         ),
       ),
     );
   }
+}
+
+List<PickedMatchGroup> _buildFallbackGroups(List<PredictionRecord> predictions) {
+  if (predictions.isEmpty) {
+    return const <PickedMatchGroup>[];
+  }
+
+  final grouped = <String, List<PickedMatchRecord>>{};
+  final dateMap = <String, DateTime>{};
+  for (final prediction in predictions) {
+    final groupDate = (prediction.kickoffAt ?? prediction.releaseAt ?? DateTime.now()).toLocal();
+    final dateKey = _dateOnlyKey(groupDate);
+    final selection = prediction.primaryPick?.selection?.trim() ??
+        prediction.predictedWinner?.trim() ??
+        'Selected pick';
+    dateMap[dateKey] = _dateOnly(groupDate);
+    grouped.putIfAbsent(dateKey, () => <PickedMatchRecord>[]).add(
+      PickedMatchRecord(
+        selectionRowId: prediction.recordId ?? prediction.fixtureApiId,
+        selectedAt: prediction.publishedAt ?? prediction.releaseAt ?? DateTime.now(),
+        selection: selection,
+        prediction: prediction,
+      ),
+    );
+  }
+
+  final groups = grouped.entries.toList()
+    ..sort((left, right) => dateMap[left.key]!.compareTo(dateMap[right.key]!));
+
+  return groups
+      .map(
+        (group) => PickedMatchGroup(
+          date: dateMap[group.key]!,
+          label: _formatPickedGroupLabel(dateMap[group.key]!),
+          picks: List<PickedMatchRecord>.from(group.value)
+            ..sort((left, right) {
+              final leftKickoff = left.prediction.kickoffAt ?? left.selectedAt;
+              final rightKickoff = right.prediction.kickoffAt ?? right.selectedAt;
+              if (leftKickoff == null && rightKickoff == null) {
+                return left.prediction.fixtureApiId.compareTo(right.prediction.fixtureApiId);
+              }
+              if (leftKickoff == null) return 1;
+              if (rightKickoff == null) return -1;
+              return leftKickoff.toUtc().compareTo(rightKickoff.toUtc());
+            }),
+        ),
+      )
+      .toList();
 }
 
 class _PremiumUpgradeGate extends StatelessWidget {
