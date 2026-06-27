@@ -1,5 +1,5 @@
-const { getApps, initializeApp, cert } = require('firebase-admin/app');
-const { getMessaging } = require('firebase-admin/messaging');
+import { getApps, initializeApp, cert } from 'firebase-admin/app';
+import { getMessaging } from 'firebase-admin/messaging';
 
 function required(name) {
   const value = process.env[name];
@@ -69,6 +69,6 @@ async function sendPredictionTopicNotification({
   });
 }
 
-module.exports = {
+export {
   sendPredictionTopicNotification,
 };

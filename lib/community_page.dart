@@ -234,10 +234,11 @@ class _ProfileSummaryCard extends StatelessWidget {
       stream: SocialEngagementService.instance.watchLeaderboard(),
       builder: (context, snapshot) {
         final leaderboard = snapshot.data ?? const <LeaderboardEntry>[];
+        final userId = user?.id;
         LeaderboardEntry? current;
-        if (user != null) {
+        if (userId != null) {
           for (final entry in leaderboard) {
-            if (entry.userId == user.id) {
+            if (entry.userId == userId) {
               current = entry;
               break;
             }

@@ -1,9 +1,9 @@
-const {
+import {
   normalizeConfidenceLabel,
   normalizePredictionReason,
   pickAt,
   shouldKeepSelection,
-} = require('./ai');
+} from './ai.js';
 
 function isoNow() {
   return new Date().toISOString();
@@ -113,6 +113,6 @@ async function savePredictionRow({
   };
 }
 
-module.exports = {
+export {
   savePredictionRow,
 };

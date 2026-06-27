@@ -1,10 +1,7 @@
-import { createRequire } from 'module';
-
-const require = createRequire(import.meta.url);
-const { Client, TablesDB, ID, Query } = require('node-appwrite');
-const ai = require('./ai');
-const save = require('./save');
-const notify = require('./notify');
+import { Client, TablesDB, ID, Query } from 'node-appwrite';
+import * as ai from './ai.js';
+import * as save from './save.js';
+import * as notify from './notify.js';
 
 function buildAppwriteLogger(context) {
   const log = typeof context?.log === 'function'

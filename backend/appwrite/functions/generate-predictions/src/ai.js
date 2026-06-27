@@ -357,7 +357,7 @@ async function requestAiPrediction({ fixtureApiId, prompt, fixture, logFn }) {
   };
 }
 
-module.exports = {
+export {
   buildPrompt,
   deepSeekChat,
   normalizeConfidenceLabel,

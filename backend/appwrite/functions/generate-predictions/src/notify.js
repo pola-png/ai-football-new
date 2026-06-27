@@ -1,4 +1,4 @@
-const { sendPredictionTopicNotification } = require('../_shared/firebase-notifications.js');
+import { sendPredictionTopicNotification } from '../_shared/firebase-notifications.js';
 
 function shouldSendPredictionNotification(confidence) {
   return Number.isFinite(confidence) && confidence >= 0.85;
@@ -42,7 +42,7 @@ async function sendPredictionNotification({
   return copy;
 }
 
-module.exports = {
+export {
   buildMatchNotificationCopy,
   sendPredictionNotification,
   shouldSendPredictionNotification,
