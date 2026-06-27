@@ -82,14 +82,15 @@ For the app to read data directly from Appwrite, give `teams`, `leagues`, `fixtu
 
 ## Functions
 
-Deploy only these two functions on Appwrite Free:
+Recommended split for the current codebase:
 
 - `daily-sync-generate`
-- `publish-and-maintain`
+- `generate-predictions`
+- `publish-and-maintain` if you still want a publish/reconcile pass
 
-Do not deploy `sync-fixtures`, `generate-predictions`, `publish-predictions`, or `cleanup-raw-fetch` separately on the Free plan.
+Function responsibilities:
 
-`daily-sync-generate` is responsible for:
+`daily-sync-generate`
 
 - deleting old raw rows first
 - keeping only prediction rows for yesterday, today, and tomorrow
@@ -99,7 +100,7 @@ Do not deploy `sync-fixtures`, `generate-predictions`, `publish-predictions`, or
 - saving or updating fixtures
 - keeping team logos in the backend
 
-`publish-and-maintain` is responsible for:
+`generate-predictions`
 
 - reading the latest successful `sync_run_id`
 - loading all fixtures from the `fixtures` table
@@ -115,6 +116,12 @@ Do not deploy `sync-fixtures`, `generate-predictions`, `publish-predictions`, or
 - marking them as `published`
 - setting `published_at`
 - sending a push notification directly through Firebase Cloud Messaging
+
+`publish-and-maintain`
+
+- publishing any remaining drafts that are due
+- refreshing final match outcomes
+- keeping the predictions table in sync with live results
 
 Optional batch setting:
 
@@ -153,3 +160,31 @@ Optional batch setting:
 - `7:00 pm`: sync
 - after sync: generate
 - when due: publish
+
+## Appwrite Function Setup
+
+For `generate-predictions` use:
+
+- Runtime: `node-25`
+- Entrypoint: `src/index.js`
+- Root directory: `backend/appwrite/functions/generate-predictions/`
+- Build command: `npm install`
+
+Required environment variables:
+
+- `APPWRITE_DATABASE_ID`
+- `APPWRITE_FUNCTION_ENDPOINT`
+- `APPWRITE_FUNCTION_PROJECT_ID`
+- `APPWRITE_FUNCTION_API_KEY`
+- `APPWRITE_TABLE_FIXTURES`
+- `APPWRITE_TABLE_FIXTURE_ODDS`
+- `APPWRITE_TABLE_FIXTURE_H2H_HISTORY`
+- `APPWRITE_TABLE_PREDICTIONS`
+- `APPWRITE_TABLE_SYNC_RUNS`
+- `APPWRITE_TOPIC_PREDICTIONS`
+- `API_FOOTBALL_BASE_URL`
+- `API_FOOTBALL_KEY`
+- `DEEPSEEK_API_KEY`
+- `DEEPSEEK_BASE_URL`
+- `DEEPSEEK_MODEL`
+- `FIREBASE_SERVICE_ACCOUNT_JSON` or the split Firebase service-account env vars
