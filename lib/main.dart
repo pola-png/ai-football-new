@@ -796,13 +796,10 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
                     isAdmin: isAdmin,
                     currentPlans: GooglePlayBillingService.instance.plans,
                   ),
-                  CommunityPage(
-                    onOpenChat: () => _setIndex(3),
-                    onOpenPickedMatches: _openPickedTab,
-                  ),
                   ChatPage(
                     hasAdFreeAccess: adFree || rewardedAdFree || isAdmin,
                   ),
+                  const ProfilesPage(),
                 ],
               ),
               bottomNavigationBar: Column(
@@ -851,20 +848,20 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
                               label: 'Premium Plan',
                             ),
                             NavigationDestination(
-                              icon: const Icon(Icons.groups_outlined),
-                              selectedIcon: _PulsingIcon(
-                                icon: Icons.groups,
-                                isActive: _currentIndex == 2,
-                              ),
-                              label: 'Group',
-                            ),
-                            NavigationDestination(
                               icon: const Icon(Icons.chat_bubble_outline),
                               selectedIcon: _PulsingIcon(
                                 icon: Icons.chat_bubble,
-                                isActive: _currentIndex == 3,
+                                isActive: _currentIndex == 2,
                               ),
                               label: 'Chat',
+                            ),
+                            NavigationDestination(
+                              icon: const Icon(Icons.groups_outlined),
+                              selectedIcon: _PulsingIcon(
+                                icon: Icons.groups,
+                                isActive: _currentIndex == 3,
+                              ),
+                              label: 'Profiles',
                             ),
                           ],
                         ),
@@ -980,12 +977,12 @@ class _MainMenuPage extends StatelessWidget {
             _menuTile(
               context,
               icon: Icons.people_outline,
-              title: 'Group',
-              subtitle: 'Leaderboard and check-ins',
+              title: 'Profiles',
+              subtitle: 'Chat, picks, check-ins, leaderboard, and challenges',
               border: border,
               textColor: primaryText,
               onTap: () {
-                onNavigate(2);
+                onNavigate(3);
                 Navigator.of(context).pop();
               },
             ),

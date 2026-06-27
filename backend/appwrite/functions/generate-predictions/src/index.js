@@ -1,3 +1,6 @@
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
 const { Client, TablesDB, ID, Query } = require('node-appwrite');
 const ai = require('./ai');
 const save = require('./save');
@@ -130,10 +133,10 @@ function shouldPublishNearKickoff(kickoffAtValue, now = new Date()) {
   return timeDiffMs >= 0 && timeDiffMs <= 8 * 60 * 60 * 1000;
 }
 
-async function main() {
-  const { log, error } = buildAppwriteLogger();
-  const appwriteLog = log;
-  const appwriteError = error;
+export default async function main(context) {
+  const { log: contextLog, error: contextError } = buildAppwriteLogger(context);
+  const appwriteLog = contextLog;
+  const appwriteError = contextError;
 
   appwriteLog(JSON.stringify({
     level: 'info',
@@ -319,28 +322,3 @@ async function main() {
     throw error;
   }
 }
-
-main().then(
-  (result) => {
-    console.log(JSON.stringify({
-      level: 'info',
-      job: 'generate-predictions',
-      step: 'function.completed',
-      timestamp: isoNow(),
-      ...result,
-    }));
-  },
-  (error) => {
-    console.error(JSON.stringify({
-      level: 'error',
-      job: 'generate-predictions',
-      step: 'process.failed',
-      timestamp: isoNow(),
-      message: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : null,
-    }));
-    process.exitCode = 1;
-  },
-);
-
-module.exports = { main };

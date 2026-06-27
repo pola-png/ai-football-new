@@ -183,12 +183,4 @@ async function main() {
   }
 }
 
-main().then(
-  (result) => {
-    logStep('function.completed', result);
-  },
-  (error) => {
-    logError('function.failed', error);
-    process.exitCode = 1;
-  },
-);
+exports.main = main;

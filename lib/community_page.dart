@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'app_auth_service.dart';
 import 'admin_access_service.dart';
 import 'admin_notification_page.dart';
 import 'social_engagement_service.dart';
@@ -31,15 +32,8 @@ Color _secondaryText(BuildContext context) {
   return _isDarkContext(context) ? const Color(0xFF8C9FB8) : const Color(0xFF5A6E85);
 }
 
-class CommunityPage extends StatelessWidget {
-  const CommunityPage({
-    super.key,
-    required this.onOpenChat,
-    required this.onOpenPickedMatches,
-  });
-
-  final VoidCallback onOpenChat;
-  final VoidCallback onOpenPickedMatches;
+class ProfilesPage extends StatelessWidget {
+  const ProfilesPage({super.key});
 
   Future<void> _checkIn(BuildContext context) async {
     await SocialEngagementService.instance.checkInToday();
@@ -98,90 +92,84 @@ class CommunityPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: AdminAccessService.instance,
+      animation: AppAuthService.instance,
       builder: (context, _) {
-        final isAdmin = AdminAccessService.instance.isAdmin;
-        final hasSession = SocialEngagementService.instance.hasCurrentUser;
+        return AnimatedBuilder(
+          animation: AdminAccessService.instance,
+          builder: (context, _) {
+            final currentUser = AppAuthService.instance.currentUser;
+            final isAdmin = AdminAccessService.instance.isAdmin;
+            final hasSession = currentUser != null;
 
-        return Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: _screenGradient(context),
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-            ),
-          ),
-          child: SafeArea(
-            child: ListView(
-              padding: const EdgeInsets.all(20),
-              children: [
-                Text(
-                  'Group',
-                  style: TextStyle(
-                    color: _primaryText(context),
-                    fontSize: 28,
-                    fontWeight: FontWeight.w900,
-                  ),
+            return Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: _screenGradient(context),
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  hasSession
-                      ? 'Open the community tools from one menu.'
-                      : 'Sign in to use community tools.',
-                  style: TextStyle(
-                    color: _secondaryText(context),
-                    fontSize: 14,
-                  ),
+              ),
+              child: SafeArea(
+                child: ListView(
+                  padding: const EdgeInsets.all(20),
+                  children: [
+                    Text(
+                      'Profiles',
+                      style: TextStyle(
+                        color: _primaryText(context),
+                        fontSize: 28,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      hasSession
+                          ? 'Open profile and community tools from one menu.'
+                          : 'Sign in to use profile and community tools.',
+                      style: TextStyle(
+                        color: _secondaryText(context),
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    _ProfileSummaryCard(user: currentUser),
+                    const SizedBox(height: 16),
+                    _menuCard(
+                      context,
+                      icon: Icons.calendar_month_outlined,
+                      title: 'Daily Check-in',
+                      subtitle: 'Earn coins for checking in each day.',
+                      onTap: hasSession
+                          ? () => _openPage(context, const DailyCheckInPage())
+                          : null,
+                    ),
+                    _menuCard(
+                      context,
+                      icon: Icons.emoji_events_outlined,
+                      title: 'Leaderboard',
+                      subtitle: 'See the top community points table.',
+                      onTap: () => _openPage(context, const LeaderboardPage()),
+                    ),
+                    _menuCard(
+                      context,
+                      icon: Icons.task_alt_outlined,
+                      title: 'Challenges',
+                      subtitle: 'Join live prediction challenges.',
+                      onTap: () => _openPage(context, const ChallengesPage()),
+                    ),
+                    if (isAdmin)
+                      _menuCard(
+                        context,
+                        icon: Icons.notifications_active_outlined,
+                        title: 'Admin Broadcast',
+                        subtitle: 'Send a push notification to users.',
+                        onTap: () => _openPage(context, const AdminNotificationPage()),
+                      ),
+                  ],
                 ),
-                const SizedBox(height: 16),
-                _menuCard(
-                  context,
-                  icon: Icons.chat_bubble_outline,
-                  title: 'Chat',
-                  subtitle: 'Open the general chat room with replies and likes.',
-                  onTap: onOpenChat,
-                ),
-                _menuCard(
-                  context,
-                  icon: Icons.fact_check_outlined,
-                  title: 'Picked Matches',
-                  subtitle: 'View saved picks grouped by date.',
-                  onTap: onOpenPickedMatches,
-                ),
-                _menuCard(
-                  context,
-                  icon: Icons.calendar_month_outlined,
-                  title: 'Daily Check-in',
-                  subtitle: 'Earn coins for checking in each day.',
-                  onTap: hasSession
-                      ? () => _openPage(context, const DailyCheckInPage())
-                      : null,
-                ),
-                _menuCard(
-                  context,
-                  icon: Icons.emoji_events_outlined,
-                  title: 'Leaderboard',
-                  subtitle: 'See the top community points table.',
-                  onTap: () => _openPage(context, const LeaderboardPage()),
-                ),
-                _menuCard(
-                  context,
-                  icon: Icons.task_alt_outlined,
-                  title: 'Challenges',
-                  subtitle: 'Join live prediction challenges.',
-                  onTap: () => _openPage(context, const ChallengesPage()),
-                ),
-                if (isAdmin)
-                  _menuCard(
-                    context,
-                    icon: Icons.notifications_active_outlined,
-                    title: 'Admin Broadcast',
-                    subtitle: 'Send a push notification to users.',
-                    onTap: () => _openPage(context, const AdminNotificationPage()),
-                  ),
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         );
       },
     );
@@ -221,6 +209,151 @@ class CommunityPage extends StatelessWidget {
         ),
         trailing: const Icon(Icons.chevron_right),
         onTap: onTap,
+      ),
+    );
+  }
+}
+
+class CommunityPage extends ProfilesPage {
+  const CommunityPage({super.key});
+}
+
+class _ProfileSummaryCard extends StatelessWidget {
+  const _ProfileSummaryCard({required this.user});
+
+  final AppUserProfile? user;
+
+  @override
+  Widget build(BuildContext context) {
+    final surface = _screenSurface(context);
+    final border = _screenBorder(context);
+    final primaryText = _primaryText(context);
+    final secondaryText = _secondaryText(context);
+
+    return StreamBuilder<List<LeaderboardEntry>>(
+      stream: SocialEngagementService.instance.watchLeaderboard(),
+      builder: (context, snapshot) {
+        final leaderboard = snapshot.data ?? const <LeaderboardEntry>[];
+        LeaderboardEntry? current;
+        if (user != null) {
+          for (final entry in leaderboard) {
+            if (entry.userId == user.id) {
+              current = entry;
+              break;
+            }
+          }
+        }
+        final name = user?.name ?? 'Guest';
+        final points = current?.points ?? 0;
+        final coins = current?.coins ?? 0;
+        final streakDays = current?.streakDays ?? 0;
+        final initial = name.isNotEmpty ? name.substring(0, 1).toUpperCase() : '?';
+
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: surface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: border),
+          ),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 28,
+                backgroundColor: const Color(0xFF00D4AA).withAlpha(35),
+                child: Text(
+                  initial,
+                  style: TextStyle(
+                    color: primaryText,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 18,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      style: TextStyle(
+                        color: primaryText,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      user?.email ?? 'No account details available',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: secondaryText,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _ProfileStatChip(label: 'Points', value: '$points'),
+                        _ProfileStatChip(label: 'Coins', value: '$coins'),
+                        _ProfileStatChip(label: 'Streak', value: '$streakDays days'),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ProfileStatChip extends StatelessWidget {
+  const _ProfileStatChip({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final primaryText = _primaryText(context);
+    final secondaryText = _secondaryText(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: _screenSurface(context, elevated: true),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: _screenBorder(context)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$label: ',
+            style: TextStyle(
+              color: secondaryText,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              color: primaryText,
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ],
       ),
     );
   }
