@@ -134,6 +134,11 @@ Columns:
 - `confidence` `float` optional
 - `market` `text` optional
 - `confidence_label` `text` optional
+- `home_team_name` `text` optional indexed
+- `away_team_name` `text` optional indexed
+- `home_team_logo_url` `url` optional
+- `away_team_logo_url` `url` optional
+- `admin_plan_override` `text` optional indexed
 - `primary_market` `text` optional
 - `primary_selection` `text` optional
 - `primary_confidence` `float` optional

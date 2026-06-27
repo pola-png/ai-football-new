@@ -56,6 +56,7 @@ class PredictionRecord {
     required this.currentAwayGoals,
     required this.fulltimeHomeGoals,
     required this.fulltimeAwayGoals,
+    this.adminPlanOverride,
   });
 
   final String? recordId;
@@ -85,6 +86,7 @@ class PredictionRecord {
   final String? currentAwayGoals;
   final String? fulltimeHomeGoals;
   final String? fulltimeAwayGoals;
+  final String? adminPlanOverride;
 
   factory PredictionRecord.fromMap(Map<String, dynamic> data) {
     final predictionJson = _asString(data['prediction_json']);
@@ -128,6 +130,7 @@ class PredictionRecord {
       currentAwayGoals: _asString(data['current_away_goals']),
       fulltimeHomeGoals: _asString(data['fulltime_home_goals']),
       fulltimeAwayGoals: _asString(data['fulltime_away_goals']),
+      adminPlanOverride: _asString(data['admin_plan_override']),
     );
   }
 
@@ -176,6 +179,22 @@ class PredictionRepository {
     final filtered = rows.where(_hasRenderablePrimaryPick).toList();
     filtered.sort(_comparePredictionsForDisplay);
     return filtered;
+  }
+
+  Future<void> updatePredictionPlanOverride(String recordId, String? planOverride, double? confidenceOverride) async {
+    configure();
+    final data = <String, dynamic>{
+      if (planOverride != null) 'admin_plan_override': planOverride,
+      if (planOverride == null) 'admin_plan_override': null,
+      if (confidenceOverride != null) 'confidence': confidenceOverride,
+      if (confidenceOverride != null) 'primary_confidence': confidenceOverride,
+    };
+    await _tables.updateRow(
+      databaseId: appwriteDatabaseId,
+      tableId: appwritePredictionsTableId,
+      rowId: recordId,
+      data: data,
+    );
   }
 
   Future<List<PredictionRecord>> _fetchAllRows(List<String> baseQueries) async {

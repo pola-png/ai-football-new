@@ -5774,11 +5774,22 @@ bool _predictionMatchesPlan(
   PredictionRecord prediction,
   SubscriptionPlanId plan,
 ) {
+  // Admin override takes priority
+  final override = prediction.adminPlanOverride?.trim().toLowerCase();
+  if (override != null && override.isNotEmpty) {
+    return switch (plan) {
+      SubscriptionPlanId.weeklyAdFree => true,
+      SubscriptionPlanId.basic => override == 'basic',
+      SubscriptionPlanId.standard => override == 'standard',
+      SubscriptionPlanId.premium => override == 'premium',
+    };
+  }
+
   final confidence = _predictionConfidencePercent(prediction);
   final confidenceExact = _predictionConfidencePercentExact(prediction);
   return switch (plan) {
     SubscriptionPlanId.weeklyAdFree => true,
-    SubscriptionPlanId.basic => confidence == 85,
+    SubscriptionPlanId.basic => confidence >= 81 && confidence <= 86,
     SubscriptionPlanId.standard => confidence >= 85 && confidence <= 87,
     SubscriptionPlanId.premium => confidenceExact >= 88.0 && confidenceExact <= 99.99,
   };
@@ -5799,7 +5810,7 @@ bool _isPopularPrediction(PredictionRecord prediction) {
 String _planConfidenceLabel(SubscriptionPlanId plan) {
   return switch (plan) {
     SubscriptionPlanId.weeklyAdFree => 'Ad free for 7 days',
-    SubscriptionPlanId.basic => '85%',
+    SubscriptionPlanId.basic => '81% - 86%',
     SubscriptionPlanId.standard => '85% - 87%',
     SubscriptionPlanId.premium => '88% - 99.99%',
   };
