@@ -2057,205 +2057,278 @@ class _PickedMatchesPageState extends State<PickedMatchesPage> {
 
   @override
   Widget build(BuildContext context) {
-    final primaryText = _primaryText(context);
+    return DefaultTextStyle.merge(
+      style: const TextStyle(decoration: TextDecoration.none),
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: _screenGradient(context),
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: SafeArea(
+          child: RefreshIndicator(
+            onRefresh: _refresh,
+            child: FutureBuilder<List<PickedMatchGroup>>(
+              future: _groupsFuture,
+              builder: (context, snapshot) {
+                final groups = snapshot.data ?? const <PickedMatchGroup>[];
+                return ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(0, 12, 0, 20),
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Picked Matches',
+                              style: TextStyle(
+                                color: _primaryText(context),
+                                fontSize: 28,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                          if (groups.isNotEmpty)
+                            TextButton.icon(
+                              onPressed: _clearAll,
+                              icon: const Icon(Icons.delete_outline),
+                              label: const Text('Clear'),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: Text(
+                        'Your picks are saved in the backend and grouped by match date.',
+                        style: TextStyle(
+                          color: _secondaryText(context),
+                          fontSize: 13,
+                          height: 1.4,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    if (groups.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: _EmptyState(
+                          icon: Icons.fact_check_outlined,
+                          title: 'No picked matches yet',
+                          message: 'Select an unlocked match from Home to save it here by date.',
+                        ),
+                      )
+                    else
+                      ...groups.map(
+                        (group) => Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+                          child: _PickedGroupCard(group: group),
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PickedGroupCard extends StatelessWidget {
+  const _PickedGroupCard({required this.group});
+
+  final PickedMatchGroup group;
+
+  @override
+  Widget build(BuildContext context) {
     final surface = _screenSurface(context);
-    final border = _screenBorder(context);
     final headerSurface = _screenSurface(context, elevated: true);
+    final border = _screenBorder(context);
+    final primaryText = _primaryText(context);
+    final secondaryText = _secondaryText(context);
 
     return Container(
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: _screenGradient(context),
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-        ),
-      ),
-      child: SafeArea(
-        child: RefreshIndicator(
-          onRefresh: _refresh,
-          child: FutureBuilder<List<PickedMatchGroup>>(
-            future: _groupsFuture,
-            builder: (context, snapshot) {
-              final groups = snapshot.data ?? const <PickedMatchGroup>[];
-              return ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(0, 12, 0, 20),
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'Picked Matches',
-                            style: TextStyle(
-                              color: _primaryText(context),
-                              fontSize: 28,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                        ),
-                        if (groups.isNotEmpty)
-                          TextButton.icon(
-                            onPressed: _clearAll,
-                            icon: const Icon(Icons.delete_outline),
-                            label: const Text('Clear'),
-                          ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                    child: Text(
-                      'Your picks are saved in the backend and grouped by match date.',
-                      style: TextStyle(
-                        color: _secondaryText(context),
-                        fontSize: 13,
-                        height: 1.4,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  if (groups.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: _EmptyState(
-                        icon: Icons.fact_check_outlined,
-                        title: 'No picked matches yet',
-                        message: 'Select an unlocked match from Home to save it here by date.',
-                      ),
-                    )
-                  else
-                    ...groups.map((group) {
-                      return Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: surface,
-                            borderRadius: BorderRadius.circular(18),
-                            border: Border.all(color: border),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Container(
-                                width: double.infinity,
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                                decoration: BoxDecoration(
-                                  color: headerSurface,
-                                  borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        group.label,
-                                        style: TextStyle(
-                                          color: primaryText,
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w800,
-                                        ),
-                                      ),
-                                    ),
-                                    Text(
-                                      '${group.picks.length} picks',
-                                      style: TextStyle(
-                                        color: _secondaryText(context),
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              SingleChildScrollView(
-                                scrollDirection: Axis.horizontal,
-                                child: DataTable(
-                                  columnSpacing: 12,
-                                  horizontalMargin: 12,
-                                  headingRowHeight: 38,
-                                  dataRowMinHeight: 40,
-                                  dataRowMaxHeight: 64,
-                                  headingRowColor: WidgetStatePropertyAll(headerSurface),
-                                  dataRowColor: WidgetStatePropertyAll(surface),
-                                  columns: [
-                                    DataColumn(
-                                      label: Text(
-                                        'Time',
-                                        style: TextStyle(color: primaryText, fontSize: 11, fontWeight: FontWeight.w700),
-                                      ),
-                                    ),
-                                    DataColumn(
-                                      label: Text(
-                                        'Match',
-                                        style: TextStyle(color: primaryText, fontSize: 11, fontWeight: FontWeight.w700),
-                                      ),
-                                    ),
-                                    DataColumn(
-                                      label: Text(
-                                        'Pick',
-                                        style: TextStyle(color: primaryText, fontSize: 11, fontWeight: FontWeight.w700),
-                                      ),
-                                    ),
-                                  ],
-                                  rows: group.picks.map((pick) {
-                                    final cellStyle = TextStyle(
-                                      color: primaryText,
-                                      fontSize: 11,
-                                      height: 1.2,
-                                    );
-                                    return DataRow(
-                                      cells: [
-                                        DataCell(
-                                          Text(
-                                            _formatTimeOnly(
-                                              pick.prediction.kickoffAt ?? pick.selectedAt,
-                                            ),
-                                            style: cellStyle,
-                                          ),
-                                        ),
-                                        DataCell(
-                                          ConstrainedBox(
-                                            constraints: BoxConstraints(
-                                              maxWidth: MediaQuery.sizeOf(context).width * 0.42,
-                                            ),
-                                            child: Text(
-                                              '${pick.prediction.homeTeamName ?? 'Home'} v ${pick.prediction.awayTeamName ?? 'Away'}',
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: cellStyle,
-                                            ),
-                                          ),
-                                        ),
-                                        DataCell(
-                                          ConstrainedBox(
-                                            constraints: BoxConstraints(
-                                              maxWidth: MediaQuery.sizeOf(context).width * 0.34,
-                                            ),
-                                            child: Text(
-                                              pick.selection,
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: cellStyle,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    );
-                                  }).toList(),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }),
-                ],
-              );
-            },
+        color: surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: border),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x12000000),
+            blurRadius: 16,
+            offset: Offset(0, 8),
           ),
-        ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: headerSurface,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        group.label,
+                        style: TextStyle(
+                          color: primaryText,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${group.picks.length} saved picks',
+                        style: TextStyle(
+                          color: secondaryText,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF00D4AA).withAlpha(20),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    'Picked',
+                    style: TextStyle(
+                      color: _accentText(context),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              children: [
+                for (var index = 0; index < group.picks.length; index++)
+                  Padding(
+                    padding: EdgeInsets.only(bottom: index == group.picks.length - 1 ? 0 : 10),
+                    child: _PickedMatchRow(pick: group.picks[index]),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PickedMatchRow extends StatelessWidget {
+  const _PickedMatchRow({required this.pick});
+
+  final PickedMatchRecord pick;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final primaryText = _primaryText(context);
+    final secondaryText = _secondaryText(context);
+    final rowSurface = isDark ? const Color(0xFF17233E) : const Color(0xFFF7F9FC);
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: rowSurface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _screenBorder(context)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 74,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF00D4AA).withAlpha(18),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text(
+                  _formatTimeOnly(pick.prediction.kickoffAt ?? pick.selectedAt),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: primaryText,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Time',
+                  style: TextStyle(
+                    color: secondaryText,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${pick.prediction.homeTeamName ?? 'Home'} vs ${pick.prediction.awayTeamName ?? 'Away'}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: primaryText,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    height: 1.25,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF00D4AA).withAlpha(18),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    pick.selection,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: _accentText(context),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -2286,7 +2359,7 @@ List<PickedMatchGroup> _buildFallbackGroups(List<PredictionRecord> predictions) 
   }
 
   final groups = grouped.entries.toList()
-    ..sort((left, right) => dateMap[left.key]!.compareTo(dateMap[right.key]!));
+    ..sort((left, right) => dateMap[right.key]!.compareTo(dateMap[left.key]!));
 
   return groups
       .map(

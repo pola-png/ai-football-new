@@ -524,7 +524,7 @@ class SocialEngagementService {
     }
 
     final groups = grouped.values.toList()
-      ..sort((left, right) => left.date.compareTo(right.date));
+      ..sort((left, right) => right.date.compareTo(left.date));
 
     return groups
         .map((group) => PickedMatchGroup(
