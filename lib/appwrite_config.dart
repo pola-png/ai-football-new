@@ -18,6 +18,11 @@ const String appwritePredictionsTableId = String.fromEnvironment(
   defaultValue: 'predictions',
 );
 
+const String appwriteFixturesTableId = String.fromEnvironment(
+  'APPWRITE_FIXTURES_TABLE_ID',
+  defaultValue: 'fixtures',
+);
+
 const String appwritePredictionTopicId = String.fromEnvironment(
   'APPWRITE_PREDICTION_TOPIC_ID',
   defaultValue: 'predictions',

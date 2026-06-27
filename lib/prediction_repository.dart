@@ -176,9 +176,100 @@ class PredictionRepository {
       Query.orderDesc('release_at'),
     ]);
 
+    // For any prediction missing team names, fetch them from the fixtures table
+    final needsEnrich = rows.where(
+      (p) => (p.homeTeamName == null || p.homeTeamName!.isEmpty) ||
+             (p.awayTeamName == null || p.awayTeamName!.isEmpty),
+    ).toList();
+
+    if (needsEnrich.isNotEmpty) {
+      final fixtureIds = needsEnrich.map((p) => p.fixtureApiId).toSet().toList();
+      final fixtureMap = await _fetchFixtureTeamNames(fixtureIds);
+
+      final enriched = rows.map((p) {
+        if ((p.homeTeamName == null || p.homeTeamName!.isEmpty) ||
+            (p.awayTeamName == null || p.awayTeamName!.isEmpty)) {
+          final f = fixtureMap[p.fixtureApiId];
+          if (f != null) {
+            return PredictionRecord(
+              recordId: p.recordId,
+              fixtureApiId: p.fixtureApiId,
+              modelName: p.modelName,
+              predictionText: p.predictionText,
+              confidenceLabel: p.confidenceLabel,
+              homeTeamName: p.homeTeamName?.isNotEmpty == true ? p.homeTeamName : f['home_team_name'],
+              awayTeamName: p.awayTeamName?.isNotEmpty == true ? p.awayTeamName : f['away_team_name'],
+              homeTeamLogoUrl: p.homeTeamLogoUrl?.isNotEmpty == true ? p.homeTeamLogoUrl : f['home_team_logo_url'],
+              awayTeamLogoUrl: p.awayTeamLogoUrl?.isNotEmpty == true ? p.awayTeamLogoUrl : f['away_team_logo_url'],
+              kickoffAt: p.kickoffAt,
+              matchStatusShort: p.matchStatusShort,
+              matchStatusLong: p.matchStatusLong,
+              primaryPick: p.primaryPick,
+              secondaryPick: p.secondaryPick,
+              tertiaryPick: p.tertiaryPick,
+              releaseAt: p.releaseAt,
+              generatedAt: p.generatedAt,
+              publishedAt: p.publishedAt,
+              predictedWinner: p.predictedWinner,
+              confidence: p.confidence,
+              market: p.market,
+              matchOutcome: p.matchOutcome,
+              resultCheckedAt: p.resultCheckedAt,
+              currentHomeGoals: p.currentHomeGoals,
+              currentAwayGoals: p.currentAwayGoals,
+              fulltimeHomeGoals: p.fulltimeHomeGoals,
+              fulltimeAwayGoals: p.fulltimeAwayGoals,
+              adminPlanOverride: p.adminPlanOverride,
+            );
+          }
+        }
+        return p;
+      }).toList();
+
+      final filtered = enriched.where(_hasRenderablePrimaryPick).toList();
+      filtered.sort(_comparePredictionsForDisplay);
+      return filtered;
+    }
+
     final filtered = rows.where(_hasRenderablePrimaryPick).toList();
     filtered.sort(_comparePredictionsForDisplay);
     return filtered;
+  }
+
+  Future<Map<String, Map<String, String?>>> _fetchFixtureTeamNames(List<String> fixtureApiIds) async {
+    final result = <String, Map<String, String?>>{};
+    if (fixtureApiIds.isEmpty) return result;
+
+    const batchSize = 25;
+    for (var i = 0; i < fixtureApiIds.length; i += batchSize) {
+      final batch = fixtureApiIds.sublist(i, (i + batchSize).clamp(0, fixtureApiIds.length));
+      try {
+        final response = await _tables.listRows(
+          databaseId: appwriteDatabaseId,
+          tableId: appwriteFixturesTableId,
+          queries: [
+            Query.equal('api_fixture_id', batch),
+            Query.limit(batch.length),
+          ],
+          total: false,
+        );
+        for (final row in response.rows) {
+          final data = _normalizeRow(row);
+          final id = _asString(data['api_fixture_id']);
+          if (id != null && id.isNotEmpty) {
+            result[id] = {
+              'home_team_name': _asString(data['home_team_name']),
+              'away_team_name': _asString(data['away_team_name']),
+              'home_team_logo_url': _asString(data['home_team_logo_url']),
+              'away_team_logo_url': _asString(data['away_team_logo_url']),
+            };
+          }
+        }
+      } catch (_) {
+        // silently skip — team names are cosmetic, don't crash the feed
+      }
+    }
+    return result;
   }
 
   Future<void> updatePredictionPlanOverride(String recordId, String? planOverride, double? confidenceOverride) async {
