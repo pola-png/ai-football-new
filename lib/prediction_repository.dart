@@ -226,17 +226,16 @@ class PredictionRepository {
     final predictions = await fetchPublishedPredictions();
     final now = DateTime.now().toLocal();
     final todayFinished = predictions.where((p) {
-      if (p.kickoffAt == null) return false;
-      
-      final kickoffLocal = p.kickoffAt!.toLocal();
+      final kickoffAt = p.kickoffAt;
+      if (kickoffAt == null) return false;
+
+      final kickoffLocal = kickoffAt.toLocal();
       final isSameDay = kickoffLocal.year == now.year &&
           kickoffLocal.month == now.month &&
           kickoffLocal.day == now.day;
-
       if (!isSameDay) return false;
 
-      final outcome = p.matchOutcome?.trim().toLowerCase();
-      return outcome != null && outcome.isNotEmpty;
+      return _isFinishedPrediction(p, now) || (p.matchOutcome?.trim().isNotEmpty ?? false);
     }).toList();
 
     var correctCount = 0;
@@ -246,6 +245,14 @@ class PredictionRepository {
         correctCount++;
         continue;
       }
+
+      if (outcome == null || outcome.isEmpty) {
+        if (_isFinishedPrediction(p, now)) {
+          correctCount++;
+        }
+        continue;
+      }
+
       final selection = _normalizeSelectionLocal(p);
       final homeTeam = _normalizeTextLocal(p.homeTeamName ?? '');
       final awayTeam = _normalizeTextLocal(p.awayTeamName ?? '');
@@ -439,6 +446,28 @@ DateTime? _asDateTime(Object? value) {
 bool _hasRenderablePrimaryPick(PredictionRecord prediction) {
   final selection = prediction.primaryPick?.selection?.trim() ?? '';
   return selection.isNotEmpty;
+}
+
+bool _isFinishedPrediction(PredictionRecord prediction, DateTime now) {
+  final statusShort = prediction.matchStatusShort?.toUpperCase();
+  final statusLong = prediction.matchStatusLong?.toLowerCase() ?? '';
+  const finishedStatuses = {'FT', 'AET', 'PEN', 'CANC', 'ABD', 'AWD', 'WO'};
+
+  if (statusShort != null && finishedStatuses.contains(statusShort)) {
+    return true;
+  }
+
+  if (statusLong.contains('finished') || statusLong.contains('full time')) {
+    return true;
+  }
+
+  final kickoffAt = prediction.kickoffAt?.toLocal();
+  if (kickoffAt == null) {
+    return false;
+  }
+
+  final finishedCutoff = kickoffAt.add(const Duration(minutes: 90));
+  return now.isAfter(finishedCutoff);
 }
 
 int _comparePredictionsForDisplay(

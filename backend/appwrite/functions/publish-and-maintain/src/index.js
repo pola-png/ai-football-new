@@ -183,6 +183,27 @@ async function upsertRow(tablesdb, databaseId, tableId, rowId, data) {
   }
 }
 
+async function upsertResultRow(tablesdb, databaseId, resultsTable, fixtureApiId, data) {
+  const existing = await fetchAllRows(tablesdb, databaseId, resultsTable, [
+    Query.equal('fixture_api_id', String(fixtureApiId)),
+  ]);
+  const existingRow = existing[0] || null;
+
+  if (existingRow?.$id) {
+    return upsertRow(tablesdb, databaseId, resultsTable, existingRow.$id, data);
+  }
+
+  return tablesdb.createRow({
+    databaseId,
+    tableId: resultsTable,
+    rowId: ID.unique(),
+    data: {
+      fixture_api_id: String(fixtureApiId),
+      ...data,
+    },
+  });
+}
+
 function normalizeRow(row) {
   if (!row || typeof row !== 'object') {
     return row;
@@ -531,6 +552,7 @@ async function refreshOutcomeRow({
   tablesdb,
   databaseId,
   predictionsTable,
+  resultsTable,
   row,
   fixture,
   logFn,
@@ -581,6 +603,24 @@ async function refreshOutcomeRow({
     updated_at: now,
   });
 
+  if (finalStatus) {
+    const resultOutcome = nextOutcome || 'void';
+    const resultWinner = resultOutcome === 'void'
+      ? null
+      : determineOutcome(finalHomeGoals, finalAwayGoals);
+
+    await upsertResultRow(tablesdb, databaseId, resultsTable, row.fixture_api_id, {
+      home_score: toTextNumber(finalHomeGoals ?? homeGoals),
+      away_score: toTextNumber(finalAwayGoals ?? awayGoals),
+      winner: resultWinner,
+      outcome: resultOutcome,
+      checked_at: now,
+      final_status: statusShort,
+      created_at: row.created_at || now,
+      updated_at: now,
+    });
+  }
+
   return {
     updated: true,
     status_short: statusShort,
@@ -610,11 +650,12 @@ export default async function main({ res, error: reportError }) {
     tablesdb = new TablesDB(client);
     databaseId = required('APPWRITE_DATABASE_ID');
     const predictionsTable = required('APPWRITE_TABLE_PREDICTIONS');
+    const resultsTable = process.env.APPWRITE_TABLE_RESULTS || 'results';
     syncRunsTable = required('APPWRITE_TABLE_SYNC_RUNS');
     const topicId = required('APPWRITE_TOPIC_PREDICTIONS');
 
     const now = new Date();
-    const outcomeLookbackHours = Number.parseInt(process.env.OUTCOME_LOOKBACK_HOURS || '24', 10);
+    const outcomeLookbackHours = Number.parseInt(process.env.OUTCOME_LOOKBACK_HOURS || '0', 10);
 
     startedSuccessfully = true;
     log(JSON.stringify({
@@ -622,6 +663,7 @@ export default async function main({ res, error: reportError }) {
       stage: 'run-start',
       started_at: startedAt,
       outcome_lookback_hours: outcomeLookbackHours,
+      results_table: resultsTable,
     }));
 
     const draftPredictions = await fetchAllRows(tablesdb, databaseId, predictionsTable, [
@@ -726,6 +768,7 @@ export default async function main({ res, error: reportError }) {
         tablesdb,
         databaseId,
         predictionsTable,
+        resultsTable,
         row,
         fixture,
         logFn: log,
@@ -736,6 +779,10 @@ export default async function main({ res, error: reportError }) {
       }
     }
 
+    const outcomeWindowLabel = outcomeLookbackHours > 0
+      ? `within the last ${outcomeLookbackHours} hours`
+      : 'across all pending published matches';
+
     await createRun(tablesdb, databaseId, syncRunsTable, {
       job_name: 'publish-and-maintain',
       status: 'success',
@@ -743,7 +790,7 @@ export default async function main({ res, error: reportError }) {
       finished_at: isoNow(),
       items_seen: String(draftPredictions.length + publishedPredictions.length),
       items_saved: String(published),
-      message: `Loaded ${draftPredictions.length} drafts and ${publishedPredictions.length} published rows. Published ${published} predictions, sent ${notified} notifications, and refreshed ${outcomesUpdated} match outcomes within the last ${outcomeLookbackHours} hours.`,
+      message: `Loaded ${draftPredictions.length} drafts and ${publishedPredictions.length} published rows. Published ${published} predictions, sent ${notified} notifications, and refreshed ${outcomesUpdated} match outcomes ${outcomeWindowLabel}.`,
       created_at: isoNow(),
       updated_at: isoNow(),
     });
