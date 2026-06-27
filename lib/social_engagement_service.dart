@@ -627,9 +627,7 @@ class SocialEngagementService {
       },
       permissions: [
         Permission.read(Role.users()),
-        Permission.create(Role.user(user.id)),
-        Permission.update(Role.user(user.id)),
-        Permission.delete(Role.user(user.id)),
+        Permission.write(Role.user(user.id)),
       ],
     );
   }
@@ -665,8 +663,7 @@ class SocialEngagementService {
         },
         permissions: [
           Permission.read(Role.users()),
-          Permission.create(Role.user(user.id)),
-          Permission.delete(Role.user(user.id)),
+          Permission.write(Role.user(user.id)),
         ],
       );
       return;
