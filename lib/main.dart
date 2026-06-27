@@ -856,9 +856,9 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
                               label: 'Chat',
                             ),
                             NavigationDestination(
-                              icon: const Icon(Icons.groups_outlined),
+                              icon: const Icon(Icons.person_outline),
                               selectedIcon: _PulsingIcon(
-                                icon: Icons.groups,
+                                icon: Icons.person,
                                 isActive: _currentIndex == 3,
                               ),
                               label: 'Profiles',

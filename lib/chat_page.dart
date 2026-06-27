@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'ad_gate_service.dart';
 import 'appwrite_config.dart';
+import 'feed_banner_ad.dart';
 import 'social_engagement_service.dart';
 
 class ChatPage extends StatefulWidget {
@@ -289,6 +290,7 @@ class _ChatPageState extends State<ChatPage> {
                 ),
               ),
             ),
+            if (!widget.hasAdFreeAccess) const FeedBannerAd(),
             const SizedBox(height: 12),
             Expanded(
               child: FutureBuilder<_ChatMeta>(
@@ -747,11 +749,7 @@ class _ComposerBar extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 6),
-            Text(
-              'Messages, replies, likes, and shared picks all live here.',
-              style: TextStyle(color: secondaryText, fontSize: 11),
-            ),
+
           ],
         ),
       ),
