@@ -413,6 +413,17 @@ function determineOutcome(homeGoals, awayGoals) {
   return 'draw';
 }
 
+// Maps goal scores to the results table enum (pending, win, loss, push, void).
+// win = home won, loss = away won, push = draw, void = cancelled/abandoned.
+function toResultsOutcome(matchOutcome) {
+  const outcome = String(matchOutcome || '').toLowerCase();
+  if (outcome === 'void') return 'void';
+  if (outcome === 'home') return 'win';   // home team won
+  if (outcome === 'away') return 'loss';  // away team won (home lost)
+  if (outcome === 'draw') return 'push';  // draw
+  return 'pending';
+}
+
 function buildScoreFields(fixture) {
   return {
     current_home_goals: toTextNumber(fixture?.goals?.home),
@@ -648,10 +659,10 @@ async function refreshOutcomeRow({
   });
 
   if (finalStatus || voidStatus) {
-    const resultOutcome = nextOutcome || 'void';
-    const resultWinner = (resultOutcome === 'void' || resultOutcome === 'draw')
+    const resultOutcome = toResultsOutcome(nextOutcome);
+    const resultWinner = (nextOutcome === 'void' || nextOutcome === 'draw')
       ? null
-      : resultOutcome;
+      : nextOutcome;
 
     await upsertResultRow(tablesdb, databaseId, resultsTable, row.fixture_api_id, {
       home_score: toTextNumber(finalHomeGoals ?? homeGoals),
