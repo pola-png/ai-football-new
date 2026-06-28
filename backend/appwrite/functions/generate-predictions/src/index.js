@@ -91,7 +91,7 @@ async function fetchRows(tablesdb, databaseId, tableId, queries) {
   return result.rows || [];
 }
 
-async function fetchAllRows(tablesdb, databaseId, tableId, baseQueries, pageSize = 100) {
+async function fetchAllRows(tablesdb, databaseId, tableId, baseQueries, pageSize = 500) {
   const rows = [];
   let offset = 0;
 
@@ -114,6 +114,18 @@ async function fetchAllRows(tablesdb, databaseId, tableId, baseQueries, pageSize
   }
 
   return rows;
+}
+
+function prepareFixtureContext(fixture, oddsRows, h2hRows) {
+  const safeFixture = fixture && typeof fixture === 'object' ? fixture : {};
+  const safeOddsRows = Array.isArray(oddsRows) ? oddsRows.filter(Boolean) : [];
+  const safeH2hRows = Array.isArray(h2hRows) ? h2hRows.filter(Boolean) : [];
+
+  return {
+    fixture: safeFixture,
+    oddsRows: safeOddsRows,
+    h2hRows: safeH2hRows,
+  };
 }
 
 function chunkArray(values, chunkSize) {
@@ -243,11 +255,12 @@ export default async function main(context) {
           ]),
         ]);
 
+        const aiContext = prepareFixtureContext(fixture, oddsRows, h2hRows);
         const shouldPublishNow = shouldPublishNearKickoff(fixture.kickoff_at, new Date());
         const aiResult = await ai.requestAiPrediction({
           fixtureApiId,
-          prompt: ai.buildPrompt(fixture, oddsRows, h2hRows),
-          fixture,
+          prompt: ai.buildPrompt(aiContext.fixture, aiContext.oddsRows, aiContext.h2hRows),
+          fixture: aiContext.fixture,
           logFn: appwriteLog,
         });
 
@@ -264,6 +277,20 @@ export default async function main(context) {
         });
 
         if (!saveResult.saved) {
+          appwriteLog(JSON.stringify({
+            job: 'generate-predictions',
+            stage: 'fixture.summary',
+            fixture_api_id: fixtureApiId,
+            fixture_name: aiResult.fixtureName,
+            league_name: aiResult.leagueName,
+            confidence: typeof aiResult.parsed?.confidence === 'number' ? aiResult.parsed.confidence : null,
+            selection: aiResult.parsed?.picks?.[0]?.selection || null,
+            reason: aiResult.parsed?.picks?.[0]?.reason || null,
+            saved: false,
+            skipped: true,
+            raw_content: aiResult.rawContent,
+            preview: ai.resolvePredictionText(aiResult.parsed, aiResult.rawContent).slice(0, 120),
+          }));
           return { status: 'skipped', fixtureApiId };
         }
 
@@ -300,12 +327,33 @@ export default async function main(context) {
           }
         }
 
-        return {
+        const outcome = {
           status: 'saved',
           fixtureApiId,
+          fixture,
           primaryConfidence,
+          selection: aiResult.parsed?.picks?.[0]?.selection || null,
+          reason: aiResult.parsed?.picks?.[0]?.reason || null,
           notificationSent,
         };
+
+        appwriteLog(JSON.stringify({
+          job: 'generate-predictions',
+          stage: 'fixture.summary',
+          fixture_api_id: fixtureApiId,
+          fixture_name: aiResult.fixtureName,
+          league_name: aiResult.leagueName,
+          confidence: primaryConfidence,
+          selection: outcome.selection,
+          reason: outcome.reason,
+          saved: true,
+          skipped: false,
+          notification_sent: notificationSent,
+          raw_content: aiResult.rawContent,
+          preview: ai.resolvePredictionText(aiResult.parsed, aiResult.rawContent).slice(0, 120),
+        }));
+
+        return outcome;
       }));
 
       for (const result of batchResults) {

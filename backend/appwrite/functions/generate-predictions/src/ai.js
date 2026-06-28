@@ -140,23 +140,18 @@ function shouldKeepSelection(selection, confidence) {
   if (!value) {
     return false;
   }
-  // Accept any confidence >= 0.80 — no hard minimum per selection type
   const numericConfidence = Number.isFinite(confidence) ? confidence : 0;
   const normalized = value.toLowerCase();
 
-  if (/\bunder\s*2\.5\b/.test(normalized) || /\bover\s*3\.5\b/.test(normalized)) {
+  if (
+    /\bunder\s*2\.5\b/.test(normalized) ||
+    /\bunder\s*3\.5\b/.test(normalized) ||
+    /\bover\s*3\.5\b/.test(normalized)
+  ) {
     return numericConfidence >= 0.95;
   }
 
-  if (
-    /\bunder\s*1\.5\b/.test(normalized) ||
-    /\bover\s*1\.5\b/.test(normalized) ||
-    /\bover\s*2\.5\b/.test(normalized)
-  ) {
-    return numericConfidence >= 0.85;
-  }
-
-  return numericConfidence >= 0.81;
+  return true;
 }
 
 function pickAt(picks, index) {
@@ -286,64 +281,17 @@ async function requestAiPrediction({ fixtureApiId, prompt, fixture, logFn }) {
     { role: 'user', content: prompt },
   ];
 
-  if (typeof logFn === 'function') {
-    logFn(JSON.stringify({
-      job: 'generate-predictions',
-      fixture_api_id: fixtureApiId || null,
-      stage: 'ai-request',
-      message: 'Sending prediction request to DeepSeek.',
-    }));
-  }
-
   let aiResponse = await deepSeekChat(messages);
   let content = aiResponse?.choices?.[0]?.message?.content || '';
   let parsed = parsePredictionJson(content);
-
-  if (!parsed) {
-    if (typeof logFn === 'function') {
-      logFn(JSON.stringify({
-        job: 'generate-predictions',
-        fixture_api_id: fixtureApiId || null,
-        stage: 'ai-repair',
-        message: 'Initial AI response was not clean JSON. Sending repair prompt.',
-      }));
-    }
-
-    const repairResponse = await deepSeekChat([
-      { role: 'system', content: systemPrompt },
-      {
-        role: 'user',
-        content: [
-          prompt,
-          '',
-          'Your previous answer was not valid JSON.',
-          'Return the exact same prediction content again, but only as valid JSON.',
-          `FIXTURE_ID: ${fixtureApiId}`,
-          `FIXTURE_SNAPSHOT: ${JSON.stringify(fixture)}`,
-        ].join('\n'),
-      },
-    ]);
-
-    aiResponse = repairResponse;
-    content = aiResponse?.choices?.[0]?.message?.content || '';
-    parsed = parsePredictionJson(content);
-  }
-
-  if (typeof logFn === 'function') {
-    logFn(JSON.stringify({
-      job: 'generate-predictions',
-      fixture_api_id: fixtureApiId || null,
-      stage: 'ai-complete',
-      parsed_ok: Boolean(parsed),
-      preview: resolvePredictionText(parsed, content).slice(0, 120),
-    }));
-  }
 
   return {
     aiResponse,
     rawContent: content,
     parsed: normalizePredictionShape(parsed),
     parsedOk: Boolean(parsed),
+    fixtureName: String(fixture?.home_team_name || fixture?.away_team_name || fixture?.team_name || fixture?.name || '').trim() || null,
+    leagueName: String(fixture?.league_name || fixture?.league?.name || fixture?.league || '').trim() || null,
   };
 }
 

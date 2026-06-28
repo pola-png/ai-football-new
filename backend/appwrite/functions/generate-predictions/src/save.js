@@ -67,6 +67,19 @@ async function savePredictionRow({
     };
   }
 
+  if (!primarySelection) {
+    return {
+      saved: false,
+      predictionId,
+      fixtureApiId,
+      primaryConfidence,
+      primarySelection,
+      primaryReason,
+      predictedWinner: parsed.predicted_winner || 'TBD',
+      confidenceLabel: normalizeConfidenceLabel(parsed.confidence_label, primaryConfidence),
+    };
+  }
+
   await upsertRow(tablesdb, databaseId, predictionsTable, predictionId, {
     fixture_api_id: fixtureApiId,
     model_name: aiResponse?.model || (process.env.DEEPSEEK_MODEL || 'deepseek-chat'),
