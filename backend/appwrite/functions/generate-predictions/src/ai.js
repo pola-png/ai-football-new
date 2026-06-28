@@ -83,12 +83,13 @@ function buildPrompt(fixture, oddsRows, h2hRows) {
     'Prefer over/under, both teams to score, double chance, draw no bet, corners, or throw-ins when the data supports them.',
     'Avoid straight win, away win, home win, or draw selections unless the evidence is very strong (confidence >= 0.90).',
     'CONFIDENCE RULES - you must distribute confidence values across these bands:',
-    '  - Basic tier (0.81 to 0.86): assign this range when data is moderate.',
-    '  - Standard tier (0.85 to 0.87): assign this range when data is good.',
-    '  - Premium tier (0.89 to 0.99): assign this range only when evidence is very strong.',
+    '  - Basic tier (0.80 to 0.86): assign this range when data is moderate.',
+    '  - Standard tier (0.85 to 0.89): assign this range when data is good.',
+    '  - Premium tier (0.90 to 0.99): assign this range only when evidence is very strong.',
     'Do NOT give all predictions the same confidence. Spread values across the bands based on data quality.',
-    'For Over 3.5 or higher lines, cap confidence at 0.83.',
-    'For Under 2.5 or lower lines, cap confidence at 0.83.',
+    'Do not output Under 2.5 or Over 3.5 unless the confidence is at least 0.95.',
+    'If you are not at least 0.95 confident about Under 2.5 or Over 3.5, fall back to safer lines such as Over 1.5, Over 2.5, Under 4.5, GG, Double Chance, or Draw No Bet.',
+    'If you do not know what to predict, prefer Over 1.5, Over 2.5, Under 4.5, GG, Double Chance, or Draw No Bet instead of forcing Under 2.5 or Over 3.5.',
     'If confidence is below 0.85, set reason to an empty string.',
     'If confidence is 0.85 or above, provide a short factual reason based on the data.',
     'confidence must be a decimal from 0 to 1.',
@@ -156,7 +157,22 @@ function shouldKeepSelection(selection, confidence) {
     return false;
   }
   // Accept any confidence >= 0.80 — no hard minimum per selection type
-  return Number.isFinite(confidence) && confidence >= 0.81;
+  const numericConfidence = Number.isFinite(confidence) ? confidence : 0;
+  const normalized = value.toLowerCase();
+
+  if (/\bunder\s*2\.5\b/.test(normalized) || /\bover\s*3\.5\b/.test(normalized)) {
+    return numericConfidence >= 0.95;
+  }
+
+  if (
+    /\bunder\s*1\.5\b/.test(normalized) ||
+    /\bover\s*1\.5\b/.test(normalized) ||
+    /\bover\s*2\.5\b/.test(normalized)
+  ) {
+    return numericConfidence >= 0.85;
+  }
+
+  return numericConfidence >= 0.81;
 }
 
 function pickAt(picks, index) {
@@ -284,11 +300,12 @@ async function requestAiPrediction({ fixtureApiId, prompt, fixture, logFn }) {
     'Never output markdown, code fences, comments, or multiple objects.',
     'The object must contain predicted_winner, confidence, confidence_label, and picks.',
     'picks must be an array with exactly one item containing selection, confidence, and reason.',
-    'Confidence must be spread across tiers: 0.80-0.86 for moderate evidence, 0.85-0.87 for good evidence, 0.89-0.99 for very strong evidence.',
+    'Confidence must be spread across tiers: 0.80-0.86 for moderate evidence, 0.85-0.89 for good evidence, 0.90-0.99 for very strong evidence.',
     'Never assign the same confidence to all predictions. Vary confidence based on data quality.',
     'If confidence is below 0.85 set reason to empty string. If 0.85 or above provide a short factual reason.',
     'Prefer safer non-straight-win markets when possible.',
-    'If the safest choice is unclear, still return valid JSON with a conservative selection and confidence between 0.81 and 0.84.',
+    'Do not output Under 2.5 or Over 3.5 unless confidence is at least 0.95.',
+    'If the safest choice is unclear, prefer Over 1.5, Over 2.5, Under 4.5, GG, Double Chance, or Draw No Bet instead of forcing Under 2.5 or Over 3.5.',
   ].join(' ');
 
   const messages = [
