@@ -128,6 +128,74 @@ function prepareFixtureContext(fixture, oddsRows, h2hRows) {
   };
 }
 
+function classifySkipReason({ aiResult = null, error = null, saveResult = null }) {
+  if (error) {
+    return 'fetch_failed';
+  }
+
+  const rawContent = typeof aiResult?.rawContent === 'string' ? aiResult.rawContent.trim() : '';
+  const parsedOk = Boolean(aiResult?.parsedOk);
+  const primarySelection = typeof saveResult?.primarySelection === 'string'
+    ? saveResult.primarySelection.trim()
+    : '';
+  const saved = Boolean(saveResult?.saved);
+
+  if (!rawContent) {
+    return 'empty_response';
+  }
+
+  if (!parsedOk) {
+    if (/^[\s]*[\[{]/.test(rawContent) && !/[\]}]\s*$/.test(rawContent)) {
+      return 'truncated_json';
+    }
+
+    return 'json_parse_failed';
+  }
+
+  if (!saved && !primarySelection) {
+    return 'missing_primary_selection';
+  }
+
+  if (!saved) {
+    return 'save_rejected';
+  }
+
+  return null;
+}
+
+function summarizeFixtureLog({
+  fixtureApiId,
+  fixtureName,
+  leagueName,
+  confidence,
+  selection,
+  reason,
+  saved,
+  skipped,
+  skipReason,
+  notificationSent,
+  rawContent,
+  preview,
+}) {
+  return {
+    job: 'generate-predictions',
+    stage: 'fixture.summary',
+    status: saved ? 'saved' : (skipReason === 'fetch_failed' ? 'failed' : 'skipped'),
+    fixture_api_id: fixtureApiId,
+    fixture_name: fixtureName,
+    league_name: leagueName,
+    confidence: Number.isFinite(confidence) ? confidence : null,
+    selection: selection || null,
+    reason: reason || null,
+    saved: Boolean(saved),
+    skipped: Boolean(skipped),
+    skip_reason: skipReason || null,
+    notification_sent: Boolean(notificationSent),
+    raw_content: typeof rawContent === 'string' ? rawContent : '',
+    preview: typeof preview === 'string' ? preview : 'Prediction details unavailable.',
+  };
+}
+
 function chunkArray(values, chunkSize) {
   const chunks = [];
   const safeChunkSize = Math.max(1, Number(chunkSize) || 1);
@@ -241,134 +309,144 @@ export default async function main(context) {
         batch_size: fixtureBatch.length,
       }));
 
-      const batchResults = await Promise.allSettled(fixtureBatch.map(async (fixture) => {
-        const fixtureApiId = fixture.api_fixture_id;
+      const batchResults = await Promise.all(fixtureBatch.map(async (fixture) => {
+        const fixtureApiId = String(fixture?.api_fixture_id || '').trim();
+        const fixtureName = String(fixture?.home_team_name || fixture?.away_team_name || fixture?.team_name || fixture?.name || '').trim() || null;
+        const leagueName = String(fixture?.league_name || fixture?.league?.name || fixture?.league || '').trim() || null;
+        const shouldPublishNow = shouldPublishNearKickoff(fixture?.kickoff_at, new Date());
 
-        const [oddsRows, h2hRows] = await Promise.all([
-          fetchRows(tablesdb, databaseId, oddsTable, [
-            Query.equal('fixture_api_id', fixtureApiId),
-            Query.orderAsc('$createdAt'),
-          ]),
-          fetchRows(tablesdb, databaseId, h2hTable, [
-            Query.equal('current_fixture_api_id', fixtureApiId),
-            Query.orderAsc('$createdAt'),
-          ]),
-        ]);
-
-        const aiContext = prepareFixtureContext(fixture, oddsRows, h2hRows);
-        const shouldPublishNow = shouldPublishNearKickoff(fixture.kickoff_at, new Date());
-        const aiResult = await ai.requestAiPrediction({
-          fixtureApiId,
-          prompt: ai.buildPrompt(aiContext.fixture, aiContext.oddsRows, aiContext.h2hRows),
-          fixture: aiContext.fixture,
-          logFn: appwriteLog,
-        });
-
-        const saveResult = await save.savePredictionRow({
-          tablesdb,
-          databaseId,
-          predictionsTable,
-          fixture,
-          aiResponse: aiResult.aiResponse,
-          parsed: aiResult.parsed,
-          startedAt,
-          releaseStatus: shouldPublishNow ? 'published' : 'draft',
-          publishedAt: shouldPublishNow ? startedAt : null,
-        });
-
-        if (!saveResult.saved) {
-          appwriteLog(JSON.stringify({
-            job: 'generate-predictions',
-            stage: 'fixture.summary',
-            fixture_api_id: fixtureApiId,
-            fixture_name: aiResult.fixtureName,
-            league_name: aiResult.leagueName,
-            confidence: typeof aiResult.parsed?.confidence === 'number' ? aiResult.parsed.confidence : null,
-            selection: aiResult.parsed?.picks?.[0]?.selection || null,
-            reason: aiResult.parsed?.picks?.[0]?.reason || null,
-            saved: false,
-            skipped: true,
-            raw_content: aiResult.rawContent,
-            preview: ai.resolvePredictionText(aiResult.parsed, aiResult.rawContent).slice(0, 120),
-          }));
-          return { status: 'skipped', fixtureApiId };
-        }
-
-        const primaryConfidence = saveResult.primaryConfidence;
+        let aiResult = null;
+        let saveResult = null;
         let notificationSent = false;
         let notificationSentAt = null;
+        let error = null;
 
-        if (shouldPublishNow && topicId && notify.shouldSendPredictionNotification(primaryConfidence)) {
-          try {
-            await notify.sendPredictionNotification({
-              topicId,
-              fixture,
-              confidence: primaryConfidence,
-              fixtureApiId,
-              predictionId: saveResult.predictionId,
-            });
+        try {
+          const [oddsRows, h2hRows] = await Promise.all([
+            fetchRows(tablesdb, databaseId, oddsTable, [
+              Query.equal('fixture_api_id', fixtureApiId),
+              Query.orderAsc('$createdAt'),
+            ]),
+            fetchRows(tablesdb, databaseId, h2hTable, [
+              Query.equal('current_fixture_api_id', fixtureApiId),
+              Query.orderAsc('$createdAt'),
+            ]),
+          ]);
 
-            notificationSent = true;
-            notificationSentAt = isoNow();
+          const aiContext = prepareFixtureContext(fixture, oddsRows, h2hRows);
+          aiResult = await ai.requestAiPrediction({
+            fixtureApiId,
+            prompt: ai.buildPrompt(aiContext.fixture, aiContext.oddsRows, aiContext.h2hRows),
+            fixture: aiContext.fixture,
+          });
 
-            await upsertRow(tablesdb, databaseId, predictionsTable, `prediction_${fixtureApiId}`, {
-              notification_sent: true,
-              notification_sent_at: notificationSentAt,
-              updated_at: isoNow(),
-            });
-          } catch (error) {
-            appwriteError(JSON.stringify({
-              job: 'generate-predictions',
-              fixture_api_id: fixtureApiId,
-              prediction_id: `prediction_${fixtureApiId}`,
-              stage: 'notification-error',
-              message: error instanceof Error ? error.message : String(error),
-            }));
+          saveResult = await save.savePredictionRow({
+            tablesdb,
+            databaseId,
+            predictionsTable,
+            fixture,
+            aiResponse: aiResult.aiResponse,
+            parsed: aiResult.parsed,
+            startedAt,
+            releaseStatus: shouldPublishNow ? 'published' : 'draft',
+            publishedAt: shouldPublishNow ? startedAt : null,
+          });
+
+          if (saveResult.saved && shouldPublishNow && topicId && notify.shouldSendPredictionNotification(saveResult.primaryConfidence)) {
+            try {
+              await notify.sendPredictionNotification({
+                topicId,
+                fixture,
+                confidence: saveResult.primaryConfidence,
+                fixtureApiId,
+                predictionId: saveResult.predictionId,
+              });
+
+              notificationSent = true;
+              notificationSentAt = isoNow();
+
+              await upsertRow(tablesdb, databaseId, predictionsTable, `prediction_${fixtureApiId}`, {
+                notification_sent: true,
+                notification_sent_at: notificationSentAt,
+                updated_at: isoNow(),
+              });
+            } catch (notifyError) {
+              appwriteError(JSON.stringify({
+                job: 'generate-predictions',
+                fixture_api_id: fixtureApiId,
+                prediction_id: `prediction_${fixtureApiId}`,
+                stage: 'notification-error',
+                message: notifyError instanceof Error ? notifyError.message : String(notifyError),
+              }));
+            }
           }
+        } catch (caughtError) {
+          error = caughtError;
         }
 
-        const outcome = {
+        const primaryConfidence = Number.isFinite(saveResult?.primaryConfidence)
+          ? saveResult.primaryConfidence
+          : typeof aiResult?.parsed?.confidence === 'number'
+            ? aiResult.parsed.confidence
+            : null;
+        const selection = saveResult?.primarySelection
+          || aiResult?.parsed?.picks?.[0]?.selection
+          || null;
+        const reason = saveResult?.primaryReason
+          || aiResult?.parsed?.picks?.[0]?.reason
+          || null;
+        const skipReason = classifySkipReason({ aiResult, error, saveResult });
+        const savedNow = Boolean(saveResult?.saved && !error);
+        const skippedNow = !savedNow;
+        const rawContent = typeof aiResult?.rawContent === 'string' ? aiResult.rawContent : '';
+        const preview = error
+          ? (error instanceof Error ? error.message : String(error))
+          : ai.resolvePredictionText(aiResult?.parsed, rawContent).slice(0, 120);
+
+        appwriteLog(JSON.stringify(summarizeFixtureLog({
+          fixtureApiId,
+          fixtureName,
+          leagueName,
+          confidence: primaryConfidence,
+          selection,
+          reason,
+          saved: savedNow,
+          skipped: skippedNow,
+          skipReason,
+          notificationSent,
+          rawContent,
+          preview,
+        })));
+
+        if (error) {
+          return {
+            status: 'failed',
+            fixtureApiId,
+            primaryConfidence: null,
+          };
+        }
+
+        if (!savedNow) {
+          return {
+            status: 'skipped',
+            fixtureApiId,
+            primaryConfidence: primaryConfidence ?? 0,
+          };
+        }
+
+        return {
           status: 'saved',
           fixtureApiId,
-          fixture,
-          primaryConfidence,
-          selection: aiResult.parsed?.picks?.[0]?.selection || null,
-          reason: aiResult.parsed?.picks?.[0]?.reason || null,
-          notificationSent,
+          primaryConfidence: saveResult.primaryConfidence,
         };
-
-        appwriteLog(JSON.stringify({
-          job: 'generate-predictions',
-          stage: 'fixture.summary',
-          fixture_api_id: fixtureApiId,
-          fixture_name: aiResult.fixtureName,
-          league_name: aiResult.leagueName,
-          confidence: primaryConfidence,
-          selection: outcome.selection,
-          reason: outcome.reason,
-          saved: true,
-          skipped: false,
-          notification_sent: notificationSent,
-          raw_content: aiResult.rawContent,
-          preview: ai.resolvePredictionText(aiResult.parsed, aiResult.rawContent).slice(0, 120),
-        }));
-
-        return outcome;
       }));
 
-      for (const result of batchResults) {
-        if (result.status !== 'fulfilled') {
+      for (const value of batchResults) {
+        if (value.status === 'failed') {
           failed += 1;
-          appwriteError(JSON.stringify({
-            job: 'generate-predictions',
-            stage: 'batch.fixture.failed',
-            timestamp: isoNow(),
-            message: result.reason instanceof Error ? result.reason.message : String(result.reason),
-          }));
           continue;
         }
 
-        const value = result.value;
         if (value.status === 'skipped') {
           skipped += 1;
           continue;
