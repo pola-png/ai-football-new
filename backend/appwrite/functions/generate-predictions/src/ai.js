@@ -81,6 +81,7 @@ function buildPrompt(fixture, oddsRows, h2hRows) {
     'The picks array must contain exactly one object.',
     'Use one conservative low-risk market choice from the fixture, odds, and h2h context.',
     'Prefer over/under, both teams to score, double chance, draw no bet, corners, or throw-ins when the data supports them.',
+    'Do not default to under markets. Balance over and under choices based on the match data.',
     'Avoid straight win, away win, home win, or draw selections unless the evidence is very strong (confidence >= 0.90).',
     'CONFIDENCE RULES - you must distribute confidence values across these bands:',
     '  - Basic tier (0.80 to 0.86): assign this range when data is moderate.',
@@ -88,8 +89,8 @@ function buildPrompt(fixture, oddsRows, h2hRows) {
     '  - Premium tier (0.90 to 0.99): assign this range only when evidence is very strong.',
     'Do NOT give all predictions the same confidence. Spread values across the bands based on data quality.',
     'Do not output Under 2.5 or Over 3.5 unless the confidence is at least 0.95.',
-    'If you are not at least 0.95 confident about Under 2.5 or Over 3.5, fall back to safer lines such as Over 1.5, Over 2.5, Under 4.5, GG, Double Chance, or Draw No Bet.',
-    'If you do not know what to predict, prefer Over 1.5, Over 2.5, Under 4.5, GG, Double Chance, or Draw No Bet instead of forcing Under 2.5 or Over 3.5.',
+    'If you are not at least 0.95 confident about Under 2.5 or Over 3.5, fall back to safer lines such as Over 1.5, Over 2.5, GG, Double Chance, Draw No Bet, or Under 4.5.',
+    'If you do not know what to predict, prefer Over 1.5 or Over 2.5 first, then GG, Double Chance, Draw No Bet, or Under 4.5 instead of forcing Under 2.5 or Over 3.5.',
     'If confidence is below 0.85, set reason to an empty string.',
     'If confidence is 0.85 or above, provide a short factual reason based on the data.',
     'confidence must be a decimal from 0 to 1.',
@@ -304,8 +305,9 @@ async function requestAiPrediction({ fixtureApiId, prompt, fixture, logFn }) {
     'Never assign the same confidence to all predictions. Vary confidence based on data quality.',
     'If confidence is below 0.85 set reason to empty string. If 0.85 or above provide a short factual reason.',
     'Prefer safer non-straight-win markets when possible.',
+    'Do not default to under markets. Balance over and under choices based on the match data.',
     'Do not output Under 2.5 or Over 3.5 unless confidence is at least 0.95.',
-    'If the safest choice is unclear, prefer Over 1.5, Over 2.5, Under 4.5, GG, Double Chance, or Draw No Bet instead of forcing Under 2.5 or Over 3.5.',
+    'If the safest choice is unclear, prefer Over 1.5 or Over 2.5 first, then GG, Double Chance, Draw No Bet, or Under 4.5 instead of forcing Under 2.5 or Over 3.5.',
   ].join(' ');
 
   const messages = [
