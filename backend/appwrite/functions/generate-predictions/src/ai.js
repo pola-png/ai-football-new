@@ -16,6 +16,28 @@ function isWorldCupCompetitionName(value) {
   );
 }
 
+const CORE_PROMPT_RULES = [
+  'You are a football prediction engine.',
+  'Return exactly one valid JSON object and nothing else.',
+  'Use double quotes only and do not use markdown, code fences, labels, bullet points, or commentary.',
+  'The output must begin with { and end with }. Do not output trailing commas, multiple objects, or extra keys.',
+  'Follow this schema exactly: {"predicted_winner":"string","confidence":0.0,"confidence_label":"high","picks":[{"selection":"string","confidence":0.0,"reason":"string"}]}',
+  'The picks array must contain exactly one object.',
+  'Use one conservative low-risk market choice from the fixture, odds, and h2h context.',
+  'Prefer over/under, both teams to score, double chance, draw no bet, corners, or throw-ins when supported by the data.',
+  'Do not default to under markets. Balance over and under choices based on the match data.',
+  'Avoid straight win, away win, home win, or draw selections unless the evidence is very strong (confidence >= 0.90).',
+  'Confidence bands: 0.80-0.86 moderate, 0.85-0.89 good, 0.90-0.99 very strong.',
+  'Spread confidence values across the bands based on data quality. Do not give all predictions the same confidence.',
+  'Do not output Under 2.5 or Over 3.5 unless confidence is at least 0.95.',
+  'If confidence is below 0.95 for Under 2.5 or Over 3.5, fall back to Over 1.5, Over 2.5, GG, Double Chance, or Draw No Bet.',
+  'If you do not know what to predict, prefer Over 1.5 or Over 2.5 first, then GG, Double Chance, or Draw No Bet instead of forcing Under 2.5 or Over 3.5.',
+  'If confidence is below 0.89, reason must be empty.',
+  'If confidence is 0.89 or above, reason must be short and factual.',
+  'confidence must be a decimal from 0 to 1.',
+  'confidence_label must be either high or medium.',
+];
+
 async function deepSeekChat(messages) {
   const baseUrl = (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '');
   const timeout = new AbortController();
@@ -57,45 +79,8 @@ async function deepSeekChat(messages) {
 }
 
 function buildPrompt(fixture, oddsRows, h2hRows) {
-  const outputSchema = {
-    predicted_winner: 'string',
-    confidence: 0.0,
-    confidence_label: 'high',
-    picks: [
-      {
-        selection: 'string',
-        confidence: 0.0,
-        reason: 'string',
-      },
-    ],
-  };
-
   return [
-    'You are a football prediction assistant.',
-    'Return exactly one JSON object and nothing else.',
-    'Do not use markdown, code fences, bullet points, labels, or commentary.',
-    'The output must begin with { and end with }.',
-    'Use double quotes for every key and string value.',
-    'Do not output trailing commas, multiple JSON objects, or extra keys.',
-    'Follow this shape exactly: ' + JSON.stringify(outputSchema),
-    'The picks array must contain exactly one object.',
-    'Use one conservative low-risk market choice from the fixture, odds, and h2h context.',
-    'Prefer over/under, both teams to score, double chance, draw no bet, corners, or throw-ins when the data supports them.',
-    'Do not default to under markets. Balance over and under choices based on the match data.',
-    'Avoid straight win, away win, home win, or draw selections unless the evidence is very strong (confidence >= 0.90).',
-    'CONFIDENCE RULES - you must distribute confidence values across these bands:',
-    '  - Basic tier (0.80 to 0.86): assign this range when data is moderate.',
-    '  - Standard tier (0.85 to 0.89): assign this range when data is good.',
-    '  - Premium tier (0.90 to 0.99): assign this range only when evidence is very strong.',
-    'Do NOT give all predictions the same confidence. Spread values across the bands based on data quality.',
-    'Do not output Under 2.5 or Over 3.5 unless the confidence is at least 0.95.',
-    'If you are not at least 0.95 confident about Under 2.5 or Over 3.5, fall back to safer lines such as Over 1.5, Over 2.5, GG, Double Chance, Draw No Bet, or Under 4.5.',
-    'If you do not know what to predict, prefer Over 1.5 or Over 2.5 first, then GG, Double Chance, Draw No Bet, or Under 4.5 instead of forcing Under 2.5 or Over 3.5.',
-    'If confidence is below 0.85, set reason to an empty string.',
-    'If confidence is 0.85 or above, provide a short factual reason based on the data.',
-    'confidence must be a decimal from 0 to 1.',
-    'confidence_label must be either high or medium.',
-    'If the evidence is weak, still return valid JSON with confidence between 0.81 and 0.84 and empty reason.',
+    ...CORE_PROMPT_RULES,
     '',
     `FIXTURE: ${JSON.stringify(fixture)}`,
     `ODDS: ${JSON.stringify(oddsRows)}`,
@@ -104,8 +89,6 @@ function buildPrompt(fixture, oddsRows, h2hRows) {
     'Return only the JSON object, with no surrounding text.',
   ].join('\n');
 }
-
-const HIGH_CONFIDENCE_REASON_THRESHOLD = 0.85;
 
 function reasonLooksLikeLimitedEvidence(reason) {
   const text = String(reason || '').toLowerCase();
@@ -130,7 +113,7 @@ function reasonLooksLikeLimitedEvidence(reason) {
 
 function normalizePredictionReason(reason, confidence) {
   const numericConfidence = Number.isFinite(confidence) ? confidence : 0;
-  if (numericConfidence < HIGH_CONFIDENCE_REASON_THRESHOLD) {
+  if (numericConfidence < 0.89) {
     return '';
   }
 
@@ -295,19 +278,7 @@ function scoreFixtureForAi({ fixture }) {
 
 async function requestAiPrediction({ fixtureApiId, prompt, fixture, logFn }) {
   const systemPrompt = [
-    'You are a JSON generator for football predictions.',
-    'Return exactly one valid JSON object and nothing else.',
-    'Use double quotes only.',
-    'Never output markdown, code fences, comments, or multiple objects.',
-    'The object must contain predicted_winner, confidence, confidence_label, and picks.',
-    'picks must be an array with exactly one item containing selection, confidence, and reason.',
-    'Confidence must be spread across tiers: 0.80-0.86 for moderate evidence, 0.85-0.89 for good evidence, 0.90-0.99 for very strong evidence.',
-    'Never assign the same confidence to all predictions. Vary confidence based on data quality.',
-    'If confidence is below 0.85 set reason to empty string. If 0.85 or above provide a short factual reason.',
-    'Prefer safer non-straight-win markets when possible.',
-    'Do not default to under markets. Balance over and under choices based on the match data.',
-    'Do not output Under 2.5 or Over 3.5 unless confidence is at least 0.95.',
-    'If the safest choice is unclear, prefer Over 1.5 or Over 2.5 first, then GG, Double Chance, Draw No Bet, or Under 4.5 instead of forcing Under 2.5 or Over 3.5.',
+    ...CORE_PROMPT_RULES,
   ].join(' ');
 
   const messages = [

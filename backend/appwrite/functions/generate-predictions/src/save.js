@@ -2,7 +2,6 @@ import {
   normalizeConfidenceLabel,
   normalizePredictionReason,
   pickAt,
-  shouldKeepSelection,
 } from './ai.js';
 
 function isoNow() {
@@ -49,10 +48,9 @@ async function savePredictionRow({
       : typeof parsed.confidence === 'number'
         ? parsed.confidence
         : 0.75;
-  const fallbackSelection = 'Under 4.5 Goals';
-  const primarySelection = shouldKeepSelection(primaryPick?.selection, primaryConfidence)
+  const primarySelection = typeof primaryPick?.selection === 'string'
     ? primaryPick.selection.trim()
-    : fallbackSelection;
+    : '';
   const primaryReason = normalizePredictionReason(primaryPick?.reason, primaryConfidence);
   const predictionId = `prediction_${fixtureApiId}`;
 
