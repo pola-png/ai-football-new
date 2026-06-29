@@ -334,10 +334,33 @@ export default async function main(context) {
         let error = null;
 
         try {
-          const h2hRows = await fetchRows(tablesdb, databaseId, h2hTable, [
+          const homeTeamId = String(fixture?.home_team_api_id || '').trim();
+          const awayTeamId = String(fixture?.away_team_api_id || '').trim();
+          const pairKey = (homeTeamId && awayTeamId) ? [homeTeamId, awayTeamId].sort().join('-') : null;
+
+          const currentFixtureRows = await fetchRows(tablesdb, databaseId, h2hTable, [
             Query.equal('current_fixture_api_id', fixtureApiId),
             Query.orderAsc('$createdAt'),
           ]);
+
+          let pairRows = [];
+          if (pairKey) {
+            pairRows = await fetchRows(tablesdb, databaseId, h2hTable, [
+              Query.equal('pair_key', pairKey),
+              Query.orderAsc('$createdAt'),
+            ]);
+          }
+
+          const rowsByHistoricalId = new Map();
+          for (const row of [...currentFixtureRows, ...pairRows]) {
+            const key = String(row?.historical_fixture_api_id || row?.$id || '').trim();
+            if (!key || rowsByHistoricalId.has(key)) {
+              continue;
+            }
+            rowsByHistoricalId.set(key, row);
+          }
+
+          const h2hRows = [...rowsByHistoricalId.values()];
 
           const aiContext = prepareFixtureContext(fixture, h2hRows);
           aiResult = await ai.requestAiPrediction({
