@@ -383,6 +383,13 @@ export default async function main(context) {
                 prediction_id: `prediction_${fixtureApiId}`,
                 stage: 'notification-error',
                 message: notifyError instanceof Error ? notifyError.message : String(notifyError),
+                stack: notifyError instanceof Error ? notifyError.stack : null,
+                hasFirebaseJson: Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON),
+                hasFirebaseSplitEnv: Boolean(
+                  process.env.FIREBASE_SERVICE_ACCOUNT_PROJECT_ID
+                    && process.env.FIREBASE_SERVICE_ACCOUNT_CLIENT_EMAIL
+                    && process.env.FIREBASE_SERVICE_ACCOUNT_PRIVATE_KEY,
+                ),
               }));
             }
           }
