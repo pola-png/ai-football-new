@@ -23,13 +23,11 @@ const CORE_PROMPT_RULES = [
   'The output must begin with { and end with }. Do not output trailing commas, multiple objects, or extra keys.',
   'Follow this schema exactly: {"predicted_winner":"string","confidence":0.0,"confidence_label":"high","picks":[{"selection":"string","confidence":0.0,"reason":"string"}]}',
   'The picks array must contain exactly one object.',
-  'Use one conservative low-risk market choice from the fixture and h2h context.',
-  'Primary preference order when the model is unsure: Over 2.5, Over 1.5, GG, NG, Under 4.5, Double Chance, Draw No Bet.',
-  'Prefer over markets before double chance. Double chance is a later fallback, not the default safe answer.',
-  'Do not default to under markets. Balance over and under choices based on the match data.',
+  'Use one conservative low-risk market choice from the fixture and the recent H2H scores.',
+  'If the data is unclear, prefer Over 2.5, then Over 1.5, then GG, then Under 4.5, then Double Chance.',
+  'Do not default to Double Chance.',
   'Avoid straight win, away win, home win, or draw selections unless the evidence is very strong (confidence >= 0.90).',
-  'Confidence bands: 0.80-0.86 moderate, 0.85-0.89 good, 0.90-0.99 very strong.',
-  'Spread confidence values across the bands based on data quality. Do not give all predictions the same confidence.',
+  'Keep confidence realistic and varied.',
   'Do not output Under 2.5 or Over 3.5 unless confidence is at least 0.95.',
   'Do not use fallback picks. Choose the single best supported market from the data.',
   'Do not overuse Double Chance. Use it only when the match data does not support a stronger over or goal-based market.',
@@ -116,9 +114,9 @@ function compactFixtureForPrompt(fixture) {
 
 function compactH2hForPrompt(h2hRows) {
   const safeRows = Array.isArray(h2hRows) ? h2hRows : [];
-  const limit = Math.max(0, Number.parseInt(process.env.AI_PROMPT_H2H_LIMIT || '5', 10) || 5);
+  const limit = Math.max(0, Number.parseInt(process.env.AI_PROMPT_H2H_LIMIT || '3', 10) || 3);
 
-  return safeRows.slice(0, limit).map((row) => ({
+  return safeRows.slice(-limit).map((row) => ({
     fixture_api_id: row?.fixture_api_id ?? null,
     current_fixture_api_id: row?.current_fixture_api_id ?? null,
     historical_fixture_api_id: row?.historical_fixture_api_id ?? null,
@@ -135,14 +133,81 @@ function compactH2hForPrompt(h2hRows) {
   }));
 }
 
+function toFiniteNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function summarizeH2hRows(h2hRows) {
+  const rows = compactH2hForPrompt(h2hRows);
+  let homeWins = 0;
+  let awayWins = 0;
+  let draws = 0;
+  let homeGoals = 0;
+  let awayGoals = 0;
+  const recentScorelines = [];
+
+  for (const row of rows) {
+    const homeScore = toFiniteNumber(row.home_score);
+    const awayScore = toFiniteNumber(row.away_score);
+
+    if (homeScore !== null && awayScore !== null) {
+      homeGoals += homeScore;
+      awayGoals += awayScore;
+
+      if (homeScore > awayScore) {
+        homeWins += 1;
+      } else if (awayScore > homeScore) {
+        awayWins += 1;
+      } else {
+        draws += 1;
+      }
+
+      recentScorelines.push(`${homeScore}-${awayScore}`);
+    } else {
+      recentScorelines.push('unknown');
+    }
+  }
+
+  const total = rows.length;
+  const avgHomeGoals = total > 0 ? (homeGoals / total).toFixed(2) : null;
+  const avgAwayGoals = total > 0 ? (awayGoals / total).toFixed(2) : null;
+  const over15 = rows.filter((row) => {
+    const homeScore = toFiniteNumber(row.home_score);
+    const awayScore = toFiniteNumber(row.away_score);
+    return homeScore !== null && awayScore !== null && (homeScore + awayScore) > 1.5;
+  }).length;
+  const over25 = rows.filter((row) => {
+    const homeScore = toFiniteNumber(row.home_score);
+    const awayScore = toFiniteNumber(row.away_score);
+    return homeScore !== null && awayScore !== null && (homeScore + awayScore) > 2.5;
+  }).length;
+
+  return {
+    total_matches: total,
+    home_wins: homeWins,
+    away_wins: awayWins,
+    draws,
+    home_goals_total: homeGoals,
+    away_goals_total: awayGoals,
+    avg_home_goals: avgHomeGoals,
+    avg_away_goals: avgAwayGoals,
+    over_1_5_count: over15,
+    over_2_5_count: over25,
+    recent_scorelines,
+  };
+}
+
 function buildPrompt(fixture, h2hRows) {
   const promptFixture = compactFixtureForPrompt(fixture);
   const promptH2h = compactH2hForPrompt(h2hRows);
+  const promptH2hSummary = summarizeH2hRows(h2hRows);
 
   return [
     ...CORE_PROMPT_RULES,
     '',
     `FIXTURE: ${JSON.stringify(promptFixture)}`,
+    `H2H_SUMMARY: ${JSON.stringify(promptH2hSummary)}`,
     `H2H_HISTORY: ${JSON.stringify(promptH2h)}`,
     '',
     'Return only the JSON object, with no surrounding text.',
