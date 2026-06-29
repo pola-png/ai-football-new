@@ -118,20 +118,21 @@ function compactH2hForPrompt(h2hRows) {
   const safeRows = Array.isArray(h2hRows) ? h2hRows : [];
   const limit = Math.max(0, Number.parseInt(process.env.AI_PROMPT_H2H_LIMIT || '5', 10) || 5);
 
-  return safeRows.slice(0, limit).map((row) => pickFields(row, [
-    'fixture_api_id',
-    'current_fixture_api_id',
-    'league_name',
-    'match_date',
-    'kickoff_at',
-    'home_team_name',
-    'away_team_name',
-    'home_goals',
-    'away_goals',
-    'status_short',
-    'status_long',
-    'winner_team_name',
-  ]));
+  return safeRows.slice(0, limit).map((row) => ({
+    fixture_api_id: row?.fixture_api_id ?? null,
+    current_fixture_api_id: row?.current_fixture_api_id ?? null,
+    historical_fixture_api_id: row?.historical_fixture_api_id ?? null,
+    league_api_id: row?.league_api_id ?? null,
+    league_name: row?.league_name ?? null,
+    season: row?.season ?? null,
+    kickoff_at: row?.kickoff_at ?? null,
+    match_date: row?.match_date ?? row?.kickoff_at ?? null,
+    home_score: row?.home_score ?? row?.home_goals ?? null,
+    away_score: row?.away_score ?? row?.away_goals ?? null,
+    winner: row?.winner ?? row?.winner_team_name ?? null,
+    status_short: row?.status_short ?? null,
+    status_long: row?.status_long ?? null,
+  }));
 }
 
 function buildPrompt(fixture, h2hRows) {
