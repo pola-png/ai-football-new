@@ -1,5 +1,3 @@
-import { sendPredictionTopicNotification } from '../_shared/firebase-notifications.js';
-
 function shouldSendPredictionNotification(confidence) {
   return Number.isFinite(confidence) && confidence >= 0.85;
 }
@@ -25,6 +23,7 @@ async function sendPredictionNotification({
   fixtureApiId,
   predictionId,
 }) {
+  const { sendPredictionTopicNotification } = await import('../_shared/firebase-notifications.js');
   const copy = buildMatchNotificationCopy({ fixture, confidence });
 
   await sendPredictionTopicNotification({
