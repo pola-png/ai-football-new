@@ -194,7 +194,7 @@ function summarizeH2hRows(h2hRows) {
     avg_away_goals: avgAwayGoals,
     over_1_5_count: over15,
     over_2_5_count: over25,
-    recent_scorelines,
+    recent_scorelines: recentScorelines,
   };
 }
 
