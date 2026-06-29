@@ -37,6 +37,49 @@ function cleanJsonText(raw) {
   return text;
 }
 
+function extractLooseField(text, fieldName) {
+  const pattern = new RegExp(`(?:^|[\\s,{])${fieldName}\\s*:\\s*([^,\\n}]+)`, 'i');
+  const match = String(text || '').match(pattern);
+  if (!match) {
+    return null;
+  }
+
+  return String(match[1] || '').trim().replace(/^["']|["']$/g, '');
+}
+
+function extractLoosePrivateKey(text) {
+  const source = String(text || '');
+  const pemMatch = source.match(/private_key\s*:\s*(-----BEGIN PRIVATE KEY-----[\s\S]*?-----END PRIVATE KEY-----)/i);
+  if (pemMatch) {
+    return pemMatch[1].trim();
+  }
+
+  const nextFieldMatch = source.match(/private_key\s*:\s*([\s\S]*?)(?:,\s*(?:private_key_id|client_email|project_id|type)\s*:|$)/i);
+  if (!nextFieldMatch) {
+    return null;
+  }
+
+  return String(nextFieldMatch[1] || '').trim().replace(/^["']|["']$/g, '');
+}
+
+function parseLooseServiceAccountText(rawJson) {
+  const text = cleanJsonText(rawJson);
+  const projectId = extractLooseField(text, 'project_id') || extractLooseField(text, 'projectId');
+  const clientEmail = extractLooseField(text, 'client_email') || extractLooseField(text, 'clientEmail');
+  const privateKey = extractLoosePrivateKey(text);
+
+  if (!projectId && !clientEmail && !privateKey) {
+    return null;
+  }
+
+  return {
+    type: extractLooseField(text, 'type') || 'service_account',
+    project_id: projectId,
+    client_email: clientEmail,
+    private_key: privateKey ? privateKey.replace(/\\n/g, '\n').trim() : null,
+  };
+}
+
 function parseServiceAccountJson(rawJson) {
   const text = cleanJsonText(rawJson);
 
@@ -44,6 +87,15 @@ function parseServiceAccountJson(rawJson) {
     const parsed = JSON.parse(text);
     return typeof parsed === 'string' ? JSON.parse(cleanJsonText(parsed)) : parsed;
   } catch (error) {
+    const looseParsed = parseLooseServiceAccountText(text);
+    if (looseParsed) {
+      logStep('firebase.service_account.loose_parse_success', {
+        rawLength: String(rawJson || '').length,
+        rawPreview: String(rawJson || '').slice(0, 160),
+      });
+      return looseParsed;
+    }
+
     logStep('firebase.service_account.parse_failed', {
       rawLength: String(rawJson || '').length,
       rawPreview: String(rawJson || '').slice(0, 160),
