@@ -278,6 +278,38 @@ function compactH2HRow(row) {
   };
 }
 
+function normalizeH2HRow(row) {
+  if (!row || typeof row !== "object") {
+    return {};
+  }
+
+  return row.data && typeof row.data === "object" ? row.data : row;
+}
+
+function summarizeH2HFixtureLog({
+  fixtureApiId,
+  leagueName,
+  homeTeamName,
+  awayTeamName,
+  h2hRowsFetched,
+  h2hRowsSaved,
+  apiEmptyResponse,
+  h2hRows,
+}) {
+  return {
+    job: "sync-fixtures",
+    stage: "fixture.h2h.summary",
+    fixture_api_id: fixtureApiId || null,
+    league_name: leagueName || null,
+    home_team_name: homeTeamName || null,
+    away_team_name: awayTeamName || null,
+    h2h_rows_fetched: Number(h2hRowsFetched) || 0,
+    h2h_rows_saved: Number(h2hRowsSaved) || 0,
+    api_empty_response: Boolean(apiEmptyResponse),
+    h2h_scores: Array.isArray(h2hRows) ? h2hRows : [],
+  };
+}
+
 // Top leagues by API-Football ID that get a popularity bonus
 const POPULAR_LEAGUE_IDS = new Set([
   39, // Premier League
@@ -426,11 +458,15 @@ async function fetchFixtureH2HHistory({
   );
   const rows = [...cachedRows];
   let saved = 0;
+  let apiEmptyResponse = false;
+  const apiScores = [];
 
   if (missingSeasons.length === 0) {
     return {
       saved: rows.length,
-      rows: rows.map((row) => compactH2HRow(row.data)),
+      apiEmptyResponse: false,
+      apiScores: rows.map((row) => compactH2HRow(normalizeH2HRow(row))),
+      rows: rows.map((row) => compactH2HRow(normalizeH2HRow(row))),
     };
   }
 
@@ -452,6 +488,10 @@ async function fetchFixtureH2HHistory({
       ? payload.response
       : [];
 
+    if (historicalFixtures.length === 0) {
+      apiEmptyResponse = true;
+    }
+
     for (const historicalFixture of historicalFixtures) {
       const historicalFixtureApiId = historicalFixture?.fixture?.id ?? null;
       if (historicalFixtureApiId == null) {
@@ -463,6 +503,21 @@ async function fetchFixtureH2HHistory({
         historicalFixture?.league?.season ?? seasonYear,
       );
       const compositeHistoricalId = `${pairKey || fixtureApiId}_${seasonLabel}_${historicalFixtureId}`;
+      const compactRow = compactH2HRow({
+        current_fixture_api_id: fixtureApiId,
+        historical_fixture_api_id: compositeHistoricalId,
+        kickoff_at: historicalFixture?.fixture?.date || null,
+        home_score: toTextNumber(historicalFixture?.goals?.home),
+        away_score: toTextNumber(historicalFixture?.goals?.away),
+        winner: determineWinnerLabel(historicalFixture),
+        status_short: historicalFixture?.fixture?.status?.short || "NS",
+        league_api_id:
+          historicalFixture?.league?.id != null
+            ? String(historicalFixture.league.id)
+            : null,
+        season: seasonLabel,
+      });
+      apiScores.push(compactRow);
       rows.push({
         rowId: `h2h_${safeIdPart(pairKey || fixtureApiId)}_${safeIdPart(seasonLabel)}_${safeIdPart(historicalFixtureId)}`,
         data: {
@@ -500,7 +555,9 @@ async function fetchFixtureH2HHistory({
 
   return {
     saved: rows.length,
-    rows: rows.map((row) => compactH2HRow(row.data)),
+    apiEmptyResponse,
+    apiScores,
+    rows: rows.map((row) => compactH2HRow(normalizeH2HRow(row))),
   };
 }
 
@@ -731,6 +788,21 @@ async function main() {
 
       const h2hSaved = Number(h2hResult.saved ?? 0);
       const hasH2h = h2hSaved >= 1;
+
+      console.log(
+        JSON.stringify(
+          summarizeH2HFixtureLog({
+            fixtureApiId,
+            leagueName: safeLeagueInfo.name,
+            homeTeamName: safeHomeTeam.name,
+            awayTeamName: safeAwayTeam.name,
+            h2hRowsFetched: Array.isArray(h2hResult.rows) ? h2hResult.rows.length : 0,
+            h2hRowsSaved: h2hSaved,
+            apiEmptyResponse: Boolean(h2hResult.apiEmptyResponse),
+            h2hRows: h2hResult.apiScores || h2hResult.rows || [],
+          }),
+        ),
+      );
 
       // Score all fixtures (no filtering)
       const syncScore = scoreFixtureForSync({
