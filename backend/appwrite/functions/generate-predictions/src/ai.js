@@ -23,15 +23,15 @@ const CORE_PROMPT_RULES = [
   'The output must begin with { and end with }. Do not output trailing commas, multiple objects, or extra keys.',
   'Follow this schema exactly: {"predicted_winner":"string","confidence":0.0,"confidence_label":"high","picks":[{"selection":"string","confidence":0.0,"reason":"string"}]}',
   'The picks array must contain exactly one object.',
-  'Use one conservative low-risk market choice from the fixture, odds, and h2h context.',
+  'Use one conservative low-risk market choice from the fixture and h2h context.',
   'Prefer over/under, both teams to score, double chance, draw no bet, corners, or throw-ins when supported by the data.',
   'Do not default to under markets. Balance over and under choices based on the match data.',
   'Avoid straight win, away win, home win, or draw selections unless the evidence is very strong (confidence >= 0.90).',
   'Confidence bands: 0.80-0.86 moderate, 0.85-0.89 good, 0.90-0.99 very strong.',
   'Spread confidence values across the bands based on data quality. Do not give all predictions the same confidence.',
   'Do not output Under 2.5 or Over 3.5 unless confidence is at least 0.95.',
-  'If confidence is below 0.95 for Under 2.5 or Over 3.5, fall back to Over 1.5, Over 2.5, GG, Double Chance, or Draw No Bet.',
-  'If you do not know what to predict, prefer Over 1.5 or Over 2.5 first, then GG, Double Chance, or Draw No Bet instead of forcing Under 2.5 or Over 3.5.',
+  'Do not use fallback picks. Choose the single best supported market from the data.',
+  'The top-level confidence must equal picks[0].confidence.',
   'If confidence is below 0.89, reason must be empty.',
   'If confidence is 0.89 or above, reason must be short and factual.',
   'confidence must be a decimal from 0 to 1.',
@@ -41,7 +41,8 @@ const CORE_PROMPT_RULES = [
 async function deepSeekChat(messages) {
   const baseUrl = (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com').replace(/\/$/, '');
   const timeout = new AbortController();
-  const timeoutId = setTimeout(() => timeout.abort(new Error('DeepSeek request timed out after 15000ms')), 15000);
+  const timeoutMs = Math.max(15000, Number.parseInt(process.env.DEEPSEEK_TIMEOUT_MS || '60000', 10) || 60000);
+  const timeoutId = setTimeout(() => timeout.abort(new Error(`DeepSeek request timed out after ${timeoutMs}ms`)), timeoutMs);
 
   try {
     const response = await fetch(`${baseUrl}/chat/completions`, {
@@ -58,7 +59,7 @@ async function deepSeekChat(messages) {
           type: 'json_object',
         },
         temperature: 0,
-        max_tokens: 700,
+        max_tokens: Math.max(1200, Number.parseInt(process.env.DEEPSEEK_MAX_TOKENS || '1800', 10) || 1800),
       }),
     });
 
@@ -78,13 +79,68 @@ async function deepSeekChat(messages) {
   }
 }
 
-function buildPrompt(fixture, oddsRows, h2hRows) {
+function pickFields(source, keys) {
+  const result = {};
+  for (const key of keys) {
+    const value = source?.[key];
+    if (value !== undefined && value !== null && value !== '') {
+      result[key] = value;
+    }
+  }
+
+  return result;
+}
+
+function compactFixtureForPrompt(fixture) {
+  return pickFields(fixture, [
+    'api_fixture_id',
+    'league_api_id',
+    'league_name',
+    'country',
+    'season',
+    'round',
+    'kickoff_at',
+    'timezone',
+    'status_short',
+    'status_long',
+    'home_team_name',
+    'away_team_name',
+    'home_goals',
+    'away_goals',
+    'venue_name',
+    'venue_city',
+  ]);
+}
+
+function compactH2hForPrompt(h2hRows) {
+  const safeRows = Array.isArray(h2hRows) ? h2hRows : [];
+  const limit = Math.max(0, Number.parseInt(process.env.AI_PROMPT_H2H_LIMIT || '5', 10) || 5);
+
+  return safeRows.slice(0, limit).map((row) => pickFields(row, [
+    'fixture_api_id',
+    'current_fixture_api_id',
+    'league_name',
+    'match_date',
+    'kickoff_at',
+    'home_team_name',
+    'away_team_name',
+    'home_goals',
+    'away_goals',
+    'status_short',
+    'status_long',
+    'winner_team_name',
+  ]));
+}
+
+function buildPrompt(fixture, h2hRows) {
+  const promptFixture = compactFixtureForPrompt(fixture);
+  const promptH2h = compactH2hForPrompt(h2hRows);
+
   return [
     ...CORE_PROMPT_RULES,
     '',
-    `FIXTURE: ${JSON.stringify(fixture)}`,
-    `ODDS: ${JSON.stringify(oddsRows)}`,
-    `H2H_HISTORY: ${JSON.stringify(h2hRows)}`,
+    `FIXTURE: ${JSON.stringify(promptFixture)}`,
+    `H2H_HISTORY: ${JSON.stringify(promptH2h)}`,
     '',
     'Return only the JSON object, with no surrounding text.',
   ].join('\n');
@@ -258,6 +314,39 @@ function normalizePredictionShape(parsed) {
   };
 }
 
+function hasUsablePrimarySelection(parsed) {
+  const normalized = normalizePredictionShape(parsed);
+  const primaryPick = pickAt(normalized.picks, 0);
+  const primaryConfidence =
+    typeof primaryPick?.confidence === 'number'
+      ? primaryPick.confidence
+      : typeof normalized.confidence === 'number'
+        ? normalized.confidence
+        : 0;
+
+  return Boolean(
+    typeof primaryPick?.selection === 'string'
+      && primaryPick.selection.trim()
+      && shouldKeepSelection(primaryPick.selection, primaryConfidence)
+  );
+}
+
+function buildRepairPrompt({ fixture, rawContent }) {
+  const promptFixture = compactFixtureForPrompt(fixture);
+
+  return [
+    ...CORE_PROMPT_RULES,
+    'Repair or regenerate the prediction as one valid JSON object using exactly one pick.',
+    'The picks array must contain one object with a non-empty selection.',
+    'Do not explain the repair.',
+    '',
+    `FIXTURE: ${JSON.stringify(promptFixture)}`,
+    `BROKEN_OR_EMPTY_OUTPUT: ${JSON.stringify(String(rawContent || '').slice(0, 6000))}`,
+    '',
+    'Return only the valid JSON object now.',
+  ].join('\n');
+}
+
 function scoreFixtureForAi({ fixture }) {
   const leagueId = Number(fixture?.league_api_id);
   const leagueName = fixture?.league_name || fixture?.name || fixture?.leagueName || '';
@@ -282,12 +371,36 @@ async function requestAiPrediction({ fixtureApiId, prompt, fixture, logFn }) {
   ];
 
   let aiResponse = await deepSeekChat(messages);
-  let content = aiResponse?.choices?.[0]?.message?.content || '';
+  let choice = aiResponse?.choices?.[0] || {};
+  let content = choice?.message?.content || '';
   let parsed = parsePredictionJson(content);
+  let repairAttempted = false;
+  let firstRawContent = content;
+  let firstFinishReason = choice?.finish_reason || null;
+
+  if (!hasUsablePrimarySelection(parsed)) {
+    repairAttempted = true;
+    const repairMessages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: buildRepairPrompt({ fixture, rawContent: content }) },
+    ];
+
+    aiResponse = await deepSeekChat(repairMessages);
+    choice = aiResponse?.choices?.[0] || {};
+    content = choice?.message?.content || '';
+    parsed = parsePredictionJson(content);
+  }
 
   return {
     aiResponse,
     rawContent: content,
+    firstRawContent,
+    firstFinishReason,
+    repairAttempted,
+    finishReason: choice?.finish_reason || null,
+    completionTokens: typeof aiResponse?.usage?.completion_tokens === 'number'
+      ? aiResponse.usage.completion_tokens
+      : null,
     parsed: normalizePredictionShape(parsed),
     parsedOk: Boolean(parsed),
     fixtureName: String(fixture?.home_team_name || fixture?.away_team_name || fixture?.team_name || fixture?.name || '').trim() || null,

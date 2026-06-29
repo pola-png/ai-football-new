@@ -2,6 +2,7 @@ import {
   normalizeConfidenceLabel,
   normalizePredictionReason,
   pickAt,
+  shouldKeepSelection,
 } from './ai.js';
 
 function isoNow() {
@@ -57,6 +58,7 @@ async function savePredictionRow({
   if (!fixtureApiId) {
     return {
       saved: false,
+      skipReason: 'missing_fixture_api_id',
       predictionId: null,
       fixtureApiId: null,
       primaryConfidence,
@@ -70,6 +72,21 @@ async function savePredictionRow({
   if (!primarySelection) {
     return {
       saved: false,
+      skipReason: 'missing_primary_selection',
+      predictionId,
+      fixtureApiId,
+      primaryConfidence,
+      primarySelection,
+      primaryReason,
+      predictedWinner: parsed.predicted_winner || 'TBD',
+      confidenceLabel: normalizeConfidenceLabel(parsed.confidence_label, primaryConfidence),
+    };
+  }
+
+  if (!shouldKeepSelection(primarySelection, primaryConfidence)) {
+    return {
+      saved: false,
+      skipReason: 'selection_rule_rejected',
       predictionId,
       fixtureApiId,
       primaryConfidence,
@@ -85,7 +102,7 @@ async function savePredictionRow({
     model_name: aiResponse?.model || (process.env.DEEPSEEK_MODEL || 'deepseek-chat'),
     prediction_text: primaryReason || 'AI prediction generated',
     predicted_winner: parsed.predicted_winner || 'TBD',
-    confidence: typeof parsed.confidence === 'number' ? parsed.confidence : null,
+    confidence: primaryConfidence,
     confidence_label: normalizeConfidenceLabel(parsed.confidence_label, primaryConfidence),
     home_team_name: fixture?.home_team_name || null,
     away_team_name: fixture?.away_team_name || null,
@@ -118,6 +135,7 @@ async function savePredictionRow({
 
   return {
     saved: true,
+    skipReason: null,
     predictionId,
     fixtureApiId,
     primaryConfidence,

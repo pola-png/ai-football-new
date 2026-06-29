@@ -116,14 +116,12 @@ async function fetchAllRows(tablesdb, databaseId, tableId, baseQueries, pageSize
   return rows;
 }
 
-function prepareFixtureContext(fixture, oddsRows, h2hRows) {
+function prepareFixtureContext(fixture, h2hRows) {
   const safeFixture = fixture && typeof fixture === 'object' ? fixture : {};
-  const safeOddsRows = Array.isArray(oddsRows) ? oddsRows.filter(Boolean) : [];
   const safeH2hRows = Array.isArray(h2hRows) ? h2hRows.filter(Boolean) : [];
 
   return {
     fixture: safeFixture,
-    oddsRows: safeOddsRows,
     h2hRows: safeH2hRows,
   };
 }
@@ -156,6 +154,10 @@ function classifySkipReason({ aiResult = null, error = null, saveResult = null }
     return 'missing_primary_selection';
   }
 
+  if (!saved && saveResult?.skipReason) {
+    return saveResult.skipReason;
+  }
+
   if (!saved) {
     return 'save_rejected';
   }
@@ -174,7 +176,13 @@ function summarizeFixtureLog({
   skipped,
   skipReason,
   notificationSent,
+  finishReason,
+  completionTokens,
+  repairAttempted,
+  firstFinishReason,
+  deepSeekResponse,
   rawContent,
+  firstRawContent,
   preview,
 }) {
   return {
@@ -191,6 +199,12 @@ function summarizeFixtureLog({
     skipped: Boolean(skipped),
     skip_reason: skipReason || null,
     notification_sent: Boolean(notificationSent),
+    finish_reason: finishReason || null,
+    first_finish_reason: firstFinishReason || null,
+    completion_tokens: Number.isFinite(completionTokens) ? completionTokens : null,
+    repair_attempted: Boolean(repairAttempted),
+    deepseek_response: deepSeekResponse || null,
+    first_raw_content: typeof firstRawContent === 'string' ? firstRawContent : '',
     raw_content: typeof rawContent === 'string' ? rawContent : '',
     preview: typeof preview === 'string' ? preview : 'Prediction details unavailable.',
   };
@@ -239,7 +253,6 @@ export default async function main(context) {
 
   const databaseId = required('APPWRITE_DATABASE_ID');
   const fixturesTable = required('APPWRITE_TABLE_FIXTURES');
-  const oddsTable = required('APPWRITE_TABLE_FIXTURE_ODDS');
   const h2hTable = required('APPWRITE_TABLE_FIXTURE_H2H_HISTORY');
   const predictionsTable = required('APPWRITE_TABLE_PREDICTIONS');
   const syncRunsTable = required('APPWRITE_TABLE_SYNC_RUNS');
@@ -253,7 +266,7 @@ export default async function main(context) {
   let skipped = 0;
   let ultraConfidenceSaved = 0;
   let highConfidenceSaved = 0;
-  const aiBatchSize = Math.max(1, Number.parseInt(process.env.AI_BATCH_SIZE || '12', 10));
+  const aiBatchSize = Math.max(1, Number.parseInt(process.env.AI_BATCH_SIZE || '5', 10));
 
   try {
     appwriteLog(JSON.stringify({
@@ -264,7 +277,6 @@ export default async function main(context) {
       syncRunsTable,
       predictionsTable,
       fixturesTable,
-      oddsTable,
       h2hTable,
       topicPresent: Boolean(topicId),
     }));
@@ -322,21 +334,15 @@ export default async function main(context) {
         let error = null;
 
         try {
-          const [oddsRows, h2hRows] = await Promise.all([
-            fetchRows(tablesdb, databaseId, oddsTable, [
-              Query.equal('fixture_api_id', fixtureApiId),
-              Query.orderAsc('$createdAt'),
-            ]),
-            fetchRows(tablesdb, databaseId, h2hTable, [
-              Query.equal('current_fixture_api_id', fixtureApiId),
-              Query.orderAsc('$createdAt'),
-            ]),
+          const h2hRows = await fetchRows(tablesdb, databaseId, h2hTable, [
+            Query.equal('current_fixture_api_id', fixtureApiId),
+            Query.orderAsc('$createdAt'),
           ]);
 
-          const aiContext = prepareFixtureContext(fixture, oddsRows, h2hRows);
+          const aiContext = prepareFixtureContext(fixture, h2hRows);
           aiResult = await ai.requestAiPrediction({
             fixtureApiId,
-            prompt: ai.buildPrompt(aiContext.fixture, aiContext.oddsRows, aiContext.h2hRows),
+            prompt: ai.buildPrompt(aiContext.fixture, aiContext.h2hRows),
             fixture: aiContext.fixture,
           });
 
@@ -414,7 +420,13 @@ export default async function main(context) {
           skipped: skippedNow,
           skipReason,
           notificationSent,
+          finishReason: aiResult?.finishReason || null,
+          completionTokens: aiResult?.completionTokens,
+          repairAttempted: aiResult?.repairAttempted,
+          firstFinishReason: aiResult?.firstFinishReason || null,
+          deepSeekResponse: aiResult?.aiResponse || null,
           rawContent,
+          firstRawContent: aiResult?.firstRawContent || '',
           preview,
         })));
 
