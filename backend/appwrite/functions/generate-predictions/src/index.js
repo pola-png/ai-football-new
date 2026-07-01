@@ -2,6 +2,9 @@ import { Client, TablesDB, ID, Query } from 'node-appwrite';
 import * as ai from './ai.js';
 import * as save from './save.js';
 import * as notify from './notify.js';
+import { runPredictionEngine } from '../prediction-engine/src/index.js';
+import { savePrediction } from '../prediction-engine/src/storage/savePrediction.js';
+import { loadMarketAccuracies } from '../prediction-engine/src/learning/updateAccuracy.js';
 
 function buildAppwriteLogger(context) {
   const log = typeof context?.log === 'function'
@@ -114,16 +117,6 @@ async function fetchAllRows(tablesdb, databaseId, tableId, baseQueries, pageSize
   }
 
   return rows;
-}
-
-function prepareFixtureContext(fixture, h2hRows) {
-  const safeFixture = fixture && typeof fixture === 'object' ? fixture : {};
-  const safeH2hRows = Array.isArray(h2hRows) ? h2hRows.filter(Boolean) : [];
-
-  return {
-    fixture: safeFixture,
-    h2hRows: safeH2hRows,
-  };
 }
 
 function classifySkipReason({ aiResult = null, error = null, saveResult = null }) {
@@ -300,6 +293,8 @@ export default async function main(context) {
       Query.orderAsc('$createdAt'),
     ]);
 
+    const { accuracies: customAccuracies } = await loadMarketAccuracies(tablesdb, databaseId, syncRunsTable);
+
     appwriteLog(JSON.stringify({
       level: 'info',
       job: 'generate-predictions',
@@ -334,49 +329,41 @@ export default async function main(context) {
         let error = null;
 
         try {
-          const homeTeamId = String(fixture?.home_team_api_id || '').trim();
-          const awayTeamId = String(fixture?.away_team_api_id || '').trim();
-          const pairKey = (homeTeamId && awayTeamId) ? [homeTeamId, awayTeamId].sort().join('-') : null;
-
-          const currentFixtureRows = await fetchRows(tablesdb, databaseId, h2hTable, [
-            Query.equal('current_fixture_api_id', fixtureApiId),
-            Query.orderAsc('$createdAt'),
-          ]);
-
-          let pairRows = [];
-          if (pairKey) {
-            pairRows = await fetchRows(tablesdb, databaseId, h2hTable, [
-              Query.equal('pair_key', pairKey),
-              Query.orderAsc('$createdAt'),
-            ]);
-          }
-
-          const rowsByHistoricalId = new Map();
-          for (const row of [...currentFixtureRows, ...pairRows]) {
-            const key = String(row?.historical_fixture_api_id || row?.$id || '').trim();
-            if (!key || rowsByHistoricalId.has(key)) {
-              continue;
-            }
-            rowsByHistoricalId.set(key, row);
-          }
-
-          const h2hRows = [...rowsByHistoricalId.values()];
-
-          const aiContext = prepareFixtureContext(fixture, h2hRows);
-          aiResult = await ai.requestAiPrediction({
-            fixtureApiId,
-            prompt: ai.buildPrompt(aiContext.fixture, aiContext.h2hRows),
-            fixture: aiContext.fixture,
+          const predictionResult = await runPredictionEngine({
+            tablesdb,
+            databaseId,
+            tablesConfig: {
+              oddsTable: process.env.APPWRITE_TABLE_FIXTURE_ODDS || 'fixture_odds',
+              h2hTable: process.env.APPWRITE_TABLE_FIXTURE_H2H_HISTORY || 'fixture_h2h_history',
+              standingsTable: process.env.APPWRITE_TABLE_STANDINGS || 'standings',
+              teamStatsTable: process.env.APPWRITE_TABLE_TEAM_STATS || 'team_statistics',
+            },
+            fixtureDoc: fixture,
+            customAccuracies,
           });
 
-          saveResult = await save.savePredictionRow({
+          aiResult = {
+            rawContent: JSON.stringify(predictionResult.chosen),
+            parsedOk: true,
+            aiResponse: { model: 'rule-engine-v1' },
+            parsed: {
+              predicted_winner: predictionResult.chosen.predictedWinner || 'TBD',
+              confidence: predictionResult.chosen.confidence,
+              picks: [{
+                selection: predictionResult.chosen.selection,
+                confidence: predictionResult.chosen.confidence,
+                reason: predictionResult.reason
+              }]
+            }
+          };
+
+          saveResult = await savePrediction({
             tablesdb,
             databaseId,
             predictionsTable,
             fixture,
-            aiResponse: aiResult.aiResponse,
-            parsed: aiResult.parsed,
-            startedAt,
+            chosenPrediction: predictionResult.chosen,
+            reason: predictionResult.reason,
             releaseStatus: shouldPublishNow ? 'published' : 'draft',
             publishedAt: shouldPublishNow ? startedAt : null,
           });
