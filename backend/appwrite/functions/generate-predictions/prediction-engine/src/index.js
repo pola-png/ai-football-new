@@ -41,6 +41,7 @@ export async function runPredictionEngine({
   fixtureDoc,
   customAccuracies = null,
   log = console.log,
+  cache = null,
 }) {
   const fixtureApiId = String(fixtureDoc.api_fixture_id || '').trim();
   const homeTeamId = String(fixtureDoc.home_team_api_id || '').trim();
@@ -48,18 +49,25 @@ export async function runPredictionEngine({
   const leagueApiId = String(fixtureDoc.league_api_id || '').trim();
   const season = String(fixtureDoc.season || '').trim();
 
-  log(`[Engine] Starting prediction for: ${fixtureDoc.home_team_name} vs ${fixtureDoc.away_team_name} (Fixture API ID: ${fixtureApiId})`);
+  const verbose = process.env.VERBOSE_LOGGING === 'true';
+  const debugLog = (msg) => {
+    if (verbose) {
+      log(msg);
+    }
+  };
+
+  debugLog(`[Engine] Starting prediction for: ${fixtureDoc.home_team_name} vs ${fixtureDoc.away_team_name} (Fixture API ID: ${fixtureApiId})`);
 
   // 1. Data Loading Phase
   const [oddsRows, h2hRows, standingsList, homeTeamStats, awayTeamStats] = await Promise.all([
     loadOdds(tablesdb, databaseId, tablesConfig.oddsTable, fixtureApiId, fixtureDoc),
     loadH2H(tablesdb, databaseId, tablesConfig.h2hTable, fixtureDoc),
-    loadStandings(tablesdb, databaseId, tablesConfig.standingsTable, leagueApiId, season),
-    loadTeamStats(tablesdb, databaseId, tablesConfig.teamStatsTable, homeTeamId, leagueApiId, season),
-    loadTeamStats(tablesdb, databaseId, tablesConfig.teamStatsTable, awayTeamId, leagueApiId, season),
+    loadStandings(tablesdb, databaseId, tablesConfig.standingsTable, leagueApiId, season, cache),
+    loadTeamStats(tablesdb, databaseId, tablesConfig.teamStatsTable, homeTeamId, leagueApiId, season, cache),
+    loadTeamStats(tablesdb, databaseId, tablesConfig.teamStatsTable, awayTeamId, leagueApiId, season, cache),
   ]);
 
-  log(`[Engine] Data loaded from Appwrite: ` +
+  debugLog(`[Engine] Data loaded from Appwrite: ` +
       `oddsRows=${oddsRows.length}, ` +
       `h2hRows=${h2hRows.length}, ` +
       `standingsList=${standingsList.length}, ` +
@@ -84,7 +92,7 @@ export async function runPredictionEngine({
     ...strengthFeatures,
   };
 
-  log(`[Engine] Extracted Features: ` +
+  debugLog(`[Engine] Extracted Features: ` +
       `homeFormScore=${features.homeFormScore}%, awayFormScore=${features.awayFormScore}%, ` +
       `homeStrength=${features.homeStrength}, awayStrength=${features.awayStrength}, ` +
       `avgGoalsScoredHome=${features.avgGoalsScoredHome}, avgGoalsScoredAway=${features.avgGoalsScoredAway}, ` +
@@ -114,9 +122,9 @@ export async function runPredictionEngine({
   // 5. Market Weighting Phase
   const weightedCandidates = applyMarketWeights(candidatesWithConfidence, customAccuracies);
 
-  log('[Engine] Market Candidates scored:');
+  debugLog('[Engine] Market Candidates scored:');
   for (const c of weightedCandidates) {
-    log(`  - Market: ${c.market.padEnd(15)} Selection: ${c.selection.padEnd(12)} RawScore: ${c.rawScore.toString().padEnd(4)} WeightedScore: ${c.weightedScore?.toFixed(2)} Confidence: ${c.confidence?.toFixed(2)}`);
+    debugLog(`  - Market: ${c.market.padEnd(15)} Selection: ${c.selection.padEnd(12)} RawScore: ${c.rawScore.toString().padEnd(4)} WeightedScore: ${c.weightedScore?.toFixed(2)} Confidence: ${c.confidence?.toFixed(2)}`);
   }
 
   // 6. Selection Phase
@@ -125,8 +133,8 @@ export async function runPredictionEngine({
   // 7. Reasoning Generation Phase
   const humanReason = buildReason(chosenResult, features, fixtureDoc);
 
-  log(`[Engine] Final Selection: ${chosenResult.market} -> ${chosenResult.selection} (Confidence: ${chosenResult.confidence})`);
-  log(`[Engine] Reason: ${humanReason}`);
+  log(`[Engine] Fixture: ${fixtureDoc.home_team_name} vs ${fixtureDoc.away_team_name} (API ID: ${fixtureApiId}) -> Selected: ${chosenResult.market} (${chosenResult.selection}), Confidence: ${chosenResult.confidence}`);
+  debugLog(`[Engine] Reason: ${humanReason}`);
 
   return {
     chosen: chosenResult,

@@ -12,11 +12,16 @@ import { Query } from 'node-appwrite';
  * @param {string} season - League season
  * @returns {Promise<object|null>} The team statistics record or null if not found
  */
-export async function loadTeamStats(tablesdb, databaseId, tableId, teamApiId, leagueApiId, season) {
+export async function loadTeamStats(tablesdb, databaseId, tableId, teamApiId, leagueApiId, season, cache = null) {
   const actualTableId = tableId || process.env.APPWRITE_TABLE_TEAM_STATS;
   if (!actualTableId) {
     console.warn('APPWRITE_TABLE_TEAM_STATS environment variable is not defined. Returning fallback stats.');
     return null;
+  }
+
+  const cacheKey = `teamstats_${actualTableId}_${teamApiId}_${leagueApiId}_${season}`;
+  if (cache && cache.has(cacheKey)) {
+    return cache.get(cacheKey);
   }
 
   try {
@@ -31,7 +36,11 @@ export async function loadTeamStats(tablesdb, databaseId, tableId, teamApiId, le
       ],
       total: false,
     });
-    return result.rows[0] || null;
+    const record = result.rows[0] || null;
+    if (cache) {
+      cache.set(cacheKey, record);
+    }
+    return record;
   } catch (error) {
     console.warn(`Could not load team stats from collection ${actualTableId}: ${error.message}. Returning null.`);
     return null;

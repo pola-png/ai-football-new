@@ -75,7 +75,6 @@ export async function savePrediction({
     fixture_api_id: fixtureApiId,
     model_name: 'rule-engine-v1',
     prediction_text: reason,
-    prediction_json: JSON.stringify(chosenPrediction),
     predicted_winner: predictedWinner,
     confidence: chosenPrediction.confidence,
     confidence_label: confidenceLabel,

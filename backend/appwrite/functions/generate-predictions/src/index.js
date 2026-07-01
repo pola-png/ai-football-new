@@ -304,6 +304,7 @@ export default async function main(context) {
       ai_batch_size: aiBatchSize,
     }));
 
+    const cache = new Map();
     const fixtureBatches = chunkArray(fixtures, aiBatchSize);
 
     for (const [batchIndex, fixtureBatch] of fixtureBatches.entries()) {
@@ -340,6 +341,7 @@ export default async function main(context) {
             fixtureDoc: fixture,
             customAccuracies,
             log: (msg) => appwriteLog(msg),
+            cache,
           });
 
           aiResult = {

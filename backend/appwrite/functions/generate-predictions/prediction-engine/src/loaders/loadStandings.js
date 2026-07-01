@@ -11,11 +11,16 @@ import { Query } from 'node-appwrite';
  * @param {string} season - League season
  * @returns {Promise<Array>} List of standings records
  */
-export async function loadStandings(tablesdb, databaseId, tableId, leagueApiId, season) {
+export async function loadStandings(tablesdb, databaseId, tableId, leagueApiId, season, cache = null) {
   const actualTableId = tableId || process.env.APPWRITE_TABLE_STANDINGS;
   if (!actualTableId) {
     console.warn('APPWRITE_TABLE_STANDINGS environment variable is not defined. Returning fallback standings.');
     return [];
+  }
+
+  const cacheKey = `standings_${actualTableId}_${leagueApiId}_${season}`;
+  if (cache && cache.has(cacheKey)) {
+    return cache.get(cacheKey);
   }
 
   try {
@@ -29,7 +34,11 @@ export async function loadStandings(tablesdb, databaseId, tableId, leagueApiId, 
       ],
       total: false,
     });
-    return result.rows || [];
+    const rows = result.rows || [];
+    if (cache) {
+      cache.set(cacheKey, rows);
+    }
+    return rows;
   } catch (error) {
     console.warn(`Could not load standings from collection ${actualTableId}: ${error.message}. Returning empty standings array.`);
     return [];
