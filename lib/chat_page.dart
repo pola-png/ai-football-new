@@ -310,7 +310,7 @@ class _ChatPageState extends State<ChatPage> {
                         ..sort((left, right) {
                           final leftTime = left.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
                           final rightTime = right.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-                          return leftTime.compareTo(rightTime);
+                          return rightTime.compareTo(leftTime);
                         });
 
                       final repliesByParent = <String, List<ChatMessageRecord>>{};
@@ -369,7 +369,8 @@ class _ChatPageState extends State<ChatPage> {
                                   ),
                                 ],
                               )
-                            : ListView.builder(
+                             : ListView.builder(
+                                reverse: true,
                                 physics: const AlwaysScrollableScrollPhysics(),
                                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
                                 itemCount: rootMessages.length,

@@ -40,12 +40,15 @@ export async function runPredictionEngine({
   tablesConfig,
   fixtureDoc,
   customAccuracies = null,
+  log = console.log,
 }) {
   const fixtureApiId = String(fixtureDoc.api_fixture_id || '').trim();
   const homeTeamId = String(fixtureDoc.home_team_api_id || '').trim();
   const awayTeamId = String(fixtureDoc.away_team_api_id || '').trim();
   const leagueApiId = String(fixtureDoc.league_api_id || '').trim();
   const season = String(fixtureDoc.season || '').trim();
+
+  log(`[Engine] Starting prediction for: ${fixtureDoc.home_team_name} vs ${fixtureDoc.away_team_name} (Fixture API ID: ${fixtureApiId})`);
 
   // 1. Data Loading Phase
   const [oddsRows, h2hRows, standingsList, homeTeamStats, awayTeamStats] = await Promise.all([
@@ -55,6 +58,13 @@ export async function runPredictionEngine({
     loadTeamStats(tablesdb, databaseId, tablesConfig.teamStatsTable, homeTeamId, leagueApiId, season),
     loadTeamStats(tablesdb, databaseId, tablesConfig.teamStatsTable, awayTeamId, leagueApiId, season),
   ]);
+
+  log(`[Engine] Data loaded from Appwrite: ` +
+      `oddsRows=${oddsRows.length}, ` +
+      `h2hRows=${h2hRows.length}, ` +
+      `standingsList=${standingsList.length}, ` +
+      `homeTeamStats=${homeTeamStats ? 'Found (Appwrite Table)' : 'Calculated (Fallback)'}, ` +
+      `awayTeamStats=${awayTeamStats ? 'Found (Appwrite Table)' : 'Calculated (Fallback)'}`);
 
   // 2. Feature Extraction Phase
   const goalsFeatures = extractGoalsFeatures(h2hRows, homeTeamStats, awayTeamStats, homeTeamId, awayTeamId);
@@ -73,6 +83,13 @@ export async function runPredictionEngine({
     ...standingsFeatures,
     ...strengthFeatures,
   };
+
+  log(`[Engine] Extracted Features: ` +
+      `homeFormScore=${features.homeFormScore}%, awayFormScore=${features.awayFormScore}%, ` +
+      `homeStrength=${features.homeStrength}, awayStrength=${features.awayStrength}, ` +
+      `avgGoalsScoredHome=${features.avgGoalsScoredHome}, avgGoalsScoredAway=${features.avgGoalsScoredAway}, ` +
+      `bttsRate=${features.bttsRate}, over25Rate=${features.over25Rate}, ` +
+      `hasOdds=${features.hasOdds}, hasStandings=${features.hasStandings}`);
 
   // 3. Engine Scoring Phase
   const candidates = [
@@ -97,11 +114,19 @@ export async function runPredictionEngine({
   // 5. Market Weighting Phase
   const weightedCandidates = applyMarketWeights(candidatesWithConfidence, customAccuracies);
 
+  log('[Engine] Market Candidates scored:');
+  for (const c of weightedCandidates) {
+    log(`  - Market: ${c.market.padEnd(15)} Selection: ${c.selection.padEnd(12)} RawScore: ${c.rawScore.toString().padEnd(4)} WeightedScore: ${c.weightedScore?.toFixed(2)} Confidence: ${c.confidence?.toFixed(2)}`);
+  }
+
   // 6. Selection Phase
   const chosenResult = chooseBestPrediction(weightedCandidates, features);
 
   // 7. Reasoning Generation Phase
   const humanReason = buildReason(chosenResult, features, fixtureDoc);
+
+  log(`[Engine] Final Selection: ${chosenResult.market} -> ${chosenResult.selection} (Confidence: ${chosenResult.confidence})`);
+  log(`[Engine] Reason: ${humanReason}`);
 
   return {
     chosen: chosenResult,

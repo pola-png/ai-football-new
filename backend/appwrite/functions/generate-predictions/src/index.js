@@ -327,7 +327,6 @@ export default async function main(context) {
         let notificationSent = false;
         let notificationSentAt = null;
         let error = null;
-
         try {
           const predictionResult = await runPredictionEngine({
             tablesdb,
@@ -340,6 +339,7 @@ export default async function main(context) {
             },
             fixtureDoc: fixture,
             customAccuracies,
+            log: (msg) => appwriteLog(msg),
           });
 
           aiResult = {

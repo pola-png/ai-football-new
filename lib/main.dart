@@ -4341,7 +4341,7 @@ class _DateSectionHeader extends StatelessWidget {
   }
 }
 
-class PredictionGroupCard extends StatelessWidget {
+class PredictionGroupCard extends StatefulWidget {
   const PredictionGroupCard({
     super.key,
     required this.prediction,
@@ -4370,7 +4370,59 @@ class PredictionGroupCard extends StatelessWidget {
   final Future<void> Function(String? plan, double? confidence)? onAdminPlanOverride;
 
   @override
+  State<PredictionGroupCard> createState() => _PredictionGroupCardState();
+}
+
+class _PredictionGroupCardState extends State<PredictionGroupCard> {
+  bool _isExpanded = false;
+  Timer? _liveTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _startLiveTimerIfNeeded();
+  }
+
+  @override
+  void didUpdateWidget(PredictionGroupCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _startLiveTimerIfNeeded();
+  }
+
+  void _startLiveTimerIfNeeded() {
+    final isLive = _isLivePrediction(widget.prediction);
+    if (isLive) {
+      _liveTimer ??= Timer.periodic(const Duration(seconds: 15), (timer) {
+        if (mounted) {
+          setState(() {});
+        }
+      });
+    } else {
+      _liveTimer?.cancel();
+      _liveTimer = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _liveTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final prediction = widget.prediction;
+    final isLocked = widget.isLocked;
+    final isUnlocking = widget.isUnlocking;
+    final onUnlockPressed = widget.onUnlockPressed;
+    final isSelected = widget.isSelected;
+    final canSelect = widget.canSelect;
+    final onSelectionPressed = widget.onSelectionPressed;
+    final onOpenComments = widget.onOpenComments;
+    final isPopular = widget.isPopular;
+    final isAdmin = widget.isAdmin;
+    final onAdminPlanOverride = widget.onAdminPlanOverride;
+
     final surface = _screenSurface(context);
     final border = _screenBorder(context);
     final popular = isPopular ?? _isPopularPrediction(prediction);
@@ -4439,7 +4491,7 @@ class PredictionGroupCard extends StatelessWidget {
                   ),
                   confidenceLabel: _confidenceBadgeLabel(prediction),
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 12),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -4453,74 +4505,140 @@ class PredictionGroupCard extends StatelessWidget {
                     ),
                     _MetaChip(
                       icon: _matchStatusIcon(prediction),
-                      iconColor: _matchStatusLabel(prediction) == 'Live' ? Colors.redAccent : Colors.orangeAccent,
-                      label: _matchStatusLabel(prediction),
+                      iconColor: _liveMatchTimeStatusLabel(prediction).startsWith('Live') ? Colors.redAccent : Colors.orangeAccent,
+                      label: _liveMatchTimeStatusLabel(prediction),
                     ),
-                    if (prediction.predictedWinner != null)
-                      _MetaChip(
-                        icon: Icons.flag,
-                        iconColor: const Color(0xFF00D4AA),
-                        label: prediction.predictedWinner!,
-                      ),
                   ],
                 ),
-                const SizedBox(height: 12),
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 220),
-                  child: isLocked
-                      ? _LockedPickGate(
-                          key: const ValueKey('locked'),
-                          isUnlocking: isUnlocking,
-                          onUnlockPressed: onUnlockPressed,
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.fastOutSlowIn,
+                  alignment: Alignment.topCenter,
+                  child: !_isExpanded
+                      ? InkWell(
+                          onTap: () => setState(() => _isExpanded = true),
+                          borderRadius: BorderRadius.circular(12),
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 14, bottom: 4),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  'Show prediction & details',
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.primary,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                                const SizedBox(width: 4),
+                                Icon(
+                                  Icons.keyboard_arrow_down,
+                                  color: Theme.of(context).colorScheme.primary,
+                                  size: 16,
+                                ),
+                              ],
+                            ),
+                          ),
                         )
-                      : _PickCard(
-                          key: const ValueKey('unlocked'),
-                          data: primaryPick,
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const SizedBox(height: 12),
+                            if (prediction.predictedWinner != null) ...[
+                              _MetaChip(
+                                icon: Icons.flag,
+                                iconColor: const Color(0xFF00D4AA),
+                                label: prediction.predictedWinner!,
+                              ),
+                              const SizedBox(height: 12),
+                            ],
+                            AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 220),
+                              child: isLocked
+                                  ? _LockedPickGate(
+                                      key: const ValueKey('locked'),
+                                      isUnlocking: isUnlocking,
+                                      onUnlockPressed: onUnlockPressed,
+                                    )
+                                  : _PickCard(
+                                      key: const ValueKey('unlocked'),
+                                      data: primaryPick,
+                                    ),
+                            ),
+                            if (canSelect && !_isFinishedPrediction(prediction, DateTime.now().toLocal())) ...[
+                              const SizedBox(height: 12),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: FilledButton.tonalIcon(
+                                  onPressed: onSelectionPressed,
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: isSelected
+                                        ? const Color(0xFF00D4AA).withAlpha(35)
+                                        : null,
+                                    foregroundColor: isSelected
+                                        ? const Color(0xFF00D4AA)
+                                        : null,
+                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                  ),
+                                  icon: Icon(
+                                    isSelected ? Icons.check_circle : Icons.add_circle_outline,
+                                    size: 18,
+                                  ),
+                                  label: Text(
+                                    isSelected ? 'Selected' : 'Select Match',
+                                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                                  ),
+                                ),
+                              ),
+                            ],
+                            if (!isLocked && onOpenComments != null) ...[
+                              const SizedBox(height: 14),
+                              _PredictionSocialSection(
+                                prediction: prediction,
+                                onOpenComments: onOpenComments,
+                              ),
+                            ],
+                            if (isAdmin && onAdminPlanOverride != null) ...[
+                              const SizedBox(height: 10),
+                              _AdminPlanOverrideBar(
+                                currentOverride: prediction.adminPlanOverride,
+                                onSelect: onAdminPlanOverride,
+                              ),
+                            ],
+                            const SizedBox(height: 12),
+                            InkWell(
+                              onTap: () => setState(() => _isExpanded = false),
+                              borderRadius: BorderRadius.circular(12),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 8),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text(
+                                      'Collapse details',
+                                      style: TextStyle(
+                                        color: _secondaryText(context),
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Icon(
+                                      Icons.keyboard_arrow_up,
+                                      color: _secondaryText(context),
+                                      size: 16,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                 ),
-                if (canSelect && !_isFinishedPrediction(prediction, DateTime.now().toLocal())) ...[
-                  const SizedBox(height: 12),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: FilledButton.tonalIcon(
-                      onPressed: onSelectionPressed,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: isSelected
-                            ? const Color(0xFF00D4AA).withAlpha(35)
-                            : null,
-                        foregroundColor: isSelected
-                            ? const Color(0xFF00D4AA)
-                            : null,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      icon: Icon(
-                        isSelected ? Icons.check_circle : Icons.add_circle_outline,
-                        size: 18,
-                      ),
-                      label: Text(
-                        isSelected ? 'Selected' : 'Select Match',
-                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                      ),
-                    ),
-                  ),
-                ],
-                if (!isLocked && onOpenComments != null) ...[
-                  const SizedBox(height: 14),
-                  _PredictionSocialSection(
-                    prediction: prediction,
-                    onOpenComments: onOpenComments!,
-                  ),
-                ],
-                if (isAdmin && onAdminPlanOverride != null) ...[
-                  const SizedBox(height: 10),
-                  _AdminPlanOverrideBar(
-                    currentOverride: prediction.adminPlanOverride,
-                    onSelect: onAdminPlanOverride!,
-                  ),
-                ],
               ],
             ),
           ),
@@ -5921,6 +6039,31 @@ String _matchStatusLabel(PredictionRecord prediction) {
   }
 
   return statusShort ?? 'Coming';
+}
+
+String _liveMatchTimeStatusLabel(PredictionRecord prediction) {
+  final label = _matchStatusLabel(prediction);
+  if (label != 'Live') return label;
+
+  final kickoffAt = _localDateTime(prediction.kickoffAt);
+  if (kickoffAt == null) return 'Live';
+
+  final now = DateTime.now().toLocal();
+  final diff = now.difference(kickoffAt);
+  final elapsedMinutes = diff.inMinutes;
+
+  if (elapsedMinutes < 0) {
+    return 'Coming';
+  } else if (elapsedMinutes < 45) {
+    return 'Live 1H ${elapsedMinutes + 1}\'';
+  } else if (elapsedMinutes < 60) {
+    return 'Live HT';
+  } else if (elapsedMinutes < 105) {
+    final gameMinute = elapsedMinutes - 15 + 1;
+    return 'Live 2H ${gameMinute > 90 ? 90 : gameMinute}\'';
+  } else {
+    return 'Finished';
+  }
 }
 
 String _confidenceBadgeLabel(PredictionRecord prediction) {
