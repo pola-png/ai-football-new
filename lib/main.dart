@@ -6,6 +6,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:in_app_review/in_app_review.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'app_auth_service.dart';
 import 'admin_access_service.dart';
 import 'admin_notification_page.dart';
@@ -476,6 +478,30 @@ class _NotificationBootstrapPageState extends State<NotificationBootstrapPage> {
     }
 
     await PlayStoreUpdateService.checkAndUpdate();
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final currentOpens = prefs.getInt('app_open_count') ?? 0;
+      final newOpens = currentOpens + 1;
+      await prefs.setInt('app_open_count', newOpens);
+
+      final hasPrompted = prefs.getBool('app_rated_or_prompted') ?? false;
+      if (newOpens >= 2 && !hasPrompted) {
+        await prefs.setBool('app_rated_or_prompted', true);
+        final InAppReview inAppReview = InAppReview.instance;
+        if (await inAppReview.isAvailable()) {
+          Future.delayed(const Duration(seconds: 3), () async {
+            try {
+              await inAppReview.requestReview();
+            } catch (e) {
+              debugPrint('In-app review prompt failed: $e');
+            }
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Error handling app rating flow: $e');
+    }
 
     if (!mounted) {
       return;
@@ -1000,6 +1026,18 @@ class _MainMenuPage extends StatelessWidget {
             ),
             _menuTile(
               context,
+              icon: Icons.star_rate_outlined,
+              title: 'Rate Us',
+              subtitle: 'Rate the app on Play Store',
+              border: border,
+              textColor: primaryText,
+              onTap: () {
+                Navigator.of(context).pop();
+                _openPlayStoreRating();
+              },
+            ),
+            _menuTile(
+              context,
               icon: Icons.delete_forever_outlined,
               title: 'Delete Account',
               subtitle: 'Permanently remove your account',
@@ -1110,6 +1148,7 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
   final Set<String> _expandedSectionKeys = <String>{};
   final Set<String> _unlockedPickKeys = <String>{};
   _TodayBucket _selectedTodayBucket = _TodayBucket.coming;
+  _OddsTab _selectedOddsTab = _OddsTab.regular;
   String? _unlockingPickKey;
   String _searchQuery = '';
   _ConfidenceFilter _confidenceFilter = _ConfidenceFilter.all;
@@ -1290,7 +1329,7 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
                   SliverAppBar(
                     pinned: true,
                     floating: false,
-                    toolbarHeight: 110,
+                    toolbarHeight: 78,
                     backgroundColor: Colors.transparent,
                     surfaceTintColor: Colors.transparent,
                     elevation: 0,
@@ -1348,6 +1387,19 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
                       ),
                     ),
                   ),
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                      child: _OddsTabSelector(
+                        selectedTab: _selectedOddsTab,
+                        onSelectTab: (tab) {
+                          setState(() {
+                            _selectedOddsTab = tab;
+                          });
+                        },
+                      ),
+                    ),
+                  ),
                   if (_isHighFilterSelected)
                     SliverToBoxAdapter(
                       child: Padding(
@@ -1379,6 +1431,31 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
                           message: 'Pull to refresh and try again.',
                           actionLabel: 'Retry',
                           onAction: _reload,
+                        ),
+                      ),
+                    )
+                  else if (_selectedOddsTab != _OddsTab.regular)
+                    SliverList(
+                      delegate: SliverChildListDelegate(
+                        _buildOddsAccumulatorWidgets(
+                          context: context,
+                          predictions: predictions,
+                          targetOdds: switch (_selectedOddsTab) {
+                            _OddsTab.twoOdds => 2.0,
+                            _OddsTab.fiveOdds => 5.0,
+                            _OddsTab.tenOdds => 10.0,
+                            _OddsTab.bigOdds => 50.0,
+                            _ => 2.0,
+                          },
+                          isPickUnlocked: _isPickUnlocked,
+                          unlockingPickKey: _unlockingPickKey,
+                          onUnlockPick: _unlockPick,
+                          adFree: widget.adFree,
+                          isSelected: widget.isPredictionSelected,
+                          onToggleSelection: _handleSelectPrediction,
+                          onOpenComments: _openComments,
+                          isAdmin: widget.isAdmin,
+                          onAdminPlanOverride: _handleAdminPlanOverride,
                         ),
                       ),
                     )
@@ -1902,6 +1979,7 @@ class _DedicatedPlanScreen extends StatefulWidget {
 
 class _DedicatedPlanScreenState extends State<_DedicatedPlanScreen> {
   final Set<String> _expandedSectionKeys = <String>{};
+  _OddsTab _selectedOddsTab = _OddsTab.regular;
 
   void _toggleSection(String key) {
     setState(() {
@@ -1994,6 +2072,17 @@ class _DedicatedPlanScreenState extends State<_DedicatedPlanScreen> {
                 ),
                 const SizedBox(height: 18),
               ],
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _OddsTabSelector(
+                  selectedTab: _selectedOddsTab,
+                  onSelectTab: (tab) {
+                    setState(() {
+                      _selectedOddsTab = tab;
+                    });
+                  },
+                ),
+              ),
               if (snapshot.connectionState == ConnectionState.waiting &&
                   predictions.isEmpty)
                 const Padding(
@@ -2005,6 +2094,29 @@ class _DedicatedPlanScreenState extends State<_DedicatedPlanScreen> {
                   context,
                   title: 'Unable to load predictions',
                   body: 'Pull to refresh and try again.',
+                )
+              else if (_selectedOddsTab != _OddsTab.regular)
+                ..._buildOddsAccumulatorWidgets(
+                  context: context,
+                  predictions: filteredPredictions,
+                  targetOdds: switch (_selectedOddsTab) {
+                    _OddsTab.twoOdds => 2.0,
+                    _OddsTab.fiveOdds => 5.0,
+                    _OddsTab.tenOdds => 10.0,
+                    _OddsTab.bigOdds => 50.0,
+                    _ => 2.0,
+                  },
+                  isPickUnlocked: (key) => true,
+                  unlockingPickKey: null,
+                  onUnlockPick: (p) async {},
+                  adFree: true,
+                  isSelected: (p) => false,
+                  onToggleSelection: (p) {},
+                  onOpenComments: (p) => showPredictionCommentsSheet(context, p),
+                  isAdmin: widget.isAdmin,
+                  onAdminPlanOverride: (p, plan, conf) async {},
+                  forPlans: true,
+                  horizontalPadding: 0,
                 )
               else if (filteredPredictions.isEmpty)
                 _planNotice(
@@ -3709,6 +3821,541 @@ List<Widget> _buildGroupedPredictionWidgets(
   }
 
   return widgets;
+}
+
+enum _OddsTab { regular, twoOdds, fiveOdds, tenOdds, bigOdds }
+
+class _OddsTabSelector extends StatelessWidget {
+  const _OddsTabSelector({
+    required this.selectedTab,
+    required this.onSelectTab,
+  });
+
+  final _OddsTab selectedTab;
+  final void Function(_OddsTab tab) onSelectTab;
+
+  String _tabLabel(_OddsTab tab) {
+    return switch (tab) {
+      _OddsTab.regular => 'All Picks',
+      _OddsTab.twoOdds => '2 Odds',
+      _OddsTab.fiveOdds => '5 Odds',
+      _OddsTab.tenOdds => '10 Odds',
+      _OddsTab.bigOdds => 'Big Odds (50+)',
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = _isDarkContext(context);
+    final border = _screenBorder(context);
+    final primaryText = _primaryText(context);
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      physics: const BouncingScrollPhysics(),
+      child: Row(
+        children: _OddsTab.values.map((tab) {
+          final isSelected = tab == selectedTab;
+          final accent = const Color(0xFF00D4AA);
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: GestureDetector(
+              onTap: () => onSelectTab(tab),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? accent
+                      : _screenSurface(context, elevated: true),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: isSelected ? accent : border,
+                    width: 1.2,
+                  ),
+                  boxShadow: isSelected
+                      ? [
+                          BoxShadow(
+                            color: accent.withValues(alpha: 0.18),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          )
+                        ]
+                      : null,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (isSelected) ...[
+                      const Icon(
+                        Icons.check_circle,
+                        size: 14,
+                        color: Color(0xFF0A0F1E),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    Text(
+                      _tabLabel(tab),
+                      style: TextStyle(
+                        color: isSelected ? const Color(0xFF0A0F1E) : primaryText,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+List<List<PredictionRecord>> _buildAccumulatorGroups(
+  List<PredictionRecord> predictions,
+  double targetOdds, {
+  bool forPlans = false,
+}) {
+  final upcoming = predictions.where((p) {
+    if (!forPlans) {
+      // Exclude matches that are meant for plans
+      final confidencePercent = _predictionConfidencePercent(p);
+      final hasOverride = p.adminPlanOverride?.trim().isNotEmpty ?? false;
+      if (confidencePercent >= 81 || hasOverride) {
+        return false;
+      }
+    }
+
+    // Exclude matches that are finished or live
+    final now = DateTime.now().toLocal();
+    return !_isFinishedPrediction(p, now) && !_isLivePrediction(p);
+  }).toList();
+
+  // Sort by kickoff time ascending so tickets are ordered chronologically
+  upcoming.sort(_comparePredictionsByKickoff);
+
+  final List<List<PredictionRecord>> groups = [];
+  List<PredictionRecord> currentGroup = [];
+  double currentOdds = 1.0;
+
+  for (final p in upcoming) {
+    final odd = _predictionOddValue(p);
+
+    currentGroup.add(p);
+    currentOdds *= odd;
+
+    // Check if we reached the target odds or max group size
+    final maxMatches = targetOdds <= 2.1 ? 2 : (targetOdds <= 5.1 ? 4 : (targetOdds <= 10.1 ? 6 : 12));
+    final stopThreshold = targetOdds * 0.9;
+
+    if (currentOdds >= stopThreshold || currentGroup.length >= maxMatches) {
+      groups.add(currentGroup);
+      currentGroup = [];
+      currentOdds = 1.0;
+    }
+  }
+
+  // If the last group has matches and is at least 70% of target odds (or has matches for big odds), add it
+  if (currentGroup.isNotEmpty) {
+    if (targetOdds >= 50.0) {
+      if (currentGroup.length >= 5) {
+        groups.add(currentGroup);
+      }
+    } else {
+      if (currentOdds >= (targetOdds * 0.70)) {
+        groups.add(currentGroup);
+      }
+    }
+  }
+
+  return groups;
+}
+
+List<Widget> _buildOddsAccumulatorWidgets({
+  required BuildContext context,
+  required List<PredictionRecord> predictions,
+  required double targetOdds,
+  required bool Function(String key) isPickUnlocked,
+  required Future<void> Function(PredictionRecord prediction) onUnlockPick,
+  required String? unlockingPickKey,
+  required bool adFree,
+  required bool Function(PredictionRecord prediction) isSelected,
+  required void Function(PredictionRecord prediction) onToggleSelection,
+  required Future<void> Function(PredictionRecord prediction) onOpenComments,
+  required bool isAdmin,
+  required Future<void> Function(PredictionRecord, String?, double?) onAdminPlanOverride,
+  bool forPlans = false,
+  double horizontalPadding = 20,
+}) {
+  final accumulators = _buildAccumulatorGroups(predictions, targetOdds, forPlans: forPlans);
+  final widgets = <Widget>[];
+
+  if (accumulators.isEmpty) {
+    widgets.add(
+      Padding(
+        padding: EdgeInsets.symmetric(horizontal: horizontalPadding, vertical: 24),
+        child: _EmptyState(
+          icon: Icons.sports_soccer,
+          title: 'No accumulators available',
+          message: 'Check back later when more matches are analyzed.',
+        ),
+      ),
+    );
+    return widgets;
+  }
+
+  for (var i = 0; i < accumulators.length; i++) {
+    final ticket = accumulators[i];
+    final ticketTotalOdds = ticket.fold<double>(
+      1.0,
+      (sum, p) => sum * _predictionOddValue(p),
+    );
+
+    widgets.add(
+      Padding(
+        padding: EdgeInsets.symmetric(horizontal: horizontalPadding, vertical: 8),
+        child: _AccumulatorTicketCard(
+          ticketIndex: i + 1,
+          totalOdds: ticketTotalOdds,
+          predictions: ticket,
+          isPickUnlocked: isPickUnlocked,
+          unlockingPickKey: unlockingPickKey,
+          onUnlockPick: onUnlockPick,
+          adFree: adFree,
+          isSelected: isSelected,
+          onToggleSelection: onToggleSelection,
+          onOpenComments: onOpenComments,
+          isAdmin: isAdmin,
+          onAdminPlanOverride: onAdminPlanOverride,
+        ),
+      ),
+    );
+  }
+
+  return widgets;
+}
+
+class _AccumulatorTicketCard extends StatelessWidget {
+  const _AccumulatorTicketCard({
+    required this.ticketIndex,
+    required this.totalOdds,
+    required this.predictions,
+    required this.isPickUnlocked,
+    required this.unlockingPickKey,
+    required this.onUnlockPick,
+    required this.adFree,
+    required this.isSelected,
+    required this.onToggleSelection,
+    required this.onOpenComments,
+    required this.isAdmin,
+    required this.onAdminPlanOverride,
+  });
+
+  final int ticketIndex;
+  final double totalOdds;
+  final List<PredictionRecord> predictions;
+  final bool Function(String key) isPickUnlocked;
+  final String? unlockingPickKey;
+  final Future<void> Function(PredictionRecord prediction) onUnlockPick;
+  final bool adFree;
+  final bool Function(PredictionRecord prediction) isSelected;
+  final void Function(PredictionRecord prediction) onToggleSelection;
+  final Future<void> Function(PredictionRecord prediction) onOpenComments;
+  final bool isAdmin;
+  final Future<void> Function(PredictionRecord, String?, double?) onAdminPlanOverride;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = _isDarkContext(context);
+    final border = _screenBorder(context);
+    final surface = _screenSurface(context, elevated: true);
+    final primaryText = _primaryText(context);
+    final secondaryText = _secondaryText(context);
+    final accent = const Color(0xFF00D4AA);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: surface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: border, width: 1.2),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0F000000),
+            blurRadius: 16,
+            offset: Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header: Ticket label and total odds
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    'TICKET #$ticketIndex',
+                    style: TextStyle(
+                      color: accent,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: accent,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    '${totalOdds.toStringAsFixed(2)} ODDS',
+                    style: const TextStyle(
+                      color: Color(0xFF0A0F1E),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          // Dotted Divider (coupon ticket style)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: List.generate(
+                30,
+                (index) => Expanded(
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 2),
+                    height: 1,
+                    color: border.withValues(alpha: 0.47),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          
+          // Matches list
+          ListView.separated(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: predictions.length,
+            separatorBuilder: (context, index) => Divider(color: border.withValues(alpha: 0.24), height: 1),
+            itemBuilder: (context, index) {
+              final prediction = predictions[index];
+              final key = _predictionUnlockKey(prediction);
+              final isUnlocked = isPickUnlocked(key);
+              final localKickoff = _localDateTime(prediction.kickoffAt);
+              final formattedTime = localKickoff != null ? _formatTimeOnly(localKickoff) : '';
+              final individualOdd = _predictionOddValue(prediction);
+
+              final primaryPickData = _PickCardData.fromPick(
+                'Primary Pick',
+                prediction.primaryPick,
+                accent,
+                prediction,
+              );
+
+              return Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '${prediction.homeTeamName ?? ""} vs ${prediction.awayTeamName ?? ""}',
+                                style: TextStyle(
+                                  color: primaryText,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  Icon(Icons.schedule, size: 12, color: secondaryText),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    formattedTime,
+                                    style: TextStyle(
+                                      color: secondaryText,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        Text(
+                          '@ ${individualOdd.toStringAsFixed(2)}',
+                          style: TextStyle(
+                            color: accent,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    
+                    // Show selection or lock widget
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 200),
+                      child: !isUnlocked
+                          ? InkWell(
+                              onTap: () => onUnlockPick(prediction),
+                              borderRadius: BorderRadius.circular(12),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                decoration: BoxDecoration(
+                                  color: accent.withValues(alpha: 0.06),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: accent.withValues(alpha: 0.14)),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (unlockingPickKey == key) ...[
+                                      const SizedBox(
+                                        width: 14,
+                                        height: 14,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          valueColor: AlwaysStoppedAnimation(Color(0xFF00D4AA)),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'Unlocking...',
+                                        style: TextStyle(
+                                          color: accent,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ] else ...[
+                                      Icon(Icons.lock, size: 14, color: accent),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'Watch Ad to Unlock Prediction',
+                                        style: TextStyle(
+                                          color: accent,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w800,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            )
+                          : Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                              decoration: BoxDecoration(
+                                color: isDark ? const Color(0xFF0A0F1D) : const Color(0xFFF1F5F9),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: border.withValues(alpha: 0.31)),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      _finalSelection(primaryPickData),
+                                      style: TextStyle(
+                                        color: primaryText,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                  ),
+                                  if (primaryPickData.verdictLabel != null)
+                                    _TinyVerdictChip(
+                                      label: primaryPickData.verdictLabel!,
+                                      color: primaryPickData.verdictColor!,
+                                    ),
+                                ],
+                              ),
+                            ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+          
+          // Ticket Action Footer (to copy/share or select all matches)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () {
+                      int selectedCount = 0;
+                      for (final p in predictions) {
+                        if (isPickUnlocked(_predictionUnlockKey(p))) {
+                          if (!isSelected(p)) {
+                            onToggleSelection(p);
+                            selectedCount++;
+                          }
+                        }
+                      }
+                      
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            selectedCount > 0
+                                ? 'Added $selectedCount unlocked matches to Picked Matches.'
+                                : 'All unlocked matches are already selected, or unlock them first.',
+                          ),
+                        ),
+                      );
+                    },
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: border),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    icon: const Icon(Icons.add_task, size: 16),
+                    label: const Text(
+                      'Select Ticket Matches',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 enum _TodayBucket { coming, live, finished }
@@ -5624,8 +6271,35 @@ class _TinyVerdictChip extends StatelessWidget {
   }
 }
 
+Future<void> _openPlayStoreRating() async {
+  final InAppReview inAppReview = InAppReview.instance;
+  if (await inAppReview.isAvailable()) {
+    try {
+      await inAppReview.openStoreListing(appStoreId: 'com.Aifootballprediction.app');
+      return;
+    } catch (_) {}
+  }
+  final playStoreUri = Uri.parse('https://play.google.com/store/apps/details?id=com.Aifootballprediction.app');
+  if (await canLaunchUrl(playStoreUri)) {
+    await launchUrl(playStoreUri, mode: LaunchMode.externalApplication);
+  }
+}
+
 String _finalSelection(_PickCardData data) {
-  return data.selection ?? data.market ?? 'Selection';
+  final market = data.market?.trim() ?? '';
+  final selection = data.selection?.trim() ?? '';
+
+  if (selection.isEmpty) return market.isEmpty ? 'Selection' : market;
+
+  final marketLower = market.toLowerCase();
+  if (marketLower == 'btts' || marketLower.contains('both team')) {
+    return 'Both Team To Score: $selection';
+  }
+  if (marketLower == 'double chance') {
+    return 'Double Chance: $selection';
+  }
+
+  return selection;
 }
 
 String? _teamScoreLabel(String? currentGoals, String? fulltimeGoals) {
@@ -5650,19 +6324,86 @@ _PickVerdict _pickVerdict(PredictionRecord prediction) {
     return isFinished ? _PickVerdict.correct : _PickVerdict.pending;
   }
 
-  final selection = _normalizeSelection(prediction);
-  if (selection.isEmpty) {
+  final rawSelection = (prediction.primaryPick?.selection ?? '').trim();
+  final rawMarket = (prediction.primaryPick?.market ?? '').trim();
+  final market = rawMarket.toLowerCase();
+  final selectionLower = rawSelection.toLowerCase();
+
+  if (rawSelection.isEmpty && rawMarket.isEmpty) {
     return _PickVerdict.pending;
   }
 
-  final homeTeam = _normalizeText(prediction.homeTeamName ?? '');
-  final awayTeam = _normalizeText(prediction.awayTeamName ?? '');
   final homeGoals = _goalCount(
     prediction.fulltimeHomeGoals ?? prediction.currentHomeGoals,
   );
   final awayGoals = _goalCount(
     prediction.fulltimeAwayGoals ?? prediction.currentAwayGoals,
   );
+
+  // BTTS — check market first, then fall back to text matching
+  if (market == 'btts' || market.contains('both team')) {
+    if (homeGoals == null || awayGoals == null) {
+      return _PickVerdict.pending;
+    }
+    final yesPicked = selectionLower == 'yes';
+    final actualYes = homeGoals > 0 && awayGoals > 0;
+    return yesPicked == actualYes ? _PickVerdict.correct : _PickVerdict.wrong;
+  }
+
+  // Double Chance — check market first
+  if (market == 'double chance') {
+    if (homeGoals == null || awayGoals == null) {
+      return _PickVerdict.pending;
+    }
+    final sel = selectionLower;
+    if (sel == '1x') return homeGoals >= awayGoals ? _PickVerdict.correct : _PickVerdict.wrong;
+    if (sel == 'x2') return awayGoals >= homeGoals ? _PickVerdict.correct : _PickVerdict.wrong;
+    if (sel == '12') return homeGoals != awayGoals ? _PickVerdict.correct : _PickVerdict.wrong;
+    return _PickVerdict.pending;
+  }
+
+  // Over/Under
+  if (market == 'over/under' || market.contains('over') || market.contains('under')) {
+    final overUnder = _parseOverUnderSelection(_normalizeText(rawSelection));
+    if (overUnder != null) {
+      if (homeGoals == null || awayGoals == null) {
+        return _PickVerdict.pending;
+      }
+      final totalGoals = homeGoals + awayGoals;
+      final actualCorrect = overUnder.isOver
+          ? totalGoals > overUnder.line
+          : totalGoals < overUnder.line;
+      return actualCorrect ? _PickVerdict.correct : _PickVerdict.wrong;
+    }
+  }
+
+  // Draw market
+  if (market == 'draw') {
+    if (selectionLower == 'yes') {
+      return outcome == 'draw' ? _PickVerdict.correct : _PickVerdict.wrong;
+    }
+    if (selectionLower == 'no') {
+      return outcome != 'draw' ? _PickVerdict.correct : _PickVerdict.wrong;
+    }
+  }
+
+  // Winner market
+  if (market == 'winner') {
+    if (selectionLower.contains('home')) {
+      return outcome == 'home' ? _PickVerdict.correct : _PickVerdict.wrong;
+    }
+    if (selectionLower.contains('away')) {
+      return outcome == 'away' ? _PickVerdict.correct : _PickVerdict.wrong;
+    }
+    if (selectionLower.contains('draw')) {
+      return outcome == 'draw' ? _PickVerdict.correct : _PickVerdict.wrong;
+    }
+  }
+
+  // Fallback: use combined normalized selection text (original logic)
+  final selection = _normalizeSelection(prediction);
+  final homeTeam = _normalizeText(prediction.homeTeamName ?? '');
+  final awayTeam = _normalizeText(prediction.awayTeamName ?? '');
 
   if (selection.contains('btts')) {
     if (homeGoals == null || awayGoals == null) {
@@ -5686,13 +6427,13 @@ _PickVerdict _pickVerdict(PredictionRecord prediction) {
   }
 
   if (selection.contains('home') ||
-      selection.contains('1') ||
+      (selection.contains('1') && !selection.contains('1.')) ||
       selection.contains(homeTeam)) {
     return outcome == 'home' ? _PickVerdict.correct : _PickVerdict.wrong;
   }
 
   if (selection.contains('away') ||
-      selection.contains('2') ||
+      (selection.contains('2') && !selection.contains('2.')) ||
       selection.contains(awayTeam)) {
     return outcome == 'away' ? _PickVerdict.correct : _PickVerdict.wrong;
   }
@@ -6084,6 +6825,15 @@ double _predictionConfidenceValue(PredictionRecord prediction) {
   return prediction.confidence ?? prediction.primaryPick?.confidence ?? 0.0;
 }
 
+double _predictionOddValue(PredictionRecord prediction) {
+  final primaryOdd = prediction.primaryPick?.odd;
+  if (primaryOdd != null && primaryOdd > 0.0) {
+    return primaryOdd;
+  }
+  final conf = _predictionConfidenceValue(prediction).clamp(0.1, 0.99);
+  return 1.0 / conf;
+}
+
 double _predictionConfidencePercentExact(PredictionRecord prediction) {
   return _predictionConfidenceValue(prediction) * 100.0;
 }
@@ -6345,87 +7095,55 @@ class _HeaderInfoCarouselState extends State<_HeaderInfoCarousel> {
   Widget build(BuildContext context) {
     final isDark = _isDarkContext(context);
 
-    return Column(
-      children: [
-        SizedBox(
-          height: 122,
-          child: PageView(
-            controller: _controller,
-            onPageChanged: (page) {
-              setState(() {
-                _currentPage = page;
-              });
-            },
-            children: [
-              FutureBuilder<Map<String, dynamic>>(
-                future: _todayStatsFuture,
-                builder: (context, snapshot) {
-                  final stats = snapshot.data;
-                  final totalCorrect = stats?['totalCorrect'] ?? 0;
-                  final totalChecked = stats?['totalChecked'] ?? 0;
-                  final accuracy = stats?['accuracy'] ?? 86;
+    return SizedBox(
+      height: 110,
+      child: PageView(
+        controller: _controller,
+        onPageChanged: (page) {
+          setState(() {
+            _currentPage = page;
+          });
+        },
+        children: [
+          FutureBuilder<Map<String, dynamic>>(
+            future: _todayStatsFuture,
+            builder: (context, snapshot) {
+              final stats = snapshot.data;
+              final totalCorrect = stats?['totalCorrect'] ?? 0;
+              final totalChecked = stats?['totalChecked'] ?? 0;
+              final accuracy = stats?['accuracy'] ?? 86;
 
-                  return _buildCarouselCard(
-                    context,
-                    gradientColors: isDark
-                        ? [const Color(0xFF0F1E36), const Color(0xFF0A0F1E)]
-                        : [const Color(0xFFE6F4F1), Colors.white],
-                    border: isDark ? const Color(0xFF233554) : const Color(0xFFBFE3DC),
-                    icon: Icons.analytics,
-                    iconColor: const Color(0xFF00D4AA),
-                    title: "Today's Dynamic Stats",
-                    body: snapshot.connectionState == ConnectionState.waiting
-                        ? "Calculating today's statistics..."
-                        : "Win Rate: $accuracy% Accuracy today.\nMatches solved: $totalCorrect won out of $totalChecked completed matches today.",
-                    onTap: null,
-                  );
-                },
-              ),
-              _buildSubscriptionSlide(context, isDark),
-              _buildCarouselCard(
+              return _buildCarouselCard(
                 context,
                 gradientColors: isDark
-                    ? [const Color(0xFF361810), const Color(0xFF0A0F1E)]
-                    : [const Color(0xFFFFEBE5), Colors.white],
-                border: isDark ? const Color(0xFF662F20) : const Color(0xFFFFC4B3),
-                icon: Icons.whatshot,
-                iconColor: const Color(0xFFFF5252),
-                title: "Popular Matches Feed",
-                body: "Chelsea, Arsenal, Barca & Real Madrid. Tap to view today's hottest fixtures.",
-                onTap: widget.onOpenPopularMatches,
-              ),
-            ],
+                    ? [const Color(0xFF0F1E36), const Color(0xFF0A0F1E)]
+                    : [const Color(0xFFE6F4F1), Colors.white],
+                border: isDark ? const Color(0xFF233554) : const Color(0xFFBFE3DC),
+                icon: Icons.analytics,
+                iconColor: const Color(0xFF00D4AA),
+                title: "Today's Dynamic Stats",
+                body: snapshot.connectionState == ConnectionState.waiting
+                    ? "Calculating today's statistics..."
+                    : "Win Rate: $accuracy% Accuracy today.\nMatches solved: $totalCorrect won out of $totalChecked completed matches today.",
+                onTap: null,
+              );
+            },
           ),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(3, (index) {
-            final active = index == _currentPage;
-            return AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              margin: const EdgeInsets.symmetric(horizontal: 4),
-              width: active ? 16 : 6,
-              height: 6,
-              decoration: BoxDecoration(
-                color: active
-                    ? const Color(0xFF00D4AA)
-                    : _screenBorder(context).withAlpha(150),
-                borderRadius: BorderRadius.circular(3),
-                boxShadow: active
-                    ? [
-                        BoxShadow(
-                          color: const Color(0xFF00D4AA).withValues(alpha: 0.6),
-                          blurRadius: 6,
-                          spreadRadius: 1.5,
-                        ),
-                      ]
-                    : null,
-              ),
-            );
-          }),
-        ),
-      ],
+          _buildSubscriptionSlide(context, isDark),
+          _buildCarouselCard(
+            context,
+            gradientColors: isDark
+                ? [const Color(0xFF361810), const Color(0xFF0A0F1E)]
+                : [const Color(0xFFFFEBE5), Colors.white],
+            border: isDark ? const Color(0xFF662F20) : const Color(0xFFFFC4B3),
+            icon: Icons.whatshot,
+            iconColor: const Color(0xFFFF5252),
+            title: "Popular Matches Feed",
+            body: "Chelsea, Arsenal, Barca & Real Madrid. Tap to view today's hottest fixtures.",
+            onTap: widget.onOpenPopularMatches,
+          ),
+        ],
+      ),
     );
   }
 

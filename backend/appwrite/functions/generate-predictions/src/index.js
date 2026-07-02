@@ -368,6 +368,7 @@ export default async function main(context) {
             reason: predictionResult.reason,
             releaseStatus: shouldPublishNow ? 'published' : 'draft',
             publishedAt: shouldPublishNow ? startedAt : null,
+            features: predictionResult.features,
           });
 
           if (saveResult.saved && shouldPublishNow && topicId && notify.shouldSendPredictionNotification(saveResult.primaryConfidence)) {

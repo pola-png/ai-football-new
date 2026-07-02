@@ -48,6 +48,7 @@ export async function savePrediction({
   reason,
   releaseStatus = 'draft',
   publishedAt = null,
+  features = null,
 }) {
   const fixtureApiId = String(fixture?.api_fixture_id || '').trim();
   if (!fixtureApiId) {
@@ -71,10 +72,57 @@ export async function savePrediction({
 
   const confidenceLabel = chosenPrediction.confidence >= 0.85 ? 'high' : 'medium';
 
+  // Find actual bookmaker odd
+  let actualOdd = null;
+  if (features && features.rawOdds) {
+    const raw = features.rawOdds;
+    const m = String(chosenPrediction.market || '').trim().toLowerCase();
+    const s = String(chosenPrediction.selection || '').trim().toLowerCase();
+    const parse = (v) => {
+      const n = Number(v);
+      return Number.isFinite(n) && n > 0 ? n : null;
+    };
+
+    if (m === 'winner') {
+      if (s.includes('home')) actualOdd = parse(raw.home);
+      else if (s.includes('away')) actualOdd = parse(raw.away);
+      else if (s.includes('draw')) actualOdd = parse(raw.draw);
+    } else if (m === 'draw') {
+      if (s === 'yes') actualOdd = parse(raw.draw);
+    } else if (m === 'btts') {
+      if (s === 'yes') actualOdd = parse(raw.bttsYes);
+      else if (s === 'no') actualOdd = parse(raw.bttsNo);
+    } else if (m === 'over/under') {
+      if (s === 'over 2.5') actualOdd = parse(raw.over25);
+      else if (s === 'under 2.5') actualOdd = parse(raw.under25);
+    } else if (m === 'double chance') {
+      const h = parse(raw.home);
+      const a = parse(raw.away);
+      const d = parse(raw.draw);
+      if (s === '1x' && h && d) {
+        actualOdd = Number((1 / ((1 / h) + (1 / d))).toFixed(2));
+      } else if (s === 'x2' && a && d) {
+        actualOdd = Number((1 / ((1 / a) + (1 / d))).toFixed(2));
+      } else if (s === '12' && h && a) {
+        actualOdd = Number((1 / ((1 / h) + (1 / a))).toFixed(2));
+      }
+    }
+  }
+
+  const predictionJson = JSON.stringify({
+    primary_pick: {
+      market: chosenPrediction.market,
+      selection: chosenPrediction.selection,
+      confidence: chosenPrediction.confidence,
+      odd: actualOdd,
+    }
+  });
+
   const data = {
     fixture_api_id: fixtureApiId,
     model_name: 'rule-engine-v1',
     prediction_text: reason,
+    prediction_json: predictionJson,
     predicted_winner: predictedWinner,
     confidence: chosenPrediction.confidence,
     confidence_label: confidenceLabel,

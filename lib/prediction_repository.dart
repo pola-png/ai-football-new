@@ -10,19 +10,22 @@ class PredictionPick {
     required this.selection,
     required this.confidence,
     required this.reason,
+    this.odd,
   });
 
   final String? market;
   final String? selection;
   final double? confidence;
   final String? reason;
+  final double? odd;
 
-  factory PredictionPick.fromMap(Map<String, dynamic> data, String prefix) {
+  factory PredictionPick.fromMap(Map<String, dynamic> data, String prefix, {double? odd}) {
     return PredictionPick(
       market: _asString(data['${prefix}market']),
       selection: _asString(data['${prefix}selection']),
       confidence: _asDouble(data['${prefix}confidence']),
       reason: _asString(data['${prefix}reason']),
+      odd: odd,
     );
   }
 }
@@ -115,9 +118,9 @@ class PredictionRecord {
       kickoffAt: _asDateTime(data['kickoff_at']),
       matchStatusShort: _asString(data['match_status_short']),
       matchStatusLong: _asString(data['match_status_long']),
-      primaryPick: _pickFromData(data, 'primary_'),
-      secondaryPick: _pickFromData(data, 'secondary_'),
-      tertiaryPick: _pickFromData(data, 'tertiary_'),
+      primaryPick: _pickFromData(data, 'primary_', parsedJson?['primary_pick']),
+      secondaryPick: _pickFromData(data, 'secondary_', parsedJson?['secondary_pick']),
+      tertiaryPick: _pickFromData(data, 'tertiary_', parsedJson?['tertiary_pick']),
       releaseAt: _asDateTime(data['release_at']),
       generatedAt: _asDateTime(data['generated_at']),
       publishedAt: _asDateTime(data['published_at']),
@@ -134,11 +137,16 @@ class PredictionRecord {
     );
   }
 
-  static PredictionPick? _pickFromData(Map<String, dynamic> data, String prefix) {
-    final market = _asString(data['${prefix}market']);
-    final selection = _asString(data['${prefix}selection']);
-    final confidence = _asDouble(data['${prefix}confidence']);
-    final reason = _asString(data['${prefix}reason']);
+  static PredictionPick? _pickFromData(
+    Map<String, dynamic> data,
+    String prefix, [
+    dynamic jsonPick,
+  ]) {
+    final market = _asString(data['${prefix}market']) ?? (jsonPick is Map ? _asString(jsonPick['market']) : null);
+    final selection = _asString(data['${prefix}selection']) ?? (jsonPick is Map ? _asString(jsonPick['selection']) : null);
+    final confidence = _asDouble(data['${prefix}confidence']) ?? (jsonPick is Map ? _asDouble(jsonPick['confidence']) : null);
+    final reason = _asString(data['${prefix}reason']) ?? (jsonPick is Map ? _asString(jsonPick['reason']) : null);
+    final odd = jsonPick is Map ? _asDouble(jsonPick['odd']) : null;
 
     if (market == null && selection == null && confidence == null && reason == null) {
       return null;
@@ -149,6 +157,7 @@ class PredictionRecord {
       selection: selection,
       confidence: confidence,
       reason: reason,
+      odd: odd,
     );
   }
 }
@@ -363,43 +372,102 @@ class PredictionRepository {
         continue;
       }
 
-      final selection = _normalizeSelectionLocal(p);
+      final rawSelection = (p.primaryPick?.selection ?? '').trim();
+      final rawMarket = (p.primaryPick?.market ?? '').trim();
+      final marketLower = rawMarket.toLowerCase();
+      final selLower = rawSelection.toLowerCase();
+
       final homeTeam = _normalizeTextLocal(p.homeTeamName ?? '');
       final awayTeam = _normalizeTextLocal(p.awayTeamName ?? '');
       final homeGoals = _goalCountLocal(p.fulltimeHomeGoals ?? p.currentHomeGoals);
       final awayGoals = _goalCountLocal(p.fulltimeAwayGoals ?? p.currentAwayGoals);
 
       var isCorrect = false;
+      var handled = false;
 
-      if (selection.contains('btts')) {
+      // BTTS — check market first
+      if (marketLower == 'btts' || marketLower.contains('both team')) {
+        handled = true;
         if (homeGoals != null && awayGoals != null) {
-          final yesPicked = selection.contains('yes');
+          final yesPicked = selLower == 'yes';
           final actualYes = homeGoals > 0 && awayGoals > 0;
           isCorrect = yesPicked == actualYes;
         }
-      } else {
-        final overUnder = _parseOverUnderSelectionLocal(selection);
+      }
+
+      // Double Chance — check market first
+      if (!handled && marketLower == 'double chance') {
+        handled = true;
+        if (homeGoals != null && awayGoals != null) {
+          if (selLower == '1x') isCorrect = homeGoals >= awayGoals;
+          else if (selLower == 'x2') isCorrect = awayGoals >= homeGoals;
+          else if (selLower == '12') isCorrect = homeGoals != awayGoals;
+        }
+      }
+
+      // Over/Under — check market first
+      if (!handled && (marketLower == 'over/under' || marketLower.contains('over') || marketLower.contains('under'))) {
+        final overUnder = _parseOverUnderSelectionLocal(_normalizeTextLocal(rawSelection));
         if (overUnder != null) {
+          handled = true;
           if (homeGoals != null && awayGoals != null) {
             final totalGoals = homeGoals + awayGoals;
             isCorrect = overUnder.isOver
                 ? totalGoals > overUnder.line
                 : totalGoals < overUnder.line;
           }
-        } else if (selection.contains('home') || selection.contains('1') || selection.contains(homeTeam)) {
-          isCorrect = outcome == 'home';
-        } else if (selection.contains('away') || selection.contains('2') || selection.contains(awayTeam)) {
-          isCorrect = outcome == 'away';
-        } else if (selection.contains('draw') || selection == 'x') {
-          isCorrect = outcome == 'draw';
-        } else if (p.predictedWinner != null) {
-          final predictedWinner = _normalizeTextLocal(p.predictedWinner!);
-          if (predictedWinner.contains(homeTeam)) {
+        }
+      }
+
+      // Draw market
+      if (!handled && marketLower == 'draw') {
+        handled = true;
+        if (selLower == 'yes') isCorrect = outcome == 'draw';
+        else if (selLower == 'no') isCorrect = outcome != 'draw';
+      }
+
+      // Winner market
+      if (!handled && marketLower == 'winner') {
+        handled = true;
+        if (selLower.contains('home')) isCorrect = outcome == 'home';
+        else if (selLower.contains('away')) isCorrect = outcome == 'away';
+        else if (selLower.contains('draw')) isCorrect = outcome == 'draw';
+      }
+
+      // Fallback: original text-matching logic
+      if (!handled) {
+        final selection = _normalizeSelectionLocal(p);
+
+        if (selection.contains('btts')) {
+          if (homeGoals != null && awayGoals != null) {
+            final yesPicked = selection.contains('yes');
+            final actualYes = homeGoals > 0 && awayGoals > 0;
+            isCorrect = yesPicked == actualYes;
+          }
+        } else {
+          final overUnder = _parseOverUnderSelectionLocal(selection);
+          if (overUnder != null) {
+            if (homeGoals != null && awayGoals != null) {
+              final totalGoals = homeGoals + awayGoals;
+              isCorrect = overUnder.isOver
+                  ? totalGoals > overUnder.line
+                  : totalGoals < overUnder.line;
+            }
+          } else if (selection.contains('home') || (selection.contains('1') && !selection.contains('1.')) || selection.contains(homeTeam)) {
             isCorrect = outcome == 'home';
-          } else if (predictedWinner.contains(awayTeam)) {
+          } else if (selection.contains('away') || (selection.contains('2') && !selection.contains('2.')) || selection.contains(awayTeam)) {
             isCorrect = outcome == 'away';
-          } else if (predictedWinner.contains('draw')) {
+          } else if (selection.contains('draw') || selection == 'x') {
             isCorrect = outcome == 'draw';
+          } else if (p.predictedWinner != null) {
+            final predictedWinner = _normalizeTextLocal(p.predictedWinner!);
+            if (predictedWinner.contains(homeTeam)) {
+              isCorrect = outcome == 'home';
+            } else if (predictedWinner.contains(awayTeam)) {
+              isCorrect = outcome == 'away';
+            } else if (predictedWinner.contains('draw')) {
+              isCorrect = outcome == 'draw';
+            }
           }
         }
       }
