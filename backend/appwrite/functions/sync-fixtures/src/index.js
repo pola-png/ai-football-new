@@ -665,7 +665,7 @@ async function createRun(tablesdb, databaseId, tableId, data) {
   });
 }
 
-export default async function main(context) {
+module.exports = async function main(context) {
   const { res } = context || {};
   const client = buildClient();
   const tablesdb = new TablesDB(client);
