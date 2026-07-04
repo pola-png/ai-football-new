@@ -6,13 +6,18 @@ import { runPredictionEngine } from '../prediction-engine/src/index.js';
 import { savePrediction } from '../prediction-engine/src/storage/savePrediction.js';
 import { loadMarketAccuracies } from '../prediction-engine/src/learning/updateAccuracy.js';
 
+const nativeConsoleLog = console.log;
+const nativeConsoleWarn = console.warn;
+const nativeConsoleError = console.error;
+const nativeConsoleInfo = console.info;
+
 function buildAppwriteLogger(context) {
   const log = typeof context?.log === 'function'
     ? (message) => context.log(message)
-    : (message) => console.log(message);
+    : (message) => nativeConsoleLog(message);
   const error = typeof context?.error === 'function'
     ? (message) => context.error(message)
-    : (message) => console.error(message);
+    : (message) => nativeConsoleError(message);
 
   return { log, error };
 }
@@ -232,11 +237,6 @@ export default async function main(context) {
   const { log: contextLog, error: contextError } = buildAppwriteLogger(context);
   const appwriteLog = contextLog;
   const appwriteError = contextError;
-
-  const originalConsoleLog = console.log;
-  const originalConsoleWarn = console.warn;
-  const originalConsoleError = console.error;
-  const originalConsoleInfo = console.info;
 
   console.log = appwriteLog;
   console.info = appwriteLog;
@@ -569,9 +569,9 @@ export default async function main(context) {
 
     throw error;
   } finally {
-    console.log = originalConsoleLog;
-    console.warn = originalConsoleWarn;
-    console.error = originalConsoleError;
-    console.info = originalConsoleInfo;
+    console.log = nativeConsoleLog;
+    console.warn = nativeConsoleWarn;
+    console.error = nativeConsoleError;
+    console.info = nativeConsoleInfo;
   }
 }
