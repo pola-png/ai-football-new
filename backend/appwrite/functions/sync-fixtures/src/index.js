@@ -1,4 +1,4 @@
-const { Client, TablesDB, ID } = require("node-appwrite");
+const { Client, TablesDB, ID, Query } = require("node-appwrite");
 
 const nativeConsoleLog = console.log;
 const nativeConsoleWarn = console.warn;
