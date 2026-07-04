@@ -42,8 +42,13 @@ export function chooseBestPrediction(weightedPredictions = [], features = {}) {
     return true;
   });
 
-  // Sort candidates by selectionScore descending
-  const sorted = (filtered.length > 0 ? filtered : evaluated).sort((a, b) => b.selectionScore - a.selectionScore);
+  // Sort candidates by confidence descending (tie-break on weightedScore)
+  const sorted = (filtered.length > 0 ? filtered : evaluated).sort((a, b) => {
+    if (b.confidence !== a.confidence) {
+      return b.confidence - a.confidence;
+    }
+    return b.weightedScore - a.weightedScore;
+  });
   const best = sorted[0];
 
   return {
