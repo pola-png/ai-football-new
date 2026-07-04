@@ -337,7 +337,7 @@ export default async function main(context) {
         const fixtureApiId = String(fixture?.api_fixture_id || '').trim();
         const fixtureName = String(fixture?.home_team_name || fixture?.away_team_name || fixture?.team_name || fixture?.name || '').trim() || null;
         const leagueName = String(fixture?.league_name || fixture?.league?.name || fixture?.league || '').trim() || null;
-        const shouldPublishNow = shouldPublishNearKickoff(fixture?.kickoff_at, new Date());
+        const shouldPublishNow = true;
 
         let aiResult = null;
         let saveResult = null;
@@ -535,6 +535,17 @@ export default async function main(context) {
       created_at: isoNow(),
       updated_at: isoNow(),
     });
+
+    appwriteLog(JSON.stringify({
+      level: 'info',
+      job: 'generate-predictions',
+      step: 'function.complete',
+      timestamp: isoNow(),
+      total_fetched: fixtures.length,
+      total_predicted_and_saved: saved,
+      total_skipped: skipped,
+      total_failed: failed,
+    }));
 
     return {
       ok: true,

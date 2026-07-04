@@ -30,8 +30,20 @@ export function chooseBestPrediction(weightedPredictions = [], features = {}) {
     };
   });
 
+  // Filter out restricted Over/Under lines if they do not meet the 98% confidence requirement
+  const filtered = evaluated.filter(pred => {
+    const isRestricted =
+      pred.market === 'Over/Under' &&
+      (pred.selection === 'Under 2.5' || pred.selection === 'Under 3.5' || pred.selection === 'Over 3.5');
+
+    if (isRestricted && pred.confidence < 0.98) {
+      return false;
+    }
+    return true;
+  });
+
   // Sort candidates by selectionScore descending
-  const sorted = evaluated.sort((a, b) => b.selectionScore - a.selectionScore);
+  const sorted = (filtered.length > 0 ? filtered : evaluated).sort((a, b) => b.selectionScore - a.selectionScore);
   const best = sorted[0];
 
   return {

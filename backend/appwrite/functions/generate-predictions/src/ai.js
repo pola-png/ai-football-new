@@ -264,17 +264,6 @@ function shouldKeepSelection(selection, confidence) {
   if (!value) {
     return false;
   }
-  const numericConfidence = Number.isFinite(confidence) ? confidence : 0;
-  const normalized = value.toLowerCase();
-
-  if (
-    /\bunder\s*2\.5\b/.test(normalized) ||
-    /\bunder\s*3\.5\b/.test(normalized) ||
-    /\bover\s*3\.5\b/.test(normalized)
-  ) {
-    return numericConfidence >= 0.95;
-  }
-
   return true;
 }
 

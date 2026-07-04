@@ -260,14 +260,7 @@ function shouldPublishPrediction(row, now) {
   if (String(row.release_status || '').toLowerCase() !== 'draft') {
     return false;
   }
-
-  const kickoffAt = parseDate(row.kickoff_at);
-  if (!kickoffAt) {
-    return false;
-  }
-
-  const fourteenHoursFromNow = new Date(now.getTime() + 14 * 60 * 60 * 1000);
-  return kickoffAt.getTime() <= fourteenHoursFromNow.getTime();
+  return true;
 }
 
 function needsOutcomeRefresh(row, now) {
