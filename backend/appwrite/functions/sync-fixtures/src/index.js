@@ -761,16 +761,16 @@ module.exports = async function main(context) {
       }),
     );
 
-    // Process ALL fixtures without any restrictions
+    // Process ALL fixtures without any restrictions (in concurrent batches to prevent timeouts)
     const allFixtures = [];
+    const BATCH_SIZE = 30;
 
-    for (const fixture of fixtures) {
+    async function processFixture(fixture) {
       const fixtureApiId = fixture?.fixture?.id ?? fixture?.id ?? null;
       const leagueInfo = fixture?.league || null;
       const homeTeam = fixture?.teams?.home || null;
       const awayTeam = fixture?.teams?.away || null;
 
-      // Only skip if absolutely essential data is missing
       if (!fixtureApiId) {
         console.log(
           JSON.stringify({
@@ -780,10 +780,9 @@ module.exports = async function main(context) {
             fixture: fixture,
           }),
         );
-        continue;
+        return;
       }
 
-      // Use fallback values for missing data instead of skipping
       const safeLeagueInfo = leagueInfo || { id: "unknown", season: "2024" };
       const safeHomeTeam = homeTeam || {
         id: "home_unknown",
@@ -806,7 +805,6 @@ module.exports = async function main(context) {
         Number(safeLeagueInfo.id) === WORLD_CUP_LEAGUE_ID ||
         isWorldCupCompetitionName(safeLeagueInfo.name);
 
-      // Get hour for distribution
       const kickoffTime = fixture?.fixture?.date || null;
       const hour = kickoffTime ? new Date(kickoffTime).getUTCHours() : 0;
 
@@ -840,7 +838,6 @@ module.exports = async function main(context) {
         ),
       );
 
-      // Score all fixtures (no filtering)
       const syncScore = scoreFixtureForSync({
         oddsRows: oddsResult.rows || [],
         h2hRows: h2hResult.rows || [],
@@ -849,7 +846,7 @@ module.exports = async function main(context) {
         isCountry: Boolean(safeHomeTeam.national || safeAwayTeam.national),
       });
 
-      const fixtureData = {
+      allFixtures.push({
         fixture,
         oddsRows: oddsResult.rows || [],
         h2hRows: h2hResult.rows || [],
@@ -858,9 +855,18 @@ module.exports = async function main(context) {
         hour,
         hasH2h,
         isWorldCup,
-      };
+      });
+    }
 
-      allFixtures.push(fixtureData);
+    for (let i = 0; i < fixtures.length; i += BATCH_SIZE) {
+      const batch = fixtures.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map((f) =>
+          processFixture(f).catch((err) =>
+            console.error(`Error processing fixture: ${err.message}`),
+          ),
+        ),
+      );
     }
 
     // Sort all fixtures by score (World Cup gets priority)
@@ -881,104 +887,119 @@ module.exports = async function main(context) {
       }),
     );
 
-    for (const qualified of finalSelectedFixtures) {
-      const fixture = qualified.fixture;
-      const leagueInfo = fixture.league || { id: "unknown", season: "2024" };
-      const homeTeam = fixture.teams?.home || {
-        id: "home_unknown",
-        name: "Home Team",
-      };
-      const awayTeam = fixture.teams?.away || {
-        id: "away_unknown",
-        name: "Away Team",
-      };
-      const fixtureApiId = String(fixture.fixture.id);
-      const teamRows = [
-        {
-          tableId: teamsTable,
-          rowId: `team_${homeTeam.id}`,
-          data: pickTeam(homeTeam),
-        },
-        {
-          tableId: teamsTable,
-          rowId: `team_${awayTeam.id}`,
-          data: pickTeam(awayTeam),
-        },
-      ];
+    // Save final selected fixtures concurrently in batches
+    const SAVE_BATCH_SIZE = 15;
+    for (let i = 0; i < finalSelectedFixtures.length; i += SAVE_BATCH_SIZE) {
+      const batch = finalSelectedFixtures.slice(i, i + SAVE_BATCH_SIZE);
+      await Promise.all(
+        batch.map(async (qualified) => {
+          try {
+            const fixture = qualified.fixture;
+            const leagueInfo = fixture.league || { id: "unknown", season: "2024" };
+            const homeTeam = fixture.teams?.home || {
+              id: "home_unknown",
+              name: "Home Team",
+            };
+            const awayTeam = fixture.teams?.away || {
+              id: "away_unknown",
+              name: "Away Team",
+            };
+            const fixtureApiId = String(fixture.fixture.id);
+            const teamRows = [
+              {
+                tableId: teamsTable,
+                rowId: `team_${homeTeam.id}`,
+                data: pickTeam(homeTeam),
+              },
+              {
+                tableId: teamsTable,
+                rowId: `team_${awayTeam.id}`,
+                data: pickTeam(awayTeam),
+              },
+            ];
 
-      const leagueRow = {
-        tableId: leaguesTable,
-        rowId: `league_${leagueInfo.id}_${fixture.league.season}`,
-        data: pickLeague(leagueInfo, fixture.league.season),
-      };
+            const leagueRow = {
+              tableId: leaguesTable,
+              rowId: `league_${leagueInfo.id}_${fixture.league.season}`,
+              data: pickLeague(leagueInfo, fixture.league.season),
+            };
 
-      const mergedSummary = buildFixtureMergeSummary(
-        qualified.oddsRows,
-        qualified.h2hRows,
+            const mergedSummary = buildFixtureMergeSummary(
+              qualified.oddsRows,
+              qualified.h2hRows,
+            );
+            const fixtureRow = {
+              tableId: fixturesTable,
+              rowId: `fixture_${fixtureApiId}`,
+              data: {
+                ...pickFixture(fixture, leagueInfo, homeTeam, awayTeam),
+                ...mergedSummary,
+                sync_run_id: syncRunId,
+                processed: true,
+                processed_at: isoNow(),
+                delete_after_at: null,
+              },
+            };
+
+            const oddsRowsToSave = qualified.oddsRows.map((row) => ({
+              tableId: oddsTable,
+              rowId: `odds_${safeIdPart(fixtureApiId)}_${safeIdPart(row.bookmaker_api_id ?? row.bookmaker_name)}_${safeIdPart(row.market_name)}_${safeIdPart(row.selection_name)}`,
+              data: {
+                fixture_api_id: fixtureApiId,
+                bookmaker_name: row.bookmaker_name,
+                bookmaker_api_id: row.bookmaker_api_id,
+                market_name: row.market_name,
+                selection_name: row.selection_name,
+                odd_value: row.odd_value,
+                line_value: row.line_value,
+                last_update_at: row.last_update_at,
+                created_at: isoNow(),
+                updated_at: isoNow(),
+              },
+            }));
+
+            const h2hRowsToSave = qualified.h2hRows.map((row) => ({
+              tableId: h2hTable,
+              rowId: `h2h_${safeIdPart(fixtureApiId)}_${safeIdPart(row.historical_fixture_api_id || `${row.kickoff_at || ""}_${row.home_score || ""}_${row.away_score || ""}_${row.winner || ""}`)}`,
+              data: {
+                current_fixture_api_id: fixtureApiId,
+                historical_fixture_api_id:
+                  row.historical_fixture_api_id ||
+                  `${fixtureApiId}_${safeIdPart(`${row.kickoff_at || ""}_${row.home_score || ""}_${row.away_score || ""}_${row.winner || ""}`)}`,
+                home_team_api_id: String(homeTeam.id),
+                away_team_api_id: String(awayTeam.id),
+                kickoff_at: row.kickoff_at,
+                home_score: row.home_score,
+                away_score: row.away_score,
+                winner: row.winner,
+                status_short: row.status_short,
+                league_api_id: row.league_api_id,
+                season: row.season,
+                created_at: isoNow(),
+                updated_at: isoNow(),
+              },
+            }));
+
+            const rows = [
+              ...teamRows,
+              leagueRow,
+              fixtureRow,
+              ...oddsRowsToSave,
+              ...h2hRowsToSave,
+            ];
+
+            await Promise.all(
+              rows.map((row) =>
+                upsertRow(tablesdb, databaseId, row.tableId, row.rowId, row.data),
+              ),
+            );
+
+            itemsSaved += 1;
+          } catch (err) {
+            console.error(`Error saving fixture ${qualified.fixture?.fixture?.id}: ${err.message}`);
+          }
+        }),
       );
-      const fixtureRow = {
-        tableId: fixturesTable,
-        rowId: `fixture_${fixtureApiId}`,
-        data: {
-          ...pickFixture(fixture, leagueInfo, homeTeam, awayTeam),
-          ...mergedSummary,
-          sync_run_id: syncRunId,
-          processed: true,
-          processed_at: isoNow(),
-          delete_after_at: null,
-        },
-      };
-
-      const oddsRowsToSave = qualified.oddsRows.map((row) => ({
-        tableId: oddsTable,
-        rowId: `odds_${safeIdPart(fixtureApiId)}_${safeIdPart(row.bookmaker_api_id ?? row.bookmaker_name)}_${safeIdPart(row.market_name)}_${safeIdPart(row.selection_name)}`,
-        data: {
-          fixture_api_id: fixtureApiId,
-          bookmaker_name: row.bookmaker_name,
-          bookmaker_api_id: row.bookmaker_api_id,
-          market_name: row.market_name,
-          selection_name: row.selection_name,
-          odd_value: row.odd_value,
-          line_value: row.line_value,
-          last_update_at: row.last_update_at,
-          created_at: isoNow(),
-          updated_at: isoNow(),
-        },
-      }));
-
-      const h2hRowsToSave = qualified.h2hRows.map((row) => ({
-        tableId: h2hTable,
-        rowId: `h2h_${safeIdPart(fixtureApiId)}_${safeIdPart(row.historical_fixture_api_id || `${row.kickoff_at || ""}_${row.home_score || ""}_${row.away_score || ""}_${row.winner || ""}`)}`,
-        data: {
-          current_fixture_api_id: fixtureApiId,
-          historical_fixture_api_id:
-            row.historical_fixture_api_id ||
-            `${fixtureApiId}_${safeIdPart(`${row.kickoff_at || ""}_${row.home_score || ""}_${row.away_score || ""}_${row.winner || ""}`)}`,
-          home_team_api_id: String(homeTeam.id),
-          away_team_api_id: String(awayTeam.id),
-          kickoff_at: row.kickoff_at,
-          home_score: row.home_score,
-          away_score: row.away_score,
-          winner: row.winner,
-          status_short: row.status_short,
-          league_api_id: row.league_api_id,
-          season: row.season,
-          created_at: isoNow(),
-          updated_at: isoNow(),
-        },
-      }));
-
-      for (const row of [
-        ...teamRows,
-        leagueRow,
-        fixtureRow,
-        ...oddsRowsToSave,
-        ...h2hRowsToSave,
-      ]) {
-        await upsertRow(tablesdb, databaseId, row.tableId, row.rowId, row.data);
-      }
-
-      itemsSaved += 1;
     }
 
     await createRun(tablesdb, databaseId, syncRunsTable, {
