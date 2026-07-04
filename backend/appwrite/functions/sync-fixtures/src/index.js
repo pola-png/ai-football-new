@@ -68,11 +68,11 @@ function lagosDate(offsetDays = 0) {
 
 function pickTeam(team) {
   return {
-    api_team_id: team.id,
+    api_team_id: team.id != null ? String(team.id) : null,
     name: team.name,
     code: team.code || null,
     country: team.country || null,
-    founded: team.founded || null,
+    founded: team.founded != null ? String(team.founded) : null,
     national: Boolean(team.national),
     logo_url: team.logo || null,
     created_at: isoNow(),
@@ -82,29 +82,30 @@ function pickTeam(team) {
 
 function pickLeague(league, season) {
   return {
-    api_league_id: league.id,
+    api_league_id: league.id != null ? String(league.id) : null,
     name: league.name,
     country: league.country || null,
     type: league.type || null,
     logo_url: league.logo || null,
     flag_url: league.flag || null,
-    season,
+    season: season != null ? String(season) : null,
     created_at: isoNow(),
     updated_at: isoNow(),
   };
 }
 
 function pickFixture(fixture, league, homeTeam, awayTeam) {
+  const apiFixtureId = fixture.fixture?.id ?? fixture.id ?? null;
   return {
-    api_fixture_id: fixture.id,
-    league_api_id: league.id,
-    season: league.season,
+    api_fixture_id: apiFixtureId != null ? String(apiFixtureId) : null,
+    league_api_id: league.id != null ? String(league.id) : null,
+    season: league.season != null ? String(league.season) : null,
     round: fixture.league?.round || null,
     kickoff_at: fixture.fixture?.date || null,
     status_short: fixture.fixture?.status?.short || "NS",
     status_long: fixture.fixture?.status?.long || null,
-    home_team_api_id: homeTeam.id,
-    away_team_api_id: awayTeam.id,
+    home_team_api_id: homeTeam.id != null ? String(homeTeam.id) : null,
+    away_team_api_id: awayTeam.id != null ? String(awayTeam.id) : null,
     home_team_name: homeTeam.name,
     away_team_name: awayTeam.name,
     home_team_logo_url: homeTeam.logo || null,
