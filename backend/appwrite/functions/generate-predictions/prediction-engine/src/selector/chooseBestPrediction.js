@@ -6,11 +6,11 @@
  * @returns {object} The chosen best prediction object
  */
 const MARKET_VALUE_MULTIPLIERS = {
-  'Winner': 1.20,
-  'BTTS': 1.10,
-  'Over/Under': 1.15,
+  'Winner': 1.00,
+  'BTTS': 1.00,
+  'Over/Under': 1.00,
   'Draw': 1.00,
-  'Double Chance': 0.80,
+  'Double Chance': 1.00,
   'Corners': 1.00,
   'Cards': 1.00,
 };
