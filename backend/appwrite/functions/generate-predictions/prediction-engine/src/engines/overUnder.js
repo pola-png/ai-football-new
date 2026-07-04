@@ -61,6 +61,11 @@ export function predictOverUnder(features) {
     reasonsOver25.push(`Bookmaker odds favor Over 2.5 with a ${Math.round(over25ImpliedProb * 100)}% implied probability`);
   }
 
+  // Boost Over 2.5 if teams have a high-scoring profile
+  if (avgGoalsCombined >= 2.7 || over25RateH2H >= 0.65 || over25Rate >= 0.65) {
+    scoreOver25 += 12;
+  }
+
   // 3. Evaluate Under 2.5
   scoreUnder25 += (0.5 - over25RateH2H) * 30;
   scoreUnder25 += (under25Rate - 0.5) * 20;

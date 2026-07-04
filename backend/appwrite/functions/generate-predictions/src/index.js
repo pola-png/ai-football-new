@@ -230,7 +230,7 @@ function shouldPublishNearKickoff(kickoffAtValue, now = new Date()) {
   }
 
   const timeDiffMs = kickoffAt.getTime() - now.getTime();
-  return timeDiffMs >= 0 && timeDiffMs <= 8 * 60 * 60 * 1000;
+  return timeDiffMs >= 0 && timeDiffMs <= 14 * 60 * 60 * 1000;
 }
 
 export default async function main(context) {

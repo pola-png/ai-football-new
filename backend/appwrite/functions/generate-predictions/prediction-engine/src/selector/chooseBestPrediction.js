@@ -5,13 +5,33 @@
  * @param {object} features - Extracted features for support references
  * @returns {object} The chosen best prediction object
  */
+const MARKET_VALUE_MULTIPLIERS = {
+  'Winner': 1.20,
+  'BTTS': 1.10,
+  'Over/Under': 1.15,
+  'Draw': 1.00,
+  'Double Chance': 0.80,
+  'Corners': 1.00,
+  'Cards': 1.00,
+};
+
 export function chooseBestPrediction(weightedPredictions = [], features = {}) {
   if (weightedPredictions.length === 0) {
     throw new Error('No candidate predictions provided to select from.');
   }
 
-  // Sort candidates by weightedScore descending
-  const sorted = [...weightedPredictions].sort((a, b) => b.weightedScore - a.weightedScore);
+  // Calculate final selection score by applying the value multipliers
+  const evaluated = weightedPredictions.map(pred => {
+    const multiplier = MARKET_VALUE_MULTIPLIERS[pred.market] ?? 1.0;
+    const selectionScore = Number((pred.weightedScore * multiplier).toFixed(2));
+    return {
+      ...pred,
+      selectionScore,
+    };
+  });
+
+  // Sort candidates by selectionScore descending
+  const sorted = evaluated.sort((a, b) => b.selectionScore - a.selectionScore);
   const best = sorted[0];
 
   return {

@@ -266,8 +266,8 @@ function shouldPublishPrediction(row, now) {
     return false;
   }
 
-  const eightHoursFromNow = new Date(now.getTime() + 8 * 60 * 60 * 1000);
-  return kickoffAt.getTime() <= eightHoursFromNow.getTime();
+  const fourteenHoursFromNow = new Date(now.getTime() + 14 * 60 * 60 * 1000);
+  return kickoffAt.getTime() <= fourteenHoursFromNow.getTime();
 }
 
 function needsOutcomeRefresh(row, now) {
