@@ -19,6 +19,16 @@ function buildClient() {
   return client;
 }
 
+async function fetchRows(tablesdb, databaseId, tableId, queries) {
+  const result = await tablesdb.listRows({
+    databaseId,
+    tableId,
+    queries,
+    total: false,
+  });
+  return result.rows || [];
+}
+
 function buildApiFootballHeaders() {
   return {
     "x-apisports-key": required("API_FOOTBALL_KEY"),
