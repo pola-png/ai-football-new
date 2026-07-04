@@ -1,5 +1,23 @@
 const { Client, TablesDB, ID } = require("node-appwrite");
 
+const nativeConsoleLog = console.log;
+const nativeConsoleWarn = console.warn;
+const nativeConsoleError = console.error;
+const nativeConsoleInfo = console.info;
+
+function buildAppwriteLogger(context) {
+  const log =
+    typeof context?.log === "function"
+      ? (message) => context.log(message)
+      : (message) => nativeConsoleLog(message);
+  const error =
+    typeof context?.error === "function"
+      ? (message) => context.error(message)
+      : (message) => nativeConsoleError(message);
+
+  return { log, error };
+}
+
 function required(name) {
   const value = process.env[name];
   if (!value) {
@@ -677,6 +695,13 @@ async function createRun(tablesdb, databaseId, tableId, data) {
 
 module.exports = async function main(context) {
   const { res } = context || {};
+  const { log: appwriteLog, error: appwriteError } = buildAppwriteLogger(context);
+
+  console.log = appwriteLog;
+  console.info = appwriteLog;
+  console.warn = appwriteLog;
+  console.error = appwriteError;
+
   const client = buildClient();
   const tablesdb = new TablesDB(client);
 
@@ -969,6 +994,15 @@ module.exports = async function main(context) {
       updated_at: isoNow(),
     });
 
+    console.log(JSON.stringify({
+      level: "info",
+      job: "sync-fixtures",
+      step: "function.complete",
+      timestamp: isoNow(),
+      total_fetched: fixtures.length,
+      total_saved: itemsSaved,
+    }));
+
     const result = {
       ok: true,
       items_seen: finalSelectedFixtures.length,
@@ -996,6 +1030,11 @@ module.exports = async function main(context) {
       });
     }
     throw error;
+  } finally {
+    console.log = nativeConsoleLog;
+    console.warn = nativeConsoleWarn;
+    console.error = nativeConsoleError;
+    console.info = nativeConsoleInfo;
   }
 }
 
