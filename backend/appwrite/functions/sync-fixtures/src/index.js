@@ -841,30 +841,8 @@ module.exports = async function main(context) {
     // Sort all fixtures by score (World Cup gets priority)
     allFixtures.sort((a, b) => (b.score || 0) - (a.score || 0));
 
-    // Simple selection: minimum 200, maximum 300
-    const totalAvailable = allFixtures.length;
-    const minRequired = 200;
-    const maxAllowed = Number.parseInt(process.env.MAX_FIXTURES || "300", 10);
-
-    let selectedCount;
-    if (totalAvailable < minRequired) {
-      selectedCount = totalAvailable; // Take all available
-      console.log(
-        JSON.stringify({
-          job: "sync-fixtures",
-          stage: "insufficient-fixtures",
-          available: totalAvailable,
-          required: minRequired,
-          message: `Only ${totalAvailable} fixtures available, less than required ${minRequired}`,
-        }),
-      );
-    } else if (totalAvailable > maxAllowed) {
-      selectedCount = maxAllowed; // Cap at maximum
-    } else {
-      selectedCount = totalAvailable; // Take all available
-    }
-
-    const finalSelectedFixtures = allFixtures.slice(0, selectedCount);
+    // Take all available fetched fixtures without any caps or limits
+    const finalSelectedFixtures = allFixtures;
 
     console.log(
       JSON.stringify({
@@ -875,8 +853,6 @@ module.exports = async function main(context) {
         world_cup_count: allFixtures.filter((f) => f.isWorldCup).length,
         with_h2h_count: allFixtures.filter((f) => f.hasH2h).length,
         final_selected: finalSelectedFixtures.length,
-        minimum_required: minRequired,
-        maximum_allowed: maxAllowed,
       }),
     );
 
