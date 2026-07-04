@@ -112,7 +112,18 @@ class AppAuthService extends ChangeNotifier {
         password: password,
         name: name.trim(),
       );
-      await signIn(email: email, password: password);
+      
+      // Delay to allow Appwrite Cloud database replication/indexing to complete
+      await Future.delayed(const Duration(milliseconds: 1000));
+      
+      try {
+        await signIn(email: email, password: password);
+      } catch (e) {
+        // Retry one more time if replication takes slightly longer
+        debugPrint('Auto-login failed on first attempt, retrying: $e');
+        await Future.delayed(const Duration(milliseconds: 1500));
+        await signIn(email: email, password: password);
+      }
     } finally {
       _loading = false;
       notifyListeners();

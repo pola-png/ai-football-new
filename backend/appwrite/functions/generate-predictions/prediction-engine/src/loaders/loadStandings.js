@@ -18,6 +18,10 @@ export async function loadStandings(tablesdb, databaseId, tableId, leagueApiId, 
     return [];
   }
 
+  if (cache && cache.has(`missing_table_${actualTableId}`)) {
+    return [];
+  }
+
   const cacheKey = `standings_${actualTableId}_${leagueApiId}_${season}`;
   if (cache && cache.has(cacheKey)) {
     return cache.get(cacheKey);
@@ -41,6 +45,17 @@ export async function loadStandings(tablesdb, databaseId, tableId, leagueApiId, 
     return rows;
   } catch (error) {
     console.warn(`Could not load standings from collection ${actualTableId}: ${error.message}. Returning empty standings array.`);
+    if (cache) {
+      const isNotFound = error.code === 404 ||
+        (error.message && (
+          error.message.includes('not be found') ||
+          error.message.includes('not found') ||
+          error.message.includes('Collection not found')
+        ));
+      if (isNotFound) {
+        cache.set(`missing_table_${actualTableId}`, true);
+      }
+    }
     return [];
   }
 }

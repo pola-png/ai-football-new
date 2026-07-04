@@ -19,6 +19,10 @@ export async function loadTeamStats(tablesdb, databaseId, tableId, teamApiId, le
     return null;
   }
 
+  if (cache && cache.has(`missing_table_${actualTableId}`)) {
+    return null;
+  }
+
   const cacheKey = `teamstats_${actualTableId}_${teamApiId}_${leagueApiId}_${season}`;
   if (cache && cache.has(cacheKey)) {
     return cache.get(cacheKey);
@@ -43,6 +47,17 @@ export async function loadTeamStats(tablesdb, databaseId, tableId, teamApiId, le
     return record;
   } catch (error) {
     console.warn(`Could not load team stats from collection ${actualTableId}: ${error.message}. Returning null.`);
+    if (cache) {
+      const isNotFound = error.code === 404 ||
+        (error.message && (
+          error.message.includes('not be found') ||
+          error.message.includes('not found') ||
+          error.message.includes('Collection not found')
+        ));
+      if (isNotFound) {
+        cache.set(`missing_table_${actualTableId}`, true);
+      }
+    }
     return null;
   }
 }

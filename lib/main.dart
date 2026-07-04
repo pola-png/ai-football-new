@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:appwrite/appwrite.dart' hide Permission;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -183,18 +184,124 @@ Color _inputFill(BuildContext context) {
   return _isDarkContext(context) ? const Color(0xFF121B2E) : Colors.white;
 }
 
-class AuthGatePage extends StatelessWidget {
+bool _isWorldCupActive() {
+  final now = DateTime.now().toLocal();
+  // 2026 World Cup ends on July 19, 2026.
+  // We check if the date is on or before July 19, 2026.
+  final endOfWorldCup = DateTime(2026, 7, 19, 23, 59, 59);
+  return now.isBefore(endOfWorldCup);
+}
+
+class _SplashScreen extends StatelessWidget {
+  const _SplashScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    final showWorldCup = _isWorldCupActive();
+    final imageAsset = showWorldCup
+        ? 'assets/worldcup_splash.png'
+        : 'assets/general_splash.png';
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF0A0F1E),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            imageAsset,
+            fit: BoxFit.cover,
+          ),
+          // Subtle gradient overlay for visual excellence
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  const Color(0xFF0A0F1E).withAlpha(120),
+                  const Color(0xFF0A0F1E).withAlpha(240),
+                ],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
+            ),
+          ),
+          SafeArea(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                const Spacer(flex: 3),
+                // Premium app branding
+                Text(
+                  'AI FOOTBALL',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 26,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 6,
+                    shadows: [
+                      Shadow(
+                        color: const Color(0xFF00D4AA).withAlpha(150),
+                        blurRadius: 12,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  showWorldCup ? 'WORLD CUP 2026 EDITION' : 'PRESTIGE PREDICTIONS',
+                  style: const TextStyle(
+                    color: Color(0xFF00D4AA),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 2,
+                  ),
+                ),
+                const Spacer(flex: 2),
+                const CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF00D4AA)),
+                  strokeWidth: 3,
+                ),
+                const SizedBox(height: 32),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class AuthGatePage extends StatefulWidget {
   const AuthGatePage({super.key});
+
+  @override
+  State<AuthGatePage> createState() => _AuthGatePageState();
+}
+
+class _AuthGatePageState extends State<AuthGatePage> {
+  bool _timerDone = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Guarantee splash visibility for at least 2.5 seconds for branding presence
+    Timer(const Duration(milliseconds: 2500), () {
+      if (mounted) {
+        setState(() {
+          _timerDone = true;
+        });
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: AppAuthService.instance,
       builder: (context, _) {
-        if (AppAuthService.instance.isLoading) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
+        final isLoading = AppAuthService.instance.isLoading || !_timerDone;
+
+        if (isLoading) {
+          return const _SplashScreen();
         }
 
         if (!AppAuthService.instance.isSignedIn) {
@@ -251,8 +358,37 @@ class _AuthPageState extends State<AuthPage> {
       if (!mounted) {
         return;
       }
+      String userFriendlyMessage = 'Authentication failed. Please try again.';
+      if (error is AppwriteException) {
+        final type = error.type ?? '';
+        final code = error.code;
+        final msg = error.message ?? '';
+
+        if (_isSignIn) {
+          if (type == 'user_not_found' || code == 404 || msg.toLowerCase().contains('not found')) {
+            userFriendlyMessage = 'No account found with this email. Please sign up first.';
+          } else if (type == 'user_invalid_credentials' || code == 401 || msg.toLowerCase().contains('credential')) {
+            userFriendlyMessage = 'Invalid email or password. Please check your credentials.';
+          } else {
+            userFriendlyMessage = error.message ?? userFriendlyMessage;
+          }
+        } else {
+          // Sign Up
+          if (type == 'user_already_exists' || code == 409 || msg.toLowerCase().contains('exists')) {
+            userFriendlyMessage = 'A user with this email already exists. Please sign in instead.';
+          } else {
+            userFriendlyMessage = error.message ?? userFriendlyMessage;
+          }
+        }
+      } else {
+        userFriendlyMessage = error.toString();
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Authentication failed: $error')),
+        SnackBar(
+          content: Text(userFriendlyMessage),
+          backgroundColor: Colors.redAccent,
+        ),
       );
     }
   }
@@ -449,6 +585,7 @@ class NotificationBootstrapPage extends StatefulWidget {
 
 class _NotificationBootstrapPageState extends State<NotificationBootstrapPage> {
   bool _ready = false;
+  bool _showGuide = false;
 
   @override
   void initState() {
@@ -479,8 +616,11 @@ class _NotificationBootstrapPageState extends State<NotificationBootstrapPage> {
 
     await PlayStoreUpdateService.checkAndUpdate();
 
+    bool hasSeenGuide = false;
     try {
       final prefs = await SharedPreferences.getInstance();
+      hasSeenGuide = prefs.getBool('has_seen_onboarding_guide') ?? false;
+
       final currentOpens = prefs.getInt('app_open_count') ?? 0;
       final newOpens = currentOpens + 1;
       await prefs.setInt('app_open_count', newOpens);
@@ -508,6 +648,7 @@ class _NotificationBootstrapPageState extends State<NotificationBootstrapPage> {
     }
 
     setState(() {
+      _showGuide = !hasSeenGuide;
       _ready = true;
     });
   }
@@ -518,7 +659,220 @@ class _NotificationBootstrapPageState extends State<NotificationBootstrapPage> {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
+    if (_showGuide) {
+      return OnboardingGuidePage(
+        onComplete: () async {
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setBool('has_seen_onboarding_guide', true);
+          } catch (e) {
+            debugPrint('Error saving onboarding guide state: $e');
+          }
+          if (mounted) {
+            setState(() {
+              _showGuide = false;
+            });
+          }
+        },
+      );
+    }
+
     return const PredictionFeedPage();
+  }
+}
+
+class OnboardingGuidePage extends StatefulWidget {
+  const OnboardingGuidePage({super.key, required this.onComplete});
+
+  final VoidCallback onComplete;
+
+  @override
+  State<OnboardingGuidePage> createState() => _OnboardingGuidePageState();
+}
+
+class _OnboardingGuidePageState extends State<OnboardingGuidePage> {
+  final PageController _controller = PageController();
+  int _currentPage = 0;
+
+  final List<Map<String, dynamic>> _slides = [
+    {
+      'icon': Icons.emoji_events_outlined,
+      'color': const Color(0xFFFFD700),
+      'title': 'AI Match Analytics',
+      'description': 'Harness state-of-the-art predictive intelligence to analyze soccer stats, form trends, and historical H2H matchups.',
+    },
+    {
+      'icon': Icons.confirmation_number_outlined,
+      'color': const Color(0xFF00D4AA),
+      'title': 'Accumulator Slips',
+      'description': 'Browse targeted odds accumulator tickets grouped by odds targets (2 Odds, 5 Odds, 10 Odds, and Big 50+ Odds).',
+    },
+    {
+      'icon': Icons.workspace_premium_outlined,
+      'color': const Color(0xFFFFB300),
+      'title': 'Premium Tiers',
+      'description': 'Subscribe to our Basic, Standard, or Premium tiers to get early access to high-probability predictions completely ad-free.',
+    },
+    {
+      'icon': Icons.rocket_launch_outlined,
+      'color': const Color(0xFF9B51E0),
+      'title': 'Tipster Community',
+      'description': 'Participate in dynamic chatrooms, vote on match verdicts, compete in daily prediction challenges, and climb the leaderboard.',
+    },
+  ];
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = _isDarkContext(context);
+    final primaryTextColor = _primaryText(context);
+    final secondaryTextColor = _secondaryText(context);
+
+    return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF0A0F1E) : const Color(0xFFF5F7FB),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Align(
+              alignment: Alignment.topRight,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 8, right: 16),
+                child: TextButton(
+                  onPressed: widget.onComplete,
+                  child: Text(
+                    "Skip",
+                    style: TextStyle(
+                      color: const Color(0xFF00D4AA),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Expanded(
+              child: PageView.builder(
+                controller: _controller,
+                itemCount: _slides.length,
+                onPageChanged: (index) {
+                  setState(() {
+                    _currentPage = index;
+                  });
+                },
+                itemBuilder: (context, index) {
+                  final slide = _slides[index];
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(24),
+                          decoration: BoxDecoration(
+                            color: (slide['color'] as Color).withAlpha(15),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: (slide['color'] as Color).withAlpha(45),
+                              width: 1.5,
+                            ),
+                          ),
+                          child: Icon(
+                            slide['icon'] as IconData,
+                            color: slide['color'] as Color,
+                            size: 72,
+                          ),
+                        ),
+                        const SizedBox(height: 48),
+                        Text(
+                          slide['title'] as String,
+                          style: TextStyle(
+                            color: primaryTextColor,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.5,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          slide['description'] as String,
+                          style: TextStyle(
+                            color: secondaryTextColor,
+                            fontSize: 14,
+                            height: 1.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: List.generate(
+                      _slides.length,
+                      (index) => Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                        width: _currentPage == index ? 20 : 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: _currentPage == index
+                              ? const Color(0xFF00D4AA)
+                              : (isDark ? const Color(0xFF233554) : const Color(0xFFD6DBE3)),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                      ),
+                    ),
+                  ),
+                  _currentPage == _slides.length - 1
+                      ? FilledButton(
+                          onPressed: widget.onComplete,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFF00D4AA),
+                            foregroundColor: const Color(0xFF0A0F1E),
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text(
+                            "Get Started",
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        )
+                      : FloatingActionButton.small(
+                          onPressed: () {
+                            _controller.nextPage(
+                              duration: const Duration(milliseconds: 300),
+                              curve: Curves.easeInOut,
+                            );
+                          },
+                          backgroundColor: const Color(0xFF00D4AA),
+                          foregroundColor: const Color(0xFF0A0F1E),
+                          child: const Icon(Icons.arrow_forward),
+                        ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -1609,66 +1963,31 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
                         isAdmin: isAdmin,
                       )
                     : Column(
-                    children: [
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 10),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                headerTitle,
-                                style: TextStyle(
-                                  color: _primaryText(context),
-                                  fontSize: 28,
-                                  fontWeight: FontWeight.w900,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 16, 20, 10),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    headerTitle,
+                                    style: TextStyle(
+                                      color: _primaryText(context),
+                                      fontSize: 28,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ),
-                            if (isAdmin)
-                              PopupMenuButton<SubscriptionPlanId>(
-                                tooltip: 'Switch plan',
-                                onSelected: (plan) {
-                                  setState(() {
-                                    _selectedPlanOverride = plan;
-                                  });
-                                },
-                                itemBuilder: (context) {
-                                  return widget.currentPlans.map((plan) {
-                                    return PopupMenuItem<SubscriptionPlanId>(
-                                      value: plan,
-                                      child: Row(
-                                        children: [
-                                          Icon(
-                                            Icons.workspace_premium_outlined,
-                                            size: 18,
-                                          ),
-                                          const SizedBox(width: 10),
-                                          Expanded(child: Text(plan.title)),
-                                        ],
-                                      ),
-                                    );
-                                  }).toList();
-                                },
-                                child: Icon(
-                                  Icons.menu_open,
-                                  color: _accentText(context),
-                                ),
-                              ),
-                            if (!isAdmin &&
-                                activePlan != null &&
-                                widget.currentPlans.any((plan) => plan != activePlan))
-                              PopupMenuButton<SubscriptionPlanId>(
-                                tooltip: 'Choose a plan',
-                                onSelected: (plan) {
-                                  setState(() {
-                                    _selectedPlanOverride = plan;
-                                    _showPurchaseScreen = true;
-                                  });
-                                },
-                                itemBuilder: (context) {
-                                  return widget.currentPlans
-                                      .where((plan) => plan != activePlan)
-                                      .map((plan) {
+                                if (isAdmin)
+                                  PopupMenuButton<SubscriptionPlanId>(
+                                    tooltip: 'Switch plan',
+                                    onSelected: (plan) {
+                                      setState(() {
+                                        _selectedPlanOverride = plan;
+                                      });
+                                    },
+                                    itemBuilder: (context) {
+                                      return widget.currentPlans.map((plan) {
                                         return PopupMenuItem<SubscriptionPlanId>(
                                           value: plan,
                                           child: Row(
@@ -1682,49 +2001,89 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
                                             ],
                                           ),
                                         );
-                                      })
-                                      .toList();
-                                },
-                                child: Icon(
-                                  Icons.menu_open,
-                                  color: _accentText(context),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: Text(
-                          'Accuracy: ${_planConfidenceLabel(selectedPlan)}',
-                          style: TextStyle(
-                            color: _secondaryText(context),
-                            fontSize: 14,
-                            height: 1.5,
+                                      }).toList();
+                                    },
+                                    child: Icon(
+                                      Icons.menu_open,
+                                      color: _accentText(context),
+                                    ),
+                                  ),
+                                if (!isAdmin &&
+                                    activePlan != null &&
+                                    widget.currentPlans.any((plan) => plan != activePlan))
+                                  PopupMenuButton<SubscriptionPlanId>(
+                                    tooltip: 'Choose a plan',
+                                    onSelected: (plan) {
+                                      setState(() {
+                                        _selectedPlanOverride = plan;
+                                        _showPurchaseScreen = true;
+                                      });
+                                    },
+                                    itemBuilder: (context) {
+                                      return widget.currentPlans
+                                          .where((plan) => plan != activePlan)
+                                          .map((plan) {
+                                            return PopupMenuItem<SubscriptionPlanId>(
+                                              value: plan,
+                                              child: Row(
+                                                children: [
+                                                  Icon(
+                                                    Icons.workspace_premium_outlined,
+                                                    size: 18,
+                                                  ),
+                                                  const SizedBox(width: 10),
+                                                  Expanded(child: Text(plan.title)),
+                                                ],
+                                              ),
+                                            );
+                                          })
+                                          .toList();
+                                    },
+                                    child: Icon(
+                                      Icons.menu_open,
+                                      color: _accentText(context),
+                                    ),
+                                  ),
+                              ],
+                            ),
                           ),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Expanded(
-                        child: _DedicatedPlanScreen(
-                          plan: selectedPlan,
-                          billing: billing,
-                          futurePredictions: _futurePredictions,
-                          isAdmin: isAdmin,
-                          onRefresh: _reload,
-                          plans: widget.currentPlans,
-                          showSummaryCard: false,
-                          onSelectPlan: isAdmin
-                              ? (plan) {
-                                  setState(() {
-                                    _selectedPlanOverride = plan;
-                                  });
-                                }
-                              : null,
-                        ),
-                      ),
-                    ],
-                  )
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            child: Text(
+                              'Accuracy: ${_planConfidenceLabel(selectedPlan)}',
+                              style: TextStyle(
+                                color: _secondaryText(context),
+                                fontSize: 14,
+                                height: 1.5,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Expanded(
+                            child: _DedicatedPlanScreen(
+                              plan: selectedPlan,
+                              billing: billing,
+                              futurePredictions: _futurePredictions,
+                              isAdmin: isAdmin,
+                              onRefresh: _reload,
+                              plans: widget.currentPlans,
+                              showSummaryCard: false,
+                              isPickUnlocked: (key) => true,
+                              unlockingPickKey: null,
+                              onUnlockPick: (p) async {},
+                              adFree: true,
+                              onSubscribePressed: () {},
+                              onSelectPlan: isAdmin
+                                  ? (plan) {
+                                      setState(() {
+                                        _selectedPlanOverride = plan;
+                                      });
+                                    }
+                                  : null,
+                            ),
+                          ),
+                        ],
+                      )
                 : SingleChildScrollView(
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
@@ -1775,7 +2134,6 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
                           title: 'What you get',
                           body: _planBenefitLines(selectedPlan).join('\n'),
                         ),
-
                       ],
                     ),
                   ),
@@ -1821,14 +2179,11 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
               ),
               IconButton(
                 tooltip: 'Back to plan',
-                onPressed: activePlan == null
-                    ? null
-                    : () {
-                        setState(() {
-                          _selectedPlanOverride = activePlan;
-                          _showPurchaseScreen = false;
-                        });
-                      },
+                onPressed: () {
+                  setState(() {
+                    _showPurchaseScreen = false;
+                  });
+                },
                 icon: Icon(Icons.arrow_back, color: accentText),
               ),
             ],
@@ -1961,6 +2316,11 @@ class _DedicatedPlanScreen extends StatefulWidget {
     required this.onRefresh,
     required this.plans,
     required this.showSummaryCard,
+    required this.isPickUnlocked,
+    required this.unlockingPickKey,
+    required this.onUnlockPick,
+    required this.adFree,
+    required this.onSubscribePressed,
     this.onSelectPlan,
   });
 
@@ -1971,6 +2331,11 @@ class _DedicatedPlanScreen extends StatefulWidget {
   final Future<void> Function() onRefresh;
   final List<SubscriptionPlanId> plans;
   final bool showSummaryCard;
+  final bool Function(String key) isPickUnlocked;
+  final String? unlockingPickKey;
+  final Future<void> Function(PredictionRecord) onUnlockPick;
+  final bool adFree;
+  final VoidCallback onSubscribePressed;
   final void Function(SubscriptionPlanId plan)? onSelectPlan;
 
   @override
@@ -1980,6 +2345,25 @@ class _DedicatedPlanScreen extends StatefulWidget {
 class _DedicatedPlanScreenState extends State<_DedicatedPlanScreen> {
   final Set<String> _expandedSectionKeys = <String>{};
   _OddsTab _selectedOddsTab = _OddsTab.regular;
+
+  Future<void> _handleAdminPlanOverride(
+    PredictionRecord prediction,
+    String? plan,
+    double? confidence,
+  ) async {
+    final recordId = prediction.recordId;
+    if (recordId == null || recordId.isEmpty) return;
+    try {
+      await PredictionRepository().updatePredictionPlanOverride(recordId, plan, confidence);
+      await widget.onRefresh();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to update plan: $e')),
+        );
+      }
+    }
+  }
 
   void _toggleSection(String key) {
     setState(() {
@@ -2072,6 +2456,70 @@ class _DedicatedPlanScreenState extends State<_DedicatedPlanScreen> {
                 ),
                 const SizedBox(height: 18),
               ],
+              if (GooglePlayBillingService.instance.activePlan != widget.plan && !widget.adFree && !widget.isAdmin)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 16),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: _planGradientColors(widget.plan, context),
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: _planAccentColor(widget.plan).withAlpha(80)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.workspace_premium, color: _planAccentColor(widget.plan), size: 24),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              "Subscribe to ${widget.plan.title}",
+                              style: TextStyle(
+                                  color: primaryText,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              "Get instant ad-free access to this tier.",
+                              style: TextStyle(
+                                  color: secondaryText,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton(
+                        onPressed: widget.onSubscribePressed,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: _planAccentColor(widget.plan),
+                          foregroundColor: widget.plan == SubscriptionPlanId.premium || widget.plan == SubscriptionPlanId.weeklyAdFree
+                              ? const Color(0xFF0A0F1E)
+                              : Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: const Text(
+                          "Subscribe",
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: _OddsTabSelector(
@@ -2106,15 +2554,15 @@ class _DedicatedPlanScreenState extends State<_DedicatedPlanScreen> {
                     _OddsTab.bigOdds => 50.0,
                     _ => 2.0,
                   },
-                  isPickUnlocked: (key) => true,
-                  unlockingPickKey: null,
-                  onUnlockPick: (p) async {},
-                  adFree: true,
+                  isPickUnlocked: widget.isPickUnlocked,
+                  unlockingPickKey: widget.unlockingPickKey,
+                  onUnlockPick: widget.onUnlockPick,
+                  adFree: widget.adFree,
                   isSelected: (p) => false,
                   onToggleSelection: (p) {},
                   onOpenComments: (p) => showPredictionCommentsSheet(context, p),
                   isAdmin: widget.isAdmin,
-                  onAdminPlanOverride: (p, plan, conf) async {},
+                  onAdminPlanOverride: _handleAdminPlanOverride,
                   forPlans: true,
                   horizontalPadding: 0,
                 )
@@ -2130,6 +2578,9 @@ class _DedicatedPlanScreenState extends State<_DedicatedPlanScreen> {
                   filteredPredictions,
                   _expandedSectionKeys,
                   _toggleSection,
+                  isPickUnlocked: widget.isPickUnlocked,
+                  unlockingPickKey: widget.unlockingPickKey,
+                  onUnlockPick: widget.onUnlockPick,
                 ),
             ],
           ),
@@ -4301,6 +4752,13 @@ class _AccumulatorTicketCard extends StatelessWidget {
                               ),
                             ),
                     ),
+                    if (isAdmin) ...[
+                      const SizedBox(height: 10),
+                      _AdminPlanOverrideBar(
+                        currentOverride: prediction.adminPlanOverride,
+                        onSelect: (plan, confidence) => onAdminPlanOverride(prediction, plan, confidence),
+                      ),
+                    ],
                   ],
                 ),
               );
@@ -4463,8 +4921,11 @@ List<Widget> _buildTodayStatusWidgets(
 List<Widget> _buildPlanPredictionWidgets(
   List<PredictionRecord> predictions,
   Set<String> expandedSectionKeys,
-  void Function(String key) onToggleSection,
-) {
+  void Function(String key) onToggleSection, {
+  required bool Function(String key) isPickUnlocked,
+  required String? unlockingPickKey,
+  required Future<void> Function(PredictionRecord) onUnlockPick,
+}) {
   final sections = _groupPredictionsByDate(predictions);
   final widgets = <Widget>[];
 
@@ -4494,14 +4955,16 @@ List<Widget> _buildPlanPredictionWidgets(
 
     for (var i = 0; i < section.predictions.length; i++) {
       final prediction = section.predictions[i];
+      final key = _predictionUnlockKey(prediction);
+      final isLocked = !isPickUnlocked(key);
       widgets.add(
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 0),
           child: PredictionGroupCard(
             prediction: prediction,
-            isLocked: false,
-            isUnlocking: false,
-            onUnlockPressed: () {},
+            isLocked: isLocked,
+            isUnlocking: unlockingPickKey == key,
+            onUnlockPressed: () => onUnlockPick(prediction),
             isSelected: false,
             canSelect: false,
             onSelectionPressed: () {},
@@ -6977,9 +7440,11 @@ class _HeaderInfoCarouselState extends State<_HeaderInfoCarousel> {
     super.initState();
     _controller = PageController();
     _todayStatsFuture = PredictionRepository().getTodayStats();
+    final showWorldCup = _isWorldCupActive();
+    final slideCount = showWorldCup ? 4 : 3;
     _autoPlayTimer = Timer.periodic(const Duration(seconds: 6), (timer) {
       if (!mounted) return;
-      final nextPage = (_currentPage + 1) % 3;
+      final nextPage = (_currentPage + 1) % slideCount;
       _controller.animateToPage(
         nextPage,
         duration: const Duration(milliseconds: 350),
@@ -7091,9 +7556,89 @@ class _HeaderInfoCarouselState extends State<_HeaderInfoCarousel> {
     );
   }
 
+  Widget _buildWorldCupSlide(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 2),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x16000000),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.asset(
+              'assets/worldcup_banner.png',
+              fit: BoxFit.cover,
+            ),
+            Container(
+              color: Colors.black.withAlpha(95),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF00D4AA).withAlpha(35),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: const Color(0xFF00D4AA).withAlpha(60)),
+                    ),
+                    child: const Icon(
+                      Icons.emoji_events,
+                      color: Color(0xFFFFD700),
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          "World Cup 2026 Predictions",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        SizedBox(height: 3),
+                        Text(
+                          "Analyze current standings, team forms, and match trends for World Cup fixtures live now.",
+                          style: TextStyle(
+                            color: Color(0xFFE0E0E0),
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = _isDarkContext(context);
+    final showWorldCup = _isWorldCupActive();
 
     return SizedBox(
       height: 110,
@@ -7105,6 +7650,7 @@ class _HeaderInfoCarouselState extends State<_HeaderInfoCarousel> {
           });
         },
         children: [
+          if (showWorldCup) _buildWorldCupSlide(context),
           FutureBuilder<Map<String, dynamic>>(
             future: _todayStatsFuture,
             builder: (context, snapshot) {

@@ -233,25 +233,15 @@ export default async function main(context) {
   const appwriteLog = contextLog;
   const appwriteError = contextError;
 
-  appwriteLog(JSON.stringify({
-    level: 'info',
-    job: 'generate-predictions',
-    step: 'bootstrap',
-    timestamp: isoNow(),
-    message: 'generate-predictions booted',
-  }));
+  const originalConsoleLog = console.log;
+  const originalConsoleWarn = console.warn;
+  const originalConsoleError = console.error;
+  const originalConsoleInfo = console.info;
 
-  const client = buildClient();
-  const tablesdb = new TablesDB(client);
-
-  const databaseId = required('APPWRITE_DATABASE_ID');
-  const fixturesTable = required('APPWRITE_TABLE_FIXTURES');
-  const h2hTable = required('APPWRITE_TABLE_FIXTURE_H2H_HISTORY');
-  const predictionsTable = required('APPWRITE_TABLE_PREDICTIONS');
-  const syncRunsTable = required('APPWRITE_TABLE_SYNC_RUNS');
-  const topicId = process.env.APPWRITE_TOPIC_PREDICTIONS
-    ? String(process.env.APPWRITE_TOPIC_PREDICTIONS).trim()
-    : '';
+  console.log = appwriteLog;
+  console.info = appwriteLog;
+  console.warn = appwriteLog;
+  console.error = appwriteError;
 
   const startedAt = isoNow();
   let saved = 0;
@@ -259,9 +249,33 @@ export default async function main(context) {
   let skipped = 0;
   let ultraConfidenceSaved = 0;
   let highConfidenceSaved = 0;
-  const aiBatchSize = Math.max(1, Number.parseInt(process.env.AI_BATCH_SIZE || '5', 10));
+  let databaseId = null;
+  let syncRunsTable = null;
+  let tablesdb = null;
+  let syncRunId = null;
+  let fixtures = [];
 
   try {
+    appwriteLog(JSON.stringify({
+      level: 'info',
+      job: 'generate-predictions',
+      step: 'bootstrap',
+      timestamp: isoNow(),
+      message: 'generate-predictions booted',
+    }));
+
+    const client = buildClient();
+    tablesdb = new TablesDB(client);
+
+    databaseId = required('APPWRITE_DATABASE_ID');
+    const fixturesTable = required('APPWRITE_TABLE_FIXTURES');
+    const h2hTable = required('APPWRITE_TABLE_FIXTURE_H2H_HISTORY');
+    const predictionsTable = required('APPWRITE_TABLE_PREDICTIONS');
+    syncRunsTable = required('APPWRITE_TABLE_SYNC_RUNS');
+    const topicId = process.env.APPWRITE_TOPIC_PREDICTIONS
+      ? String(process.env.APPWRITE_TOPIC_PREDICTIONS).trim()
+      : '';
+
     appwriteLog(JSON.stringify({
       level: 'info',
       job: 'generate-predictions',
@@ -275,7 +289,7 @@ export default async function main(context) {
     }));
 
     const syncRun = await fetchLatestSyncRun(tablesdb, databaseId, syncRunsTable);
-    const syncRunId = syncRun?.sync_run_id;
+    syncRunId = syncRun?.sync_run_id;
 
     if (!syncRunId) {
       appwriteError(JSON.stringify({
@@ -288,12 +302,14 @@ export default async function main(context) {
       throw new Error('No successful sync_run_id found to generate predictions from.');
     }
 
-    const fixtures = await fetchAllRows(tablesdb, databaseId, fixturesTable, [
+    fixtures = await fetchAllRows(tablesdb, databaseId, fixturesTable, [
       Query.equal('sync_run_id', syncRunId),
       Query.orderAsc('$createdAt'),
     ]);
 
     const { accuracies: customAccuracies } = await loadMarketAccuracies(tablesdb, databaseId, syncRunsTable);
+
+    const aiBatchSize = Math.max(1, Number.parseInt(process.env.AI_BATCH_SIZE || '5', 10));
 
     appwriteLog(JSON.stringify({
       level: 'info',
@@ -537,18 +553,25 @@ export default async function main(context) {
       stack: error instanceof Error ? error.stack : null,
     }));
 
-    await createRun(tablesdb, databaseId, syncRunsTable, {
-      job_name: 'generate-predictions',
-      status: 'failed',
-      started_at: startedAt,
-      finished_at: isoNow(),
-      items_seen: String(saved),
-      items_saved: String(saved),
-      message: error instanceof Error ? error.message : String(error),
-      created_at: isoNow(),
-      updated_at: isoNow(),
-    });
+    if (tablesdb && databaseId && syncRunsTable) {
+      await createRun(tablesdb, databaseId, syncRunsTable, {
+        job_name: 'generate-predictions',
+        status: 'failed',
+        started_at: startedAt,
+        finished_at: isoNow(),
+        items_seen: String(saved),
+        items_saved: String(saved),
+        message: error instanceof Error ? error.message : String(error),
+        created_at: isoNow(),
+        updated_at: isoNow(),
+      });
+    }
 
     throw error;
+  } finally {
+    console.log = originalConsoleLog;
+    console.warn = originalConsoleWarn;
+    console.error = originalConsoleError;
+    console.info = originalConsoleInfo;
   }
 }
