@@ -181,7 +181,6 @@ class PredictionRepository {
 
     final rows = await _fetchAllRows([
       Query.equal('release_status', 'published'),
-      Query.orderDesc('kickoff_at'),
       Query.orderDesc('release_at'),
     ]);
 
