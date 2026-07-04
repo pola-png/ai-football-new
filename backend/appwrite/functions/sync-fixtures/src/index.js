@@ -665,7 +665,8 @@ async function createRun(tablesdb, databaseId, tableId, data) {
   });
 }
 
-async function main() {
+export default async function main(context) {
+  const { res } = context || {};
   const client = buildClient();
   const tablesdb = new TablesDB(client);
 
@@ -982,11 +983,12 @@ async function main() {
       updated_at: isoNow(),
     });
 
-    return {
+    const result = {
       ok: true,
       items_seen: finalSelectedFixtures.length,
       items_saved: itemsSaved,
     };
+    return res ? res.json(result) : result;
   } catch (error) {
     await createRun(tablesdb, databaseId, syncRunsTable, {
       job_name: "sync-fixtures",
@@ -1001,16 +1003,24 @@ async function main() {
       updated_at: isoNow(),
     });
 
+    if (res) {
+      return res.json({
+        ok: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     throw error;
   }
 }
 
-main().then(
-  (result) => {
-    console.log(JSON.stringify(result));
-  },
-  (error) => {
-    console.error(error);
-    process.exit(1);
-  },
-);
+if (process.env.APPWRITE_FUNCTION_ID === undefined) {
+  main().then(
+    (result) => {
+      console.log(JSON.stringify(result));
+    },
+    (error) => {
+      console.error(error);
+      process.exit(1);
+    },
+  );
+}
