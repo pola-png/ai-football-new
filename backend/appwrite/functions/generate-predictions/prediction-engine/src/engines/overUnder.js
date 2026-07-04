@@ -87,6 +87,11 @@ export function predictOverUnder(features) {
     reasonsOver35.push(`Extreme offensive profiles with combined goals average of ${avgGoalsCombined}`);
   }
 
+  // Cap Over 1.5 if it is a high-scoring matchup to favor Over 2.5
+  if (avgGoalsCombined >= 2.7) {
+    scoreOver15 = Math.min(70, scoreOver15);
+  }
+
   // Cap scores
   scoreOver15 = Math.max(0, Math.min(100, Math.round(scoreOver15)));
   scoreOver25 = Math.max(0, Math.min(100, Math.round(scoreOver25)));
