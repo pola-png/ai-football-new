@@ -1,5 +1,4 @@
 import 'package:appwrite/appwrite.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -28,7 +27,16 @@ class AdminAccessService extends ChangeNotifier {
 
     _preferences = await SharedPreferences.getInstance();
     _isAdmin = _preferences?.getBool(_adminAccessKey) ?? false;
+
+    AppAuthService.instance.addListener(_handleAuthChange);
+
     notifyListeners();
+  }
+
+  void _handleAuthChange() {
+    if (!AppAuthService.instance.isLoading && !AppAuthService.instance.isSignedIn) {
+      revoke();
+    }
   }
 
   Future<void> syncFromBackend() async {

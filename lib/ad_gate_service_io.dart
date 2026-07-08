@@ -32,6 +32,8 @@ class AdGateService {
     _loadRewardedAd();
   }
 
+  int _retryCount = 0;
+
   void _loadRewardedAd() {
     if (!_supportsAds || _loadingRewardedAd || _rewardedAd != null) {
       return;
@@ -45,9 +47,15 @@ class AdGateService {
         onAdLoaded: (ad) {
           _rewardedAd = ad;
           _loadingRewardedAd = false;
+          _retryCount = 0;
         },
         onAdFailedToLoad: (error) {
           _loadingRewardedAd = false;
+          _retryCount++;
+          final retryDelay = Duration(seconds: (2 * _retryCount).clamp(2, 60));
+          Future.delayed(retryDelay, () {
+            _loadRewardedAd();
+          });
         },
       ),
     );
@@ -58,9 +66,20 @@ class AdGateService {
       return false;
     }
 
+    if (_rewardedAd == null && !_loadingRewardedAd) {
+      _loadRewardedAd();
+    }
+
+    if (_rewardedAd == null && _loadingRewardedAd) {
+      int elapsedMs = 0;
+      while (_rewardedAd == null && _loadingRewardedAd && elapsedMs < 5000) {
+        await Future.delayed(const Duration(milliseconds: 200));
+        elapsedMs += 200;
+      }
+    }
+
     final ad = _rewardedAd;
     if (ad == null) {
-      _loadRewardedAd();
       return false;
     }
 

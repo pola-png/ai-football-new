@@ -805,7 +805,7 @@ export default async function main(context) {
   const league = process.env.API_FOOTBALL_LEAGUE
     ? Number(process.env.API_FOOTBALL_LEAGUE)
     : null;
-  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(1);
+  const fetchDate = process.env.API_FOOTBALL_DATE || lagosDate(0);
   const syncRunId = `sync_${new Date()
     .toISOString()
     .replace(/[-:TZ.]/g, "")
