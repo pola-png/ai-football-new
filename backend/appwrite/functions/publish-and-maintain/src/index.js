@@ -257,10 +257,8 @@ function isVoidStatus(statusShort) {
 }
 
 function shouldPublishPrediction(row, now) {
-  if (String(row.release_status || '').toLowerCase() !== 'draft') {
-    return false;
-  }
-  return true;
+  // Disabled draft publishing via maintenance: predictions are saved directly as published.
+  return false;
 }
 
 function needsOutcomeRefresh(row, now) {
