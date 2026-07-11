@@ -383,6 +383,94 @@ function resolvePickOdd(market, selection, rawOdds) {
   return null;
 }
 
+function safeIdPart(value) {
+  return String(value ?? '')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+
+async function fetchAndSaveOddsFromApi({ tablesdb, databaseId, oddsTable, fixtureApiId, logFn }) {
+  const baseUrl = required('API_FOOTBALL_BASE_URL').replace(/\/$/, '');
+  const url = new URL(`${baseUrl}/odds`);
+  url.searchParams.set('fixture', String(fixtureApiId));
+
+  if (typeof logFn === 'function') {
+    logFn(JSON.stringify({
+      job: 'publish-and-maintain',
+      stage: 'odds-api-fetch-start',
+      fixture_api_id: fixtureApiId,
+      url: url.toString(),
+    }));
+  }
+
+  const response = await fetch(url.toString(), {
+    headers: buildApiFootballHeaders(),
+  });
+
+  if (!response.ok) {
+    if (typeof logFn === 'function') {
+      logFn(JSON.stringify({
+        job: 'publish-and-maintain',
+        stage: 'odds-api-fetch-error',
+        fixture_api_id: fixtureApiId,
+        status: response.status,
+      }));
+    }
+    return [];
+  }
+
+  const payload = await response.json();
+  const entries = Array.isArray(payload?.response) ? payload.response : [];
+  const now = isoNow();
+  const rows = [];
+
+  for (const entry of entries) {
+    for (const bookmaker of Array.isArray(entry?.bookmakers) ? entry.bookmakers : []) {
+      for (const bet of Array.isArray(bookmaker?.bets) ? bookmaker.bets : []) {
+        for (const value of Array.isArray(bet?.values) ? bet.values : []) {
+          const selectionName = value?.value != null ? String(value.value) : null;
+          if (!selectionName) continue;
+
+          const rowId = `odds_${safeIdPart(fixtureApiId)}_${safeIdPart(bookmaker?.id ?? bookmaker?.name)}_${safeIdPart(bet?.name)}_${safeIdPart(selectionName)}`;
+          const data = {
+            fixture_api_id: String(fixtureApiId),
+            bookmaker_name: bookmaker?.name || null,
+            market_name: bet?.name || null,
+            selection_name: selectionName,
+            odd_value: value?.odd != null ? String(value.odd) : null,
+            line_value:
+              value?.handicap != null
+                ? String(value.handicap)
+                : value?.value != null
+                  ? String(value.value)
+                  : null,
+            last_update_at: bookmaker?.last_update || entry?.update || null,
+            created_at: now,
+            updated_at: now,
+          };
+          
+          await upsertRow(tablesdb, databaseId, oddsTable, rowId, data);
+          rows.push(data);
+        }
+      }
+    }
+  }
+
+  if (typeof logFn === 'function') {
+    logFn(JSON.stringify({
+      job: 'publish-and-maintain',
+      stage: 'odds-api-fetch-complete',
+      fixture_api_id: fixtureApiId,
+      odds_saved: rows.length,
+    }));
+  }
+
+  return rows;
+}
+
 async function syncPredictionOddsAndSummary({ tablesdb, databaseId, predictionsTable, oddsTable, predictionRow, logFn }) {
   let predictionJson = {};
   try {
@@ -399,9 +487,33 @@ async function syncPredictionOddsAndSummary({ tablesdb, databaseId, predictionsT
     return false;
   }
 
-  const oddsRows = await fetchAllRows(tablesdb, databaseId, oddsTable, [
+  // 1. First check the local database oddsTable
+  let oddsRows = await fetchAllRows(tablesdb, databaseId, oddsTable, [
     Query.equal('fixture_api_id', String(predictionRow.fixture_api_id)),
   ]);
+
+  // 2. If local table has no odds, fetch from API-Football and save them to the DB
+  if (!oddsRows || oddsRows.length === 0) {
+    try {
+      await sleep(250); // respect rate limits
+      oddsRows = await fetchAndSaveOddsFromApi({
+        tablesdb,
+        databaseId,
+        oddsTable,
+        fixtureApiId: predictionRow.fixture_api_id,
+        logFn,
+      });
+    } catch (apiError) {
+      if (typeof logFn === 'function') {
+        logFn(JSON.stringify({
+          job: 'publish-and-maintain',
+          stage: 'odds-api-fetch-failed',
+          fixture_api_id: predictionRow.fixture_api_id,
+          error: apiError.message,
+        }));
+      }
+    }
+  }
 
   if (!oddsRows || oddsRows.length === 0) {
     return false;
