@@ -118,6 +118,8 @@ export async function savePrediction({
     }
   });
 
+  const oddsSummary = features && features.rawOdds ? JSON.stringify(features.rawOdds) : null;
+
   const data = {
     fixture_api_id: fixtureApiId,
     model_name: 'rule-engine-v1',
@@ -152,6 +154,7 @@ export async function savePrediction({
     published_at: publishedAt,
     notification_sent: false,
     notification_sent_at: null,
+    odds_summary: oddsSummary,
     created_at: now,
     updated_at: now,
   };
