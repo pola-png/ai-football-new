@@ -292,6 +292,193 @@ function needsOutcomeRefreshWithinWindow(row, now, lookbackHours) {
   return kickoffAt.getTime() >= windowStart.getTime();
 }
 
+async function deleteOlderPredictions(tablesdb, databaseId, predictionsTable, logFn) {
+  const now = new Date();
+  const threshold = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
+
+  const oldRows = await fetchAllRows(tablesdb, databaseId, predictionsTable, [
+    Query.lessThan('kickoff_at', threshold.toISOString()),
+  ]);
+
+  if (typeof logFn === 'function') {
+    logFn(JSON.stringify({
+      job: 'publish-and-maintain',
+      stage: 'cleanup-predictions-start',
+      threshold: threshold.toISOString(),
+      candidates: oldRows.length,
+    }));
+  }
+
+  let deleted = 0;
+  for (const row of oldRows) {
+    if (!row?.$id) continue;
+    try {
+      await tablesdb.deleteRow({
+        databaseId,
+        tableId: predictionsTable,
+        rowId: row.$id,
+      });
+      deleted += 1;
+    } catch (e) {
+      if (typeof logFn === 'function') {
+        logFn(JSON.stringify({
+          job: 'publish-and-maintain',
+          stage: 'cleanup-predictions-error',
+          prediction_id: row.$id,
+          error: e.message,
+        }));
+      }
+    }
+  }
+
+  if (typeof logFn === 'function') {
+    logFn(JSON.stringify({
+      job: 'publish-and-maintain',
+      stage: 'cleanup-predictions-complete',
+      deleted,
+    }));
+  }
+
+  return deleted;
+}
+
+function resolvePickOdd(market, selection, rawOdds) {
+  const m = String(market || '').trim().toLowerCase();
+  const s = String(selection || '').trim().toLowerCase();
+  const parse = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+
+  if (m === 'winner' || m === 'match winner' || m === '1x2') {
+    if (s.includes('home') || s === '1') return parse(rawOdds.home);
+    if (s.includes('away') || s === '2') return parse(rawOdds.away);
+    if (s.includes('draw') || s === 'x') return parse(rawOdds.draw);
+  }
+  if (m === 'draw') {
+    if (s === 'yes') return parse(rawOdds.draw);
+  }
+  if (m === 'btts' || m === 'both teams to score') {
+    if (s === 'yes') return parse(rawOdds.bttsYes);
+    if (s === 'no') return parse(rawOdds.bttsNo);
+  }
+  if (m === 'over/under' || m === 'total goals') {
+    if (s === 'over 2.5' || s.includes('over')) return parse(rawOdds.over25);
+    if (s === 'under 2.5' || s.includes('under')) return parse(rawOdds.under25);
+  }
+  if (m === 'double chance') {
+    const h = parse(rawOdds.home);
+    const a = parse(rawOdds.away);
+    const d = parse(rawOdds.draw);
+    if ((s === '1x' || s === 'home/draw') && h && d) {
+      return Number((1 / ((1 / h) + (1 / d))).toFixed(2));
+    }
+    if ((s === 'x2' || s === 'away/draw' || s === 'draw/away') && a && d) {
+      return Number((1 / ((1 / a) + (1 / d))).toFixed(2));
+    }
+    if ((s === '12' || s === 'home/away') && h && a) {
+      return Number((1 / ((1 / h) + (1 / a))).toFixed(2));
+    }
+  }
+  return null;
+}
+
+async function syncPredictionOddsAndSummary({ tablesdb, databaseId, predictionsTable, oddsTable, predictionRow, logFn }) {
+  let predictionJson = {};
+  try {
+    predictionJson = JSON.parse(predictionRow.prediction_json || '{}');
+  } catch (e) {
+    predictionJson = {};
+  }
+
+  const primaryPick = predictionJson.primary_pick || {};
+  const hasOdd = primaryPick.odd != null;
+  const hasOddsSummary = predictionRow.odds_summary != null && predictionRow.odds_summary.trim().length > 0;
+
+  if (hasOdd && hasOddsSummary) {
+    return false;
+  }
+
+  const oddsRows = await fetchAllRows(tablesdb, databaseId, oddsTable, [
+    Query.equal('fixture_api_id', String(predictionRow.fixture_api_id)),
+  ]);
+
+  if (!oddsRows || oddsRows.length === 0) {
+    return false;
+  }
+
+  const rawOdds = {};
+  for (const row of oddsRows) {
+    const marketName = String(row.market_name || '').trim().toLowerCase();
+    const selectionName = String(row.selection_name || '').trim().toLowerCase();
+    const value = Number(row.odd_value);
+    if (!Number.isFinite(value) || value <= 0) continue;
+
+    if (marketName.includes('winner') || marketName.includes('1x2') || marketName.includes('match odds') || marketName.includes('match winner')) {
+      if (selectionName === 'home' || selectionName === '1' || selectionName.includes('home')) {
+        rawOdds.home = value;
+      } else if (selectionName === 'away' || selectionName === '2' || selectionName.includes('away')) {
+        rawOdds.away = value;
+      } else if (selectionName === 'draw' || selectionName === 'x' || selectionName.includes('draw')) {
+        rawOdds.draw = value;
+      }
+    } else if (marketName.includes('both teams to score') || marketName.includes('btts') || marketName.includes('both teams score')) {
+      if (selectionName === 'yes') {
+        rawOdds.bttsYes = value;
+      } else if (selectionName === 'no') {
+        rawOdds.bttsNo = value;
+      }
+    } else if (marketName.includes('over/under') || marketName.includes('goals over/under') || marketName.includes('total goals')) {
+      const line = String(row.line_value || '').trim();
+      const is25 = line === '2.5' || selectionName.includes('2.5');
+      if (is25) {
+        if (selectionName.includes('over')) {
+          rawOdds.over25 = value;
+        } else if (selectionName.includes('under')) {
+          rawOdds.under25 = value;
+        }
+      }
+    }
+  }
+
+  const resolvedOdd = resolvePickOdd(
+    primaryPick.market || predictionRow.primary_market || predictionRow.market,
+    primaryPick.selection || predictionRow.primary_selection,
+    rawOdds
+  );
+
+  if (resolvedOdd != null) {
+    primaryPick.odd = resolvedOdd;
+  }
+  predictionJson.primary_pick = primaryPick;
+
+  const updatedPredictionJsonStr = JSON.stringify(predictionJson);
+  const updatedOddsSummaryStr = JSON.stringify(rawOdds);
+
+  await tablesdb.updateRow({
+    databaseId,
+    tableId: predictionsTable,
+    rowId: predictionRow.$id,
+    data: {
+      prediction_json: updatedPredictionJsonStr,
+      odds_summary: updatedOddsSummaryStr,
+      updated_at: isoNow(),
+    },
+  });
+
+  if (typeof logFn === 'function') {
+    logFn(JSON.stringify({
+      job: 'publish-and-maintain',
+      stage: 'update-prediction-odds',
+      prediction_id: predictionRow.$id,
+      fixture_api_id: predictionRow.fixture_api_id,
+      resolved_odd: resolvedOdd,
+    }));
+  }
+
+  return true;
+}
+
 function chunkArray(values, chunkSize) {
   const chunks = [];
   for (let index = 0; index < values.length; index += chunkSize) {
@@ -699,8 +886,18 @@ export default async function main({ res, error: reportError }) {
     const resultsTable = process.env.APPWRITE_TABLE_RESULTS || 'results';
     syncRunsTable = required('APPWRITE_TABLE_SYNC_RUNS');
     const topicId = required('APPWRITE_TOPIC_PREDICTIONS');
+    const oddsTable = required('APPWRITE_TABLE_FIXTURE_ODDS');
 
     const now = new Date();
+
+    // 1. Clean up predictions older than 2 days
+    let deleted = 0;
+    try {
+      deleted = await deleteOlderPredictions(tablesdb, databaseId, predictionsTable, log);
+    } catch (err) {
+      logError(`Error deleting older predictions: ${err.message}`);
+    }
+
     const outcomeLookbackHours = Number.parseInt(process.env.OUTCOME_LOOKBACK_HOURS || '0', 10);
 
     startedSuccessfully = true;
@@ -710,6 +907,7 @@ export default async function main({ res, error: reportError }) {
       started_at: startedAt,
       outcome_lookback_hours: outcomeLookbackHours,
       results_table: resultsTable,
+      deleted_count: deleted,
     }));
 
     const draftPredictions = await fetchAllRows(tablesdb, databaseId, predictionsTable, [
@@ -733,6 +931,25 @@ export default async function main({ res, error: reportError }) {
       stage: 'published-loaded',
       total_published: publishedPredictions.length,
     }));
+
+    let oddsSynced = 0;
+    for (const row of publishedPredictions) {
+      try {
+        const synced = await syncPredictionOddsAndSummary({
+          tablesdb,
+          databaseId,
+          predictionsTable,
+          oddsTable,
+          predictionRow: row,
+          logFn: log,
+        });
+        if (synced) {
+          oddsSynced += 1;
+        }
+      } catch (err) {
+        logError(`Error syncing odds for prediction ${row.$id}: ${err.message}`);
+      }
+    }
 
     const publishCandidates = draftPredictions.filter((row) => shouldPublishPrediction(row, now));
     const outcomeCandidates = publishedPredictions.filter((row) => needsOutcomeRefreshWithinWindow(row, now, outcomeLookbackHours));
@@ -847,7 +1064,7 @@ export default async function main({ res, error: reportError }) {
       finished_at: isoNow(),
       items_seen: String(draftPredictions.length + publishedPredictions.length),
       items_saved: String(published),
-      message: `Loaded ${draftPredictions.length} drafts and ${publishedPredictions.length} published rows. Published ${published} predictions, sent ${notified} notifications, and refreshed ${outcomesUpdated} match outcomes ${outcomeWindowLabel}.`,
+      message: `Deleted ${deleted} old predictions. Synced odds for ${oddsSynced} predictions. Loaded ${draftPredictions.length} drafts and ${publishedPredictions.length} published rows. Published ${published} predictions, sent ${notified} notifications, and refreshed ${outcomesUpdated} match outcomes ${outcomeWindowLabel}.`,
       created_at: isoNow(),
       updated_at: isoNow(),
     });
@@ -855,6 +1072,8 @@ export default async function main({ res, error: reportError }) {
     log(JSON.stringify({
       job: 'publish-and-maintain',
       stage: 'run-complete',
+      deleted_predictions: deleted,
+      odds_synced: oddsSynced,
       published,
       notified,
       outcomes_updated: outcomesUpdated,
