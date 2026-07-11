@@ -490,7 +490,7 @@ class SocialEngagementService {
     }
 
     final publishedPredictions = await PredictionRepository(client: _client)
-        .fetchPublishedPredictions();
+        .fetchPublishedPredictions(includeHistory: true);
     final predictionByFixture = {
       for (final prediction in publishedPredictions) prediction.fixtureApiId: prediction,
     };

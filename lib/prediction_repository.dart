@@ -176,13 +176,24 @@ class PredictionRepository {
     }
   }
 
-  Future<List<PredictionRecord>> fetchPublishedPredictions() async {
+  Future<List<PredictionRecord>> fetchPublishedPredictions({bool includeHistory = false}) async {
     configure();
 
-    final rows = await _fetchAllRows([
+    final now = DateTime.now();
+    final todayStart = DateTime(now.year, now.month, now.day).toUtc();
+
+    final queries = [
       Query.equal('release_status', 'published'),
       Query.orderDesc('release_at'),
-    ]);
+    ];
+
+    if (includeHistory) {
+      queries.add(Query.lessThan('kickoff_at', todayStart.toIso8601String()));
+    } else {
+      queries.add(Query.greaterThanEqual('kickoff_at', todayStart.toIso8601String()));
+    }
+
+    final rows = await _fetchAllRows(queries);
 
     // For any prediction missing team names, fetch them from the fixtures table
     final needsEnrich = rows.where(

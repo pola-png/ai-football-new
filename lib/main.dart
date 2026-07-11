@@ -1506,18 +1506,26 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
   String? _unlockingPickKey;
   String _searchQuery = '';
   _ConfidenceFilter _confidenceFilter = _ConfidenceFilter.all;
+  bool _historyMode = false;
 
   @override
   void initState() {
     super.initState();
-    _futurePredictions = _repository.fetchPublishedPredictions();
+    _futurePredictions = _repository.fetchPublishedPredictions(includeHistory: _historyMode);
   }
 
   Future<void> _reload() async {
     setState(() {
-      _futurePredictions = _repository.fetchPublishedPredictions();
+      _futurePredictions = _repository.fetchPublishedPredictions(includeHistory: _historyMode);
     });
     await _futurePredictions;
+  }
+
+  void _toggleHistoryMode() {
+    setState(() {
+      _historyMode = !_historyMode;
+      _futurePredictions = _repository.fetchPublishedPredictions(includeHistory: _historyMode);
+    });
   }
 
   void _toggleSection(String key) {
@@ -1703,6 +1711,8 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
                               });
                             },
                       onOpenMenu: widget.onOpenMenu,
+                      historyMode: _historyMode,
+                      onHistoryToggled: _toggleHistoryMode,
                     ),
                     flexibleSpace: ClipRect(
                       child: BackdropFilter(
@@ -3223,12 +3233,16 @@ class _StickyHeader extends StatefulWidget {
     required this.onSearchChanged,
     required this.onClearSearch,
     required this.onOpenMenu,
+    required this.historyMode,
+    required this.onHistoryToggled,
   });
 
   final String searchQuery;
   final ValueChanged<String> onSearchChanged;
   final VoidCallback? onClearSearch;
   final VoidCallback onOpenMenu;
+  final bool historyMode;
+  final VoidCallback onHistoryToggled;
 
   @override
   State<_StickyHeader> createState() => _StickyHeaderState();
@@ -3328,6 +3342,15 @@ class _StickyHeaderState extends State<_StickyHeader> {
           ),
         ),
         const SizedBox(width: 8),
+        IconButton(
+          tooltip: 'History',
+          onPressed: widget.onHistoryToggled,
+          icon: Icon(
+            widget.historyMode ? Icons.history : Icons.history_outlined,
+            color: widget.historyMode ? const Color(0xFF00D4AA) : _accentText(context),
+          ),
+        ),
+        const SizedBox(width: 4),
         IconButton(
           tooltip: 'Menu',
           onPressed: widget.onOpenMenu,
