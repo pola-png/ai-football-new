@@ -202,7 +202,6 @@ async function fetchAndSaveOdds({ tablesdb, databaseId, oddsTable, fixtureApiId 
           await upsertRow(tablesdb, databaseId, oddsTable, rowId, {
             fixture_api_id: String(fixtureApiId),
             bookmaker_name: bookmaker?.name || null,
-            bookmaker_api_id: bookmaker?.id != null ? String(bookmaker.id) : null,
             market_name: bet?.name || null,
             selection_name: selectionName,
             odd_value: value?.odd != null ? String(value.odd) : null,
