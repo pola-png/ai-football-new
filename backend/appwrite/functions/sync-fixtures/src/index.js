@@ -341,7 +341,7 @@ module.exports = async function main(context) {
   const h2hTable = required("APPWRITE_TABLE_FIXTURE_H2H_HISTORY");
   const syncRunsTable = required("APPWRITE_TABLE_SYNC_RUNS");
 
-  const today = lagosDate(1);
+  const today = lagosDate(0);
   const league = process.env.API_FOOTBALL_LEAGUE
     ? Number(process.env.API_FOOTBALL_LEAGUE)
     : null;
