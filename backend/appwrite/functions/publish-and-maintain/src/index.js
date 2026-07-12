@@ -492,26 +492,37 @@ async function syncPredictionOddsAndSummary({ tablesdb, databaseId, predictionsT
     Query.equal('fixture_api_id', String(predictionRow.fixture_api_id)),
   ]);
 
-  // 2. If local table has no odds, fetch from API-Football and save them to the DB
+  // 2. If local table has no odds, fetch from API-Football ONLY if match is upcoming
   if (!oddsRows || oddsRows.length === 0) {
-    try {
-      await sleep(250); // respect rate limits
-      oddsRows = await fetchAndSaveOddsFromApi({
-        tablesdb,
-        databaseId,
-        oddsTable,
-        fixtureApiId: predictionRow.fixture_api_id,
-        logFn,
-      });
-    } catch (apiError) {
-      if (typeof logFn === 'function') {
-        logFn(JSON.stringify({
-          job: 'publish-and-maintain',
-          stage: 'odds-api-fetch-failed',
-          fixture_api_id: predictionRow.fixture_api_id,
-          error: apiError.message,
-        }));
+    const kickoff = parseDate(predictionRow.kickoff_at);
+    const now = new Date();
+    const isUpcoming = kickoff && 
+                       (kickoff.getTime() > now.getTime() + 5 * 60 * 1000) && 
+                       (kickoff.getTime() < now.getTime() + 36 * 60 * 60 * 1000);
+
+    if (isUpcoming) {
+      try {
+        await sleep(250); // respect rate limits
+        oddsRows = await fetchAndSaveOddsFromApi({
+          tablesdb,
+          databaseId,
+          oddsTable,
+          fixtureApiId: predictionRow.fixture_api_id,
+          logFn,
+        });
+      } catch (apiError) {
+        if (typeof logFn === 'function') {
+          logFn(JSON.stringify({
+            job: 'publish-and-maintain',
+            stage: 'odds-api-fetch-failed',
+            fixture_api_id: predictionRow.fixture_api_id,
+            error: apiError.message,
+          }));
+        }
       }
+    } else {
+      // Match is in the past or too far out, and has no local odds. Skip calling API.
+      return false;
     }
   }
 
