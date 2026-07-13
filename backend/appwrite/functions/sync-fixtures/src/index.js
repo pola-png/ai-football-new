@@ -340,16 +340,21 @@ module.exports = async function main(context) {
   const h2hTable = required("APPWRITE_TABLE_FIXTURE_H2H_HISTORY");
   const syncRunsTable = required("APPWRITE_TABLE_SYNC_RUNS");
 
-  const today = lagosDate(0);
   const league = process.env.API_FOOTBALL_LEAGUE
     ? Number(process.env.API_FOOTBALL_LEAGUE)
     : null;
 
-  const url = new URL(
-    `${required("API_FOOTBALL_BASE_URL").replace(/\/$/, "")}/fixtures`,
-  );
-  url.searchParams.set("date", today);
-  if (league) url.searchParams.set("league", String(league));
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  const dateStrings = [];
+  for (let day = 1; day <= daysInMonth; day++) {
+    const monthStr = String(month + 1).padStart(2, '0');
+    const dayStr = String(day).padStart(2, '0');
+    dateStrings.push(`${year}-${monthStr}-${dayStr}`);
+  }
 
   const startedAt = isoNow();
   const syncRunId = `sync_${new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14)}`;
@@ -358,19 +363,31 @@ module.exports = async function main(context) {
   let h2hSaved = 0;
 
   try {
-    console.log(`Fetching fixtures for today: ${today}`);
-    const response = await fetch(url.toString(), { headers: buildApiFootballHeaders() });
+    console.log(`Fetching fixtures for ${dateStrings.length} days in parallel...`);
+    const fetchPromises = dateStrings.map(async (date) => {
+      const url = new URL(`${required("API_FOOTBALL_BASE_URL").replace(/\/$/, "")}/fixtures`);
+      url.searchParams.set("date", date);
+      if (league) url.searchParams.set("league", String(league));
 
-    if (!response.ok) {
-      throw new Error(`API-Football request failed with status ${response.status}`);
-    }
+      try {
+        const response = await fetch(url.toString(), { headers: buildApiFootballHeaders() });
+        if (!response.ok) {
+          throw new Error(`Status ${response.status}`);
+        }
+        const payload = await response.json();
+        if (payload?.errors && Object.keys(payload.errors).length > 0) {
+          console.error(`Errors for ${date}: ${JSON.stringify(payload.errors)}`);
+        }
+        return Array.isArray(payload?.response) ? payload.response : [];
+      } catch (err) {
+        console.error(`Failed to fetch fixtures for ${date}: ${err.message}`);
+        return [];
+      }
+    });
 
-    const payload = await response.json();
-    if (payload?.errors && Object.keys(payload.errors).length > 0) {
-      console.error(`API-Football payload errors: ${JSON.stringify(payload.errors)}`);
-    }
-    const fixtures = Array.isArray(payload?.response) ? payload.response : [];
-    console.log(`Fetched ${fixtures.length} fixtures from API-Football.`);
+    const results = await Promise.all(fetchPromises);
+    const fixtures = results.flat();
+    console.log(`Fetched ${fixtures.length} fixtures in total for the month.`);
 
     for (const fixture of fixtures) {
       const leagueInfo = fixture.league;
@@ -407,35 +424,44 @@ module.exports = async function main(context) {
       }
       itemsSaved += 1;
 
-      // 2. Fetch & save odds (200ms delay to stay under API rate limit)
-      await sleep(200);
-      try {
-        const oddsCount = await fetchAndSaveOdds({
-          tablesdb, databaseId, oddsTable, fixtureApiId,
-        });
-        oddsSaved += oddsCount;
-        console.log(`Odds saved for ${fixtureApiId}: ${oddsCount} rows`);
-      } catch (err) {
-        console.log(`Odds error for ${fixtureApiId}: ${err.message}`);
-      }
+      // 2. Fetch & save odds/H2H only if fixture kickoff is within [now - 12h, now + 36h] to protect API quotas
+      const kickoffTime = fixture.fixture.date ? new Date(fixture.fixture.date).getTime() : 0;
+      const nowTime = new Date().getTime();
+      const isWithinOddsWindow = kickoffTime && 
+                                  kickoffTime >= (nowTime - 12 * 60 * 60 * 1000) &&
+                                  kickoffTime <= (nowTime + 36 * 60 * 60 * 1000);
 
-      // 3. Fetch & save H2H (200ms delay)
-      await sleep(200);
-      try {
-        const h2hCount = await fetchAndSaveH2H({
-          tablesdb,
-          databaseId,
-          h2hTable,
-          fixtureApiId,
-          homeTeamId: String(homeTeam.id),
-          awayTeamId: String(awayTeam.id),
-          leagueApiId: leagueInfo.id != null ? String(leagueInfo.id) : null,
-          season: leagueInfo.season != null ? String(leagueInfo.season) : null,
-        });
-        h2hSaved += h2hCount;
-        console.log(`H2H saved for ${fixtureApiId}: ${h2hCount} rows`);
-      } catch (err) {
-        console.log(`H2H error for ${fixtureApiId}: ${err.message}`);
+      if (isWithinOddsWindow) {
+        await sleep(200);
+        try {
+          const oddsCount = await fetchAndSaveOdds({
+            tablesdb, databaseId, oddsTable, fixtureApiId,
+          });
+          oddsSaved += oddsCount;
+          console.log(`Odds saved for ${fixtureApiId}: ${oddsCount} rows`);
+        } catch (err) {
+          console.log(`Odds error for ${fixtureApiId}: ${err.message}`);
+        }
+
+        await sleep(200);
+        try {
+          const h2hCount = await fetchAndSaveH2H({
+            tablesdb,
+            databaseId,
+            h2hTable,
+            fixtureApiId,
+            homeTeamId: String(homeTeam.id),
+            awayTeamId: String(awayTeam.id),
+            leagueApiId: leagueInfo.id != null ? String(leagueInfo.id) : null,
+            season: leagueInfo.season != null ? String(leagueInfo.season) : null,
+          });
+          h2hSaved += h2hCount;
+          console.log(`H2H saved for ${fixtureApiId}: ${h2hCount} rows`);
+        } catch (err) {
+          console.log(`H2H error for ${fixtureApiId}: ${err.message}`);
+        }
+      } else {
+        console.log(`Fixture ${fixtureApiId} is outside active odds window, skipping odds/H2H sync.`);
       }
     }
 
