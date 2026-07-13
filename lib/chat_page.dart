@@ -759,8 +759,29 @@ class _ComposerBar extends StatelessWidget {
 }
 
 String _formatChatTime(DateTime date) {
-  final local = date.toLocal();
-  final hour = local.hour.toString().padLeft(2, '0');
-  final minute = local.minute.toString().padLeft(2, '0');
-  return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')} $hour:$minute';
+  final now = DateTime.now().toUtc();
+  final messageTime = date.toUtc();
+  final difference = now.difference(messageTime);
+
+  if (difference.isNegative) {
+    return 'now';
+  }
+
+  if (difference.inSeconds < 45) {
+    return 'now';
+  } else if (difference.inMinutes < 60) {
+    final minutes = difference.inMinutes;
+    return '$minutes ${minutes == 1 ? 'min' : 'mins'} ago';
+  } else if (difference.inHours < 24) {
+    final hours = difference.inHours;
+    return '$hours ${hours == 1 ? 'hour' : 'hours'} ago';
+  } else if (difference.inDays < 7) {
+    final days = difference.inDays;
+    return '$days ${days == 1 ? 'day' : 'days'} ago';
+  } else {
+    final local = date.toLocal();
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+    return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')} $hour:$minute';
+  }
 }
