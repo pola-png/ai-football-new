@@ -145,7 +145,7 @@ export default async function main(context = {}) {
 
   // Check if the payload matches a chat message document structure
   if (payload.room_id && payload.user_name && payload.message) {
-    title = `New Message from ${payload.user_name}`;
+    title = payload.user_name;
     body = payload.message;
     topicId = `chat_${payload.room_id}`;
     data = {
