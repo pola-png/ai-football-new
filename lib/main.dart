@@ -1011,9 +1011,9 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
   }
 
   void _maybeShowAdFreeUpsell(bool adFree) {
-    if (adFree || _adFreeUpsellShown) {
-      return;
-    }
+    // Disabled as the premium plans modal has taken over
+    return;
+  }
 
     _adFreeUpsellShown = true;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -2073,7 +2073,7 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
                                     style: TextStyle(
                                       color: _primaryText(context),
                                       fontSize: 28,
-                                      fontWeight: FontWeight.w900,
+                                      fontWeight: FontWeight.w700,
                                     ),
                                   ),
                                 ),
@@ -2197,7 +2197,7 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
                                 style: TextStyle(
                                   color: _primaryText(context),
                                   fontSize: 28,
-                                  fontWeight: FontWeight.w900,
+                                  fontWeight: FontWeight.w700,
                                 ),
                               ),
                             ),
@@ -2272,7 +2272,7 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
                   style: TextStyle(
                     color: primaryText,
                     fontSize: 28,
-                    fontWeight: FontWeight.w900,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
@@ -2327,7 +2327,7 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
                         style: TextStyle(
                           color: primaryText,
                           fontSize: 24,
-                          fontWeight: FontWeight.w900,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ),
@@ -3836,7 +3836,7 @@ class _CarouselPlanCard extends StatelessWidget {
                         style: TextStyle(
                           color: primaryText,
                           fontSize: 11,
-                          fontWeight: FontWeight.w800,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ),
@@ -3854,7 +3854,7 @@ class _CarouselPlanCard extends StatelessWidget {
                   style: TextStyle(
                     color: primaryText,
                     fontSize: compact ? 22 : 26,
-                    fontWeight: FontWeight.w900,
+                    fontWeight: FontWeight.w700,
                     height: 1.0,
                   ),
                 ),
@@ -3880,47 +3880,58 @@ class _CarouselPlanCard extends StatelessWidget {
                       .toList(),
                 ),
                 const Spacer(),
-                Row(
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Flexible(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            price,
-                            style: TextStyle(
-                              color: primaryText,
-                              fontSize: compact ? 18 : 22,
-                              fontWeight: FontWeight.w900,
-                            ),
-                            overflow: TextOverflow.ellipsis,
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Text(
+                          price,
+                          style: TextStyle(
+                            color: primaryText,
+                            fontSize: compact ? 22 : 26,
+                            fontWeight: FontWeight.w700,
                           ),
-                          Text(
-                            isOwned ? 'Active' : 'One tap',
-                            style: TextStyle(
-                              color: secondaryText.withAlpha(235),
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          isOwned ? '(Owned)' : '/ month',
+                          style: TextStyle(
+                            color: secondaryText.withAlpha(180),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    FilledButton(
-                      onPressed: onPressed,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF00D4AA),
-                        foregroundColor: const Color(0xFF07111F),
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-                      ),
-                      child: Text(
-                        isOwned
-                            ? 'Active'
-                            : onPressed == null
-                                ? 'Unavailable'
-                                : 'Subscribe',
-                        style: const TextStyle(fontWeight: FontWeight.w900),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: onPressed,
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF00D4AA),
+                          foregroundColor: const Color(0xFF07111F),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                        child: Text(
+                          isOwned
+                              ? 'Active'
+                              : onPressed == null
+                                  ? 'Unavailable'
+                                  : 'Subscribe Now',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
+                            letterSpacing: 0.2,
+                          ),
+                        ),
                       ),
                     ),
                   ],
