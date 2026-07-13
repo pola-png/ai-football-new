@@ -1055,24 +1055,7 @@ export default async function main({ res, error: reportError }) {
       total_published: publishedPredictions.length,
     }));
 
-    let oddsSynced = 0;
-    for (const row of publishedPredictions) {
-      try {
-        const synced = await syncPredictionOddsAndSummary({
-          tablesdb,
-          databaseId,
-          predictionsTable,
-          oddsTable,
-          predictionRow: row,
-          logFn: log,
-        });
-        if (synced) {
-          oddsSynced += 1;
-        }
-      } catch (err) {
-        logError(`Error syncing odds for prediction ${row.$id}: ${err.message}`);
-      }
-    }
+    const oddsSynced = 0;
 
     const publishCandidates = draftPredictions.filter((row) => shouldPublishPrediction(row, now));
     const outcomeCandidates = publishedPredictions.filter((row) => needsOutcomeRefreshWithinWindow(row, now, outcomeLookbackHours));
