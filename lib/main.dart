@@ -2001,7 +2001,7 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
     _futurePredictions = _repository.fetchPublishedPredictions();
     _selectedPlanOverride =
         GooglePlayBillingService.instance.activePlan ??
-        SubscriptionPlanId.premium;
+        SubscriptionPlanId.standard;
   }
 
   Future<void> _buyPlan(BuildContext context, SubscriptionPlanId plan) async {
@@ -3660,7 +3660,10 @@ class _PlanCarouselState extends State<_PlanCarousel> {
   @override
   void initState() {
     super.initState();
+    final initialIdx = widget.plans.indexOf(SubscriptionPlanId.standard);
+    _pageIndex = initialIdx != -1 ? initialIdx : 0;
     _controller = PageController(
+      initialPage: _pageIndex,
       viewportFraction: widget.compact ? 0.9 : 0.84,
     );
   }
