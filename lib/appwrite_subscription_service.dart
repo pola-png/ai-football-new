@@ -9,9 +9,11 @@ class AppwriteSubscriptionService {
     await firebaseMessaging.setAutoInitEnabled(true);
     await firebaseMessaging.requestPermission(alert: true, badge: true, sound: true);
     await firebaseMessaging.subscribeToTopic(appwritePredictionTopicId);
+    await firebaseMessaging.subscribeToTopic('chat_general');
 
     firebaseMessaging.onTokenRefresh.listen((_) async {
       await firebaseMessaging.subscribeToTopic(appwritePredictionTopicId);
+      await firebaseMessaging.subscribeToTopic('chat_general');
     });
   }
 }

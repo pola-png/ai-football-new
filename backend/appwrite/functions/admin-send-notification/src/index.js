@@ -137,15 +137,37 @@ export default async function main(context = {}) {
   }
 
   const payload = parsePayload(context);
-  const title = String(payload.title || payload.notification?.title || 'AI Football Prediction').trim();
-  const body = String(payload.body || payload.notification?.body || 'A new notification is available.').trim();
-  const data = payload.data && typeof payload.data === 'object' ? payload.data : {};
-  const topicId = String(
-    payload.topicId ||
-    process.env.APPWRITE_TOPIC_PREDICTIONS ||
-    process.env.APPWRITE_PREDICTION_TOPIC_ID ||
-    '',
-  ).trim();
+
+  let title = '';
+  let body = '';
+  let data = {};
+  let topicId = '';
+
+  // Check if the payload matches a chat message document structure
+  if (payload.room_id && payload.user_name && payload.message) {
+    title = `New Message from ${payload.user_name}`;
+    body = payload.message;
+    topicId = `chat_${payload.room_id}`;
+    data = {
+      type: 'chat',
+      roomId: payload.room_id,
+      messageId: payload.$id || '',
+      userId: payload.user_id || '',
+      selectionFixtureApiId: payload.selection_fixture_api_id || '',
+      selectionText: payload.selection_text || '',
+    };
+  } else {
+    // Fall back to standard prediction notification payload
+    title = String(payload.title || payload.notification?.title || 'AI Football Prediction').trim();
+    body = String(payload.body || payload.notification?.body || 'A new notification is available.').trim();
+    data = payload.data && typeof payload.data === 'object' ? payload.data : {};
+    topicId = String(
+      payload.topicId ||
+      process.env.APPWRITE_TOPIC_PREDICTIONS ||
+      process.env.APPWRITE_PREDICTION_TOPIC_ID ||
+      '',
+    ).trim();
+  }
 
   logStep('notification.resolved', {
     title,

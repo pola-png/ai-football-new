@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'app_auth_service.dart';
 
 class PushNotificationService {
   PushNotificationService._();
@@ -47,6 +48,15 @@ class PushNotificationService {
     final notification = message.notification;
     if (notification == null) {
       return;
+    }
+
+    // Ignore push notifications sent by the current user themselves
+    final senderUserId = message.data['userId']?.toString();
+    if (senderUserId != null && senderUserId.isNotEmpty) {
+      final currentUserId = AppAuthService.instance.currentUser?.id;
+      if (currentUserId == senderUserId) {
+        return;
+      }
     }
 
     final androidDetails = AndroidNotificationDetails(
