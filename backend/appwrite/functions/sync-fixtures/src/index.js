@@ -424,44 +424,35 @@ module.exports = async function main(context) {
       }
       itemsSaved += 1;
 
-      // 2. Fetch & save odds/H2H only if fixture kickoff is within [now - 12h, now + 36h] to protect API quotas
-      const kickoffTime = fixture.fixture.date ? new Date(fixture.fixture.date).getTime() : 0;
-      const nowTime = new Date().getTime();
-      const isWithinOddsWindow = kickoffTime && 
-                                  kickoffTime >= (nowTime - 12 * 60 * 60 * 1000) &&
-                                  kickoffTime <= (nowTime + 36 * 60 * 60 * 1000);
+      // 2. Fetch & save odds (200ms delay to stay under API rate limit)
+      await sleep(200);
+      try {
+        const oddsCount = await fetchAndSaveOdds({
+          tablesdb, databaseId, oddsTable, fixtureApiId,
+        });
+        oddsSaved += oddsCount;
+        console.log(`Odds saved for ${fixtureApiId}: ${oddsCount} rows`);
+      } catch (err) {
+        console.log(`Odds error for ${fixtureApiId}: ${err.message}`);
+      }
 
-      if (isWithinOddsWindow) {
-        await sleep(200);
-        try {
-          const oddsCount = await fetchAndSaveOdds({
-            tablesdb, databaseId, oddsTable, fixtureApiId,
-          });
-          oddsSaved += oddsCount;
-          console.log(`Odds saved for ${fixtureApiId}: ${oddsCount} rows`);
-        } catch (err) {
-          console.log(`Odds error for ${fixtureApiId}: ${err.message}`);
-        }
-
-        await sleep(200);
-        try {
-          const h2hCount = await fetchAndSaveH2H({
-            tablesdb,
-            databaseId,
-            h2hTable,
-            fixtureApiId,
-            homeTeamId: String(homeTeam.id),
-            awayTeamId: String(awayTeam.id),
-            leagueApiId: leagueInfo.id != null ? String(leagueInfo.id) : null,
-            season: leagueInfo.season != null ? String(leagueInfo.season) : null,
-          });
-          h2hSaved += h2hCount;
-          console.log(`H2H saved for ${fixtureApiId}: ${h2hCount} rows`);
-        } catch (err) {
-          console.log(`H2H error for ${fixtureApiId}: ${err.message}`);
-        }
-      } else {
-        console.log(`Fixture ${fixtureApiId} is outside active odds window, skipping odds/H2H sync.`);
+      // 3. Fetch & save H2H (200ms delay)
+      await sleep(200);
+      try {
+        const h2hCount = await fetchAndSaveH2H({
+          tablesdb,
+          databaseId,
+          h2hTable,
+          fixtureApiId,
+          homeTeamId: String(homeTeam.id),
+          awayTeamId: String(awayTeam.id),
+          leagueApiId: leagueInfo.id != null ? String(leagueInfo.id) : null,
+          season: leagueInfo.season != null ? String(leagueInfo.season) : null,
+        });
+        h2hSaved += h2hCount;
+        console.log(`H2H saved for ${fixtureApiId}: ${h2hCount} rows`);
+      } catch (err) {
+        console.log(`H2H error for ${fixtureApiId}: ${err.message}`);
       }
     }
 
