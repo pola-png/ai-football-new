@@ -2214,7 +2214,7 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
                         ),
                         const SizedBox(height: 18),
                         SizedBox(
-                          height: 396,
+                          height: 460,
                           child: _PlanCarousel(
                             plans: widget.currentPlans,
                             billing: billing,
@@ -3865,12 +3865,15 @@ class _CarouselPlanCard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 14),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: benefits
                       .take(compact ? 2 : 3)
-                      .map((benefit) => _PlanBenefitLine(text: benefit))
+                      .map((benefit) => Padding(
+                            padding: const EdgeInsets.only(bottom: 6),
+                            child: _PlanBenefitLine(text: benefit),
+                          ))
                       .toList(),
                 ),
                 const Spacer(),
@@ -3937,9 +3940,10 @@ class _PlanBenefitLine extends StatelessWidget {
   Widget build(BuildContext context) {
     final primaryText = _primaryText(context);
     return Row(
-      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
+          margin: const EdgeInsets.only(top: 2),
           width: 18,
           height: 18,
           decoration: BoxDecoration(
@@ -3949,13 +3953,15 @@ class _PlanBenefitLine extends StatelessWidget {
           child: const Icon(Icons.check, size: 12, color: Color(0xFF00D4AA)),
         ),
         const SizedBox(width: 8),
-        Text(
-          text,
-          style: TextStyle(
-            color: primaryText,
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            height: 1.3,
+        Expanded(
+          child: Text(
+            text,
+            style: TextStyle(
+              color: primaryText,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              height: 1.3,
+            ),
           ),
         ),
       ],
