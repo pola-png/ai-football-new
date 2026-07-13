@@ -7501,19 +7501,22 @@ List<String> _planBenefitLines(SubscriptionPlanId plan) {
       'Perfect short-term upgrade',
     ],
     SubscriptionPlanId.basic => const [
-      'Budget-friendly access',
-      'Stay close to the feed',
-      'Great starter tier',
+      'Basic confidence predictions',
+      '80% - 85% confidence AI predictions',
+      'Budget-friendly entry tier',
     ],
     SubscriptionPlanId.standard => const [
-      'Balanced access level',
-      'More prediction depth',
+      'Standard AI with Admin picks',
+      '87% - 89% confidence matches',
+      '88% accurate prediction scoring',
       'Built for regular users',
     ],
     SubscriptionPlanId.premium => const [
-      'Top-tier access focus',
-      'Best for heavy usage',
-      'Unlock the strongest tier',
+      'High AI and Specialist Admin picks',
+      'AI highly picked selections',
+      '90% - 99% accurate picks',
+      'Fixed predictions included',
+      'Full unlock & priority analysis',
     ],
   };
 }
