@@ -889,6 +889,37 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
   int _currentIndex = 0;
   bool _adFreeUpsellShown = false;
 
+  @override
+  void initState() {
+    super.initState();
+    final billing = GooglePlayBillingService.instance;
+    final isAdmin = AdminAccessService.instance.isAdmin;
+    final isPremium = billing.activePlan != null || isAdmin;
+    if (!isPremium) {
+      _currentIndex = 1;
+    }
+    billing.addListener(_onBillingChanged);
+  }
+
+  @override
+  void dispose() {
+    GooglePlayBillingService.instance.removeListener(_onBillingChanged);
+    super.dispose();
+  }
+
+  void _onBillingChanged() {
+    final billing = GooglePlayBillingService.instance;
+    final isAdmin = AdminAccessService.instance.isAdmin;
+    final isPremium = billing.activePlan != null || isAdmin;
+    if (isPremium && _currentIndex == 1) {
+      if (mounted) {
+        setState(() {
+          _currentIndex = 0;
+        });
+      }
+    }
+  }
+
   Future<void> _openMainMenu(bool isAdmin) async {
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
