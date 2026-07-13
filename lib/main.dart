@@ -892,31 +892,23 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showPaywallIfNeeded();
+    });
+  }
+
+  void _showPaywallIfNeeded() {
     final billing = GooglePlayBillingService.instance;
     final isAdmin = AdminAccessService.instance.isAdmin;
     final isPremium = billing.activePlan != null || isAdmin;
+
     if (!isPremium) {
-      _currentIndex = 1;
-    }
-    billing.addListener(_onBillingChanged);
-  }
-
-  @override
-  void dispose() {
-    GooglePlayBillingService.instance.removeListener(_onBillingChanged);
-    super.dispose();
-  }
-
-  void _onBillingChanged() {
-    final billing = GooglePlayBillingService.instance;
-    final isAdmin = AdminAccessService.instance.isAdmin;
-    final isPremium = billing.activePlan != null || isAdmin;
-    if (isPremium && _currentIndex == 1) {
-      if (mounted) {
-        setState(() {
-          _currentIndex = 0;
-        });
-      }
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          fullscreenDialog: true,
+          builder: (_) => const PremiumPaywallDialog(),
+        ),
+      );
     }
   }
 
@@ -1910,6 +1902,72 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
             );
           },
         ),
+      ),
+    );
+  }
+}
+
+class PremiumPaywallDialog extends StatefulWidget {
+  const PremiumPaywallDialog({super.key});
+
+  @override
+  State<PremiumPaywallDialog> createState() => _PremiumPaywallDialogState();
+}
+
+class _PremiumPaywallDialogState extends State<PremiumPaywallDialog> {
+  @override
+  void initState() {
+    super.initState();
+    GooglePlayBillingService.instance.addListener(_onBillingChanged);
+  }
+
+  @override
+  void dispose() {
+    GooglePlayBillingService.instance.removeListener(_onBillingChanged);
+    super.dispose();
+  }
+
+  void _onBillingChanged() {
+    final billing = GooglePlayBillingService.instance;
+    final isAdmin = AdminAccessService.instance.isAdmin;
+    final isPremium = billing.activePlan != null || isAdmin;
+    if (isPremium) {
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final billing = GooglePlayBillingService.instance;
+    final isAdmin = AdminAccessService.instance.isAdmin;
+    final adFree = billing.hasAdFreeAccess || isAdmin;
+
+    return Scaffold(
+      body: Stack(
+        children: [
+          PremiumPlanPage(
+            adFree: adFree,
+            isAdmin: isAdmin,
+            currentPlans: billing.plans,
+          ),
+          Positioned(
+            top: 16,
+            right: 16,
+            child: SafeArea(
+              child: ClipOval(
+                child: Material(
+                  color: Colors.black.withValues(alpha: 0.4),
+                  child: IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white, size: 22),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
