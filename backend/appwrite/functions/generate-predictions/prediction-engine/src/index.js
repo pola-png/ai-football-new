@@ -49,7 +49,7 @@ export async function runPredictionEngine({
   const leagueApiId = String(fixtureDoc.league_api_id || '').trim();
   const season = String(fixtureDoc.season || '').trim();
 
-  const verbose = process.env.VERBOSE_LOGGING === 'true';
+  const verbose = process.env.VERBOSE_LOGGING !== 'false';
   const debugLog = (msg) => {
     if (verbose) {
       log(msg);

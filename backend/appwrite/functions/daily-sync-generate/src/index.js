@@ -198,7 +198,29 @@ async function createRun(tablesdb, databaseId, tableId, data) {
 }
 
 async function upsertRow(tablesdb, databaseId, tableId, rowId, data) {
-  return tablesdb.upsertRow({ databaseId, tableId, rowId, data });
+  try {
+    return await tablesdb.updateRow({ databaseId, tableId, rowId, data });
+  } catch (error) {
+    const isNotFound =
+      String(error?.code) === "404" ||
+      String(error?.message || "").includes("Row not found") ||
+      String(error?.message || "").includes("Document not found");
+    if (!isNotFound) {
+      throw error;
+    }
+    try {
+      return await tablesdb.createRow({ databaseId, tableId, rowId, data });
+    } catch (createError) {
+      const isAlreadyExists =
+        String(createError?.code) === "409" ||
+        String(createError?.message || "").includes("already exists") ||
+        String(createError?.message || "").includes("Document already exists");
+      if (isAlreadyExists) {
+        return await tablesdb.updateRow({ databaseId, tableId, rowId, data });
+      }
+      throw createError;
+    }
+  }
 }
 
 async function deleteAllRows(tablesdb, databaseId, tableId) {
@@ -361,7 +383,16 @@ async function fetchApiFootballJson(path, query = {}) {
     );
   }
 
-  return response.json();
+  const payload = await response.json();
+  if (payload?.errors) {
+    const hasErrors = Array.isArray(payload.errors)
+      ? payload.errors.length > 0
+      : Object.keys(payload.errors).length > 0;
+    if (hasErrors) {
+      throw new Error(`API-Football error: ${JSON.stringify(payload.errors)}`);
+    }
+  }
+  return payload;
 }
 
 function safeIdPart(value) {

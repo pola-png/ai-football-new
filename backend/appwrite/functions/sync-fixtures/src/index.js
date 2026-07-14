@@ -56,7 +56,16 @@ async function fetchApiFootballJson(path, query = {}) {
   if (!response.ok) {
     throw new Error(`API-Football request failed with status ${response.status}`);
   }
-  return response.json();
+  const payload = await response.json();
+  if (payload?.errors) {
+    const hasErrors = Array.isArray(payload.errors)
+      ? payload.errors.length > 0
+      : Object.keys(payload.errors).length > 0;
+    if (hasErrors) {
+      throw new Error(`API-Football error: ${JSON.stringify(payload.errors)}`);
+    }
+  }
+  return payload;
 }
 
 function sleep(ms) {
@@ -166,7 +175,29 @@ function pickFixture(fixture, league, homeTeam, awayTeam) {
 }
 
 async function upsertRow(tablesdb, databaseId, tableId, rowId, data) {
-  return tablesdb.upsertRow({ databaseId, tableId, rowId, data });
+  try {
+    return await tablesdb.updateRow({ databaseId, tableId, rowId, data });
+  } catch (error) {
+    const isNotFound =
+      String(error?.code) === "404" ||
+      String(error?.message || "").includes("Row not found") ||
+      String(error?.message || "").includes("Document not found");
+    if (!isNotFound) {
+      throw error;
+    }
+    try {
+      return await tablesdb.createRow({ databaseId, tableId, rowId, data });
+    } catch (createError) {
+      const isAlreadyExists =
+        String(createError?.code) === "409" ||
+        String(createError?.message || "").includes("already exists") ||
+        String(createError?.message || "").includes("Document already exists");
+      if (isAlreadyExists) {
+        return await tablesdb.updateRow({ databaseId, tableId, rowId, data });
+      }
+      throw createError;
+    }
+  }
 }
 
 async function createRun(tablesdb, databaseId, tableId, data) {
@@ -176,8 +207,10 @@ async function createRun(tablesdb, databaseId, tableId, data) {
 // ─── Odds ────────────────────────────────────────────────────────────────────
 
 async function fetchAndSaveOdds({ tablesdb, databaseId, oddsTable, fixtureApiId }) {
+  console.log(`[Odds] Requesting odds for fixture ${fixtureApiId}...`);
   const payload = await fetchApiFootballJson("/odds", { fixture: fixtureApiId });
   const entries = Array.isArray(payload?.response) ? payload.response : [];
+  console.log(`[Odds] Received ${entries.length} odds entries for fixture ${fixtureApiId}`);
   const now = isoNow();
   let saved = 0;
 
@@ -241,6 +274,7 @@ async function fetchAndSaveH2H({
   const pairKey = buildTeamPairKey(homeTeamId, awayTeamId);
   if (!fixtureApiId || !homeTeamId || !awayTeamId) return 0;
 
+  console.log(`[H2H] Checking cache for fixture ${fixtureApiId} (${homeTeamId} vs ${awayTeamId})...`);
   // Check if H2H already exists in the database for this pair
   const existing = await tablesdb.listRows({
     databaseId,
@@ -249,7 +283,7 @@ async function fetchAndSaveH2H({
     total: false,
   });
   if ((existing.rows || []).length > 0) {
-    console.log(`H2H already cached for fixture ${fixtureApiId}, skipping.`);
+    console.log(`[H2H] H2H already cached for fixture ${fixtureApiId}, skipping API request.`);
     return 0;
   }
 
@@ -257,6 +291,7 @@ async function fetchAndSaveH2H({
   const now = isoNow();
   let saved = 0;
 
+  console.log(`[H2H] Querying API-Football H2H history across seasons: ${targetSeasons.join(", ")}`);
   for (const seasonYear of targetSeasons) {
     const requestQuery = {
       h2h: `${homeTeamId}-${awayTeamId}`,
@@ -267,9 +302,12 @@ async function fetchAndSaveH2H({
 
     let payload;
     try {
+      console.log(`[H2H] Requesting H2H for season ${seasonYear}...`);
       payload = await fetchApiFootballJson("/fixtures/headtohead", requestQuery);
+      const count = Array.isArray(payload?.response) ? payload.response.length : 0;
+      console.log(`[H2H] Received ${count} historical matches for season ${seasonYear}`);
     } catch (err) {
-      console.log(`H2H fetch error for ${homeTeamId}-${awayTeamId} season ${seasonYear}: ${err.message}`);
+      console.log(`[H2H] H2H fetch error for ${homeTeamId}-${awayTeamId} season ${seasonYear}: ${err.message}`);
       continue;
     }
 
@@ -334,7 +372,7 @@ module.exports = async function main(context) {
     ? Number(process.env.API_FOOTBALL_LEAGUE)
     : null;
 
-  const syncRange = (process.env.SYNC_RANGE || "week").toLowerCase();
+  const syncRange = (process.env.SYNC_RANGE || "today").toLowerCase();
   let daysToSync = syncRange === "today" ? 1 : 8; // 8 days total (today + 7 days)
   if (process.env.SYNC_DAYS) {
     const parsedDays = parseInt(process.env.SYNC_DAYS, 10);
@@ -361,19 +399,27 @@ module.exports = async function main(context) {
       url.searchParams.set("date", date);
       if (league) url.searchParams.set("league", String(league));
 
+      console.log(`[Fetch] Requesting fixtures from API-Football for date ${date}: ${url.toString()}`);
       try {
         const response = await fetch(url.toString(), { headers: buildApiFootballHeaders() });
         if (!response.ok) {
           throw new Error(`Status ${response.status}`);
         }
         const payload = await response.json();
-        if (payload?.errors && Object.keys(payload.errors).length > 0) {
-          console.error(`Errors for ${date}: ${JSON.stringify(payload.errors)}`);
+        if (payload?.errors) {
+          const hasErrors = Array.isArray(payload.errors)
+            ? payload.errors.length > 0
+            : Object.keys(payload.errors).length > 0;
+          if (hasErrors) {
+            throw new Error(`API-Football error: ${JSON.stringify(payload.errors)}`);
+          }
         }
+        const count = Array.isArray(payload?.response) ? payload.response.length : 0;
+        console.log(`[Fetch] Received ${count} fixtures for date ${date}`);
         return Array.isArray(payload?.response) ? payload.response : [];
       } catch (err) {
-        console.error(`Failed to fetch fixtures for ${date}: ${err.message}`);
-        return [];
+        console.error(`[Fetch] Failed to fetch fixtures for ${date}: ${err.message}`);
+        throw err;
       }
     });
 
@@ -388,6 +434,7 @@ module.exports = async function main(context) {
       const fixtureApiId = String(fixture.fixture.id);
 
       console.log(`Processing: ${homeTeam.name} vs ${awayTeam.name} (${fixtureApiId})`);
+      console.log(`[Sync] Saving/updating teams, league, and fixture documents...`);
 
       // 1. Save teams, league, fixture
       const teamRows = [
