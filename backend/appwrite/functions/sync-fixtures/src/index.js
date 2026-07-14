@@ -344,16 +344,18 @@ module.exports = async function main(context) {
     ? Number(process.env.API_FOOTBALL_LEAGUE)
     : null;
 
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const syncRange = (process.env.SYNC_RANGE || "week").toLowerCase();
+  let daysToSync = syncRange === "today" ? 1 : 8; // 8 days total (today + 7 days)
+  if (process.env.SYNC_DAYS) {
+    const parsedDays = parseInt(process.env.SYNC_DAYS, 10);
+    if (!isNaN(parsedDays) && parsedDays > 0) {
+      daysToSync = parsedDays;
+    }
+  }
 
   const dateStrings = [];
-  for (let day = 1; day <= daysInMonth; day++) {
-    const monthStr = String(month + 1).padStart(2, '0');
-    const dayStr = String(day).padStart(2, '0');
-    dateStrings.push(`${year}-${monthStr}-${dayStr}`);
+  for (let i = 0; i < daysToSync; i++) {
+    dateStrings.push(lagosDate(i));
   }
 
   const startedAt = isoNow();
@@ -387,7 +389,7 @@ module.exports = async function main(context) {
 
     const results = await Promise.all(fetchPromises);
     const fixtures = results.flat();
-    console.log(`Fetched ${fixtures.length} fixtures in total for the month.`);
+    console.log(`Fetched ${fixtures.length} fixtures in total.`);
 
     for (const fixture of fixtures) {
       const leagueInfo = fixture.league;
