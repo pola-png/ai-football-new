@@ -53,24 +53,7 @@ async function createRun(tablesdb, databaseId, tableId, data) {
 }
 
 async function upsertRow(tablesdb, databaseId, tableId, rowId, data) {
-  try {
-    return await tablesdb.updateRow({
-      databaseId,
-      tableId,
-      rowId,
-      data,
-    });
-  } catch (error) {
-    if (String(error?.code) !== '404' && !String(error?.message || '').includes('Row not found')) {
-      throw error;
-    }
-    return tablesdb.createRow({
-      databaseId,
-      tableId,
-      rowId,
-      data,
-    });
-  }
+  return tablesdb.upsertRow({ databaseId, tableId, rowId, data });
 }
 
 async function fetchLatestSyncRun(tablesdb, databaseId, syncRunsTable) {
