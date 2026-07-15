@@ -372,19 +372,7 @@ module.exports = async function main(context) {
     ? Number(process.env.API_FOOTBALL_LEAGUE)
     : null;
 
-  const syncRange = (process.env.SYNC_RANGE || "today").toLowerCase();
-  let daysToSync = syncRange === "today" ? 1 : 8; // 8 days total (today + 7 days)
-  if (process.env.SYNC_DAYS) {
-    const parsedDays = parseInt(process.env.SYNC_DAYS, 10);
-    if (!isNaN(parsedDays) && parsedDays > 0) {
-      daysToSync = parsedDays;
-    }
-  }
-
-  const dateStrings = [];
-  for (let i = 0; i < daysToSync; i++) {
-    dateStrings.push(lagosDate(i));
-  }
+  const dateStrings = [lagosDate(0)];
 
   const startedAt = isoNow();
   const syncRunId = `sync_${new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14)}`;
