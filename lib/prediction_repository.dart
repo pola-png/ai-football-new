@@ -1,8 +1,6 @@
 import 'dart:convert';
-
-import 'package:appwrite/appwrite.dart';
-
-import 'appwrite_config.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'firebase_config.dart';
 
 class PredictionPick {
   const PredictionPick({
@@ -163,39 +161,42 @@ class PredictionRecord {
 }
 
 class PredictionRepository {
-  PredictionRepository({Client? client}) : _client = client ?? Client();
+  PredictionRepository();
 
-  final Client _client;
-  static const int _pageSize = 100;
-
-  TablesDB get _tables => TablesDB(_client);
-
-  void configure() {
-    if (appwriteEndpoint.isNotEmpty && appwriteProjectId.isNotEmpty) {
-      _client.setEndpoint(appwriteEndpoint).setProject(appwriteProjectId);
-    }
-  }
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   Future<List<PredictionRecord>> fetchPublishedPredictions({bool includeHistory = false}) async {
-    configure();
-
     final now = DateTime.now();
     final todayStart = DateTime(now.year, now.month, now.day).toUtc();
 
-    final queries = [
-      Query.equal('release_status', 'published'),
-      Query.orderDesc('release_at'),
-    ];
+    final query = _firestore
+        .collection(firebasePredictionsCollection)
+        .where('release_status', isEqualTo: 'published');
 
+    final response = await query.get();
+    var rows = response.docs.map((doc) {
+      final data = doc.data();
+      return PredictionRecord.fromMap({
+        ...data,
+        r'$id': doc.id,
+      });
+    }).toList();
+
+    // Filter by kickoff_at in-memory to avoid requiring composite indexes
+    final todayStartStr = todayStart.toIso8601String();
     if (includeHistory) {
-      queries.add(Query.lessThan('kickoff_at', todayStart.toIso8601String()));
+      rows = rows.where((p) {
+        final kickoff = p.kickoffAt?.toUtc().toIso8601String();
+        return kickoff != null && kickoff.compareTo(todayStartStr) < 0;
+      }).toList();
     } else {
-      queries.add(Query.greaterThanEqual('kickoff_at', todayStart.toIso8601String()));
+      rows = rows.where((p) {
+        final kickoff = p.kickoffAt?.toUtc().toIso8601String();
+        return kickoff == null || kickoff.compareTo(todayStartStr) >= 0;
+      }).toList();
     }
 
-    final rows = await _fetchAllRows(queries);
-
-    // For any prediction missing team names, fetch them from the fixtures table
+    // For any prediction missing team names, fetch them from the fixtures collection
     final needsEnrich = rows.where(
       (p) => (p.homeTeamName == null || p.homeTeamName!.isEmpty) ||
              (p.awayTeamName == null || p.awayTeamName!.isEmpty),
@@ -263,17 +264,12 @@ class PredictionRepository {
     for (var i = 0; i < fixtureApiIds.length; i += batchSize) {
       final batch = fixtureApiIds.sublist(i, (i + batchSize).clamp(0, fixtureApiIds.length));
       try {
-        final response = await _tables.listRows(
-          databaseId: appwriteDatabaseId,
-          tableId: appwriteFixturesTableId,
-          queries: [
-            Query.equal('api_fixture_id', batch),
-            Query.limit(batch.length),
-          ],
-          total: false,
-        );
-        for (final row in response.rows) {
-          final data = _normalizeRow(row);
+        final response = await _firestore
+            .collection(firebaseFixturesCollection)
+            .where('api_fixture_id', whereIn: batch)
+            .get();
+        for (final doc in response.docs) {
+          final data = doc.data();
           final id = _asString(data['api_fixture_id']);
           if (id != null && id.isNotEmpty) {
             result[id] = {
@@ -292,63 +288,16 @@ class PredictionRepository {
   }
 
   Future<void> updatePredictionPlanOverride(String recordId, String? planOverride, double? confidenceOverride) async {
-    configure();
     final data = <String, dynamic>{
       if (planOverride != null) 'admin_plan_override': planOverride,
       if (planOverride == null) 'admin_plan_override': null,
       if (confidenceOverride != null) 'confidence': confidenceOverride,
       if (confidenceOverride != null) 'primary_confidence': confidenceOverride,
     };
-    await _tables.updateRow(
-      databaseId: appwriteDatabaseId,
-      tableId: appwritePredictionsTableId,
-      rowId: recordId,
-      data: data,
-    );
-  }
-
-  Future<List<PredictionRecord>> _fetchAllRows(List<String> baseQueries) async {
-    final records = <PredictionRecord>[];
-    var offset = 0;
-
-    while (true) {
-      final response = await _tables.listRows(
-        databaseId: appwriteDatabaseId,
-        tableId: appwritePredictionsTableId,
-        queries: [
-          ...baseQueries,
-          Query.limit(_pageSize),
-          Query.offset(offset),
-        ],
-        total: false,
-      );
-
-      final rows = response.rows
-          .map((row) => PredictionRecord.fromMap(_normalizeRow(row)))
-          .toList();
-
-      records.addAll(rows);
-      if (rows.length < _pageSize) {
-        break;
-      }
-
-      offset += _pageSize;
-    }
-
-    return records;
-  }
-
-  Future<List<PredictionRecord>> _fetchRows(List<String> queries) async {
-    final response = await _tables.listRows(
-      databaseId: appwriteDatabaseId,
-      tableId: appwritePredictionsTableId,
-      queries: queries,
-      total: false,
-    );
-
-    return response.rows
-        .map((row) => PredictionRecord.fromMap(_normalizeRow(row)))
-        .toList();
+    await _firestore
+        .collection(firebasePredictionsCollection)
+        .doc(recordId)
+        .update(data);
   }
 
   Future<Map<String, dynamic>> getTodayStats() async {
@@ -575,34 +524,6 @@ String _summaryFromJson(Map<String, dynamic>? json) {
   return '';
 }
 
-Map<String, dynamic> _normalizeRow(dynamic row) {
-  if (row is Map<String, dynamic>) {
-    final data = row['data'];
-    if (data is Map<String, dynamic>) {
-      return <String, dynamic>{
-        ...data,
-        if (row.containsKey(r'$id')) r'$id': row[r'$id'],
-        if (row.containsKey(r'$createdAt')) r'$createdAt': row[r'$createdAt'],
-        if (row.containsKey(r'$updatedAt')) r'$updatedAt': row[r'$updatedAt'],
-      };
-    }
-
-    return row;
-  }
-
-  final dynamic data = row.data;
-  if (data is Map<String, dynamic>) {
-    return <String, dynamic>{
-      ...data,
-      if (row.$id != null) r'$id': row.$id,
-      if (row.$createdAt != null) r'$createdAt': row.$createdAt,
-      if (row.$updatedAt != null) r'$updatedAt': row.$updatedAt,
-    };
-  }
-
-  return <String, dynamic>{};
-}
-
 String? _asString(Object? value) {
   if (value == null) {
     return null;
@@ -624,6 +545,10 @@ double? _asDouble(Object? value) {
 }
 
 DateTime? _asDateTime(Object? value) {
+  if (value == null) return null;
+  if (value is Timestamp) {
+    return value.toDate();
+  }
   final text = _asString(value);
   if (text == null || text.isEmpty) {
     return null;

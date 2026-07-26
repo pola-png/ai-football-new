@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
-import 'package:appwrite/appwrite.dart' hide Permission;
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -15,7 +15,7 @@ import 'admin_notification_page.dart';
 import 'ad_gate_service.dart';
 import 'account_deletion_page.dart';
 import 'chat_page.dart';
-import 'appwrite_subscription_service.dart';
+import 'firebase_subscription_service.dart';
 import 'community_page.dart';
 import 'feed_banner_ad.dart';
 import 'google_play_billing_service.dart';
@@ -23,6 +23,7 @@ import 'prediction_repository.dart';
 import 'play_store_update_service.dart';
 import 'social_engagement_service.dart';
 import 'push_notification_service.dart';
+import 'support_page.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -298,7 +299,7 @@ class _AuthGatePageState extends State<AuthGatePage> {
     return AnimatedBuilder(
       animation: AppAuthService.instance,
       builder: (context, _) {
-        final isLoading = AppAuthService.instance.isLoading || !_timerDone;
+        final isLoading = !_timerDone;
 
         if (isLoading) {
           return const _SplashScreen();
@@ -359,22 +360,25 @@ class _AuthPageState extends State<AuthPage> {
         return;
       }
       String userFriendlyMessage = 'Authentication failed. Please try again.';
-      if (error is AppwriteException) {
-        final type = error.type ?? '';
+      if (error is FirebaseAuthException) {
         final code = error.code;
-        final msg = error.message ?? '';
 
         if (_isSignIn) {
-          if (type == 'user_not_found' || code == 404 || msg.toLowerCase().contains('not found')) {
-            userFriendlyMessage = 'No account found with this email. Please sign up first.';
-          } else if (type == 'user_invalid_credentials' || code == 401 || msg.toLowerCase().contains('credential')) {
+          if (code == 'user-not-found') {
+            userFriendlyMessage = 'invalid credential. sign up.';
+            setState(() {
+              _signUpEmail.text = _signInEmail.text;
+              _signUpPassword.text = _signInPassword.text;
+              _isSignIn = false;
+            });
+          } else if (code == 'wrong-password' || code == 'invalid-credential') {
             userFriendlyMessage = 'Invalid email or password. Please check your credentials.';
           } else {
             userFriendlyMessage = error.message ?? userFriendlyMessage;
           }
         } else {
           // Sign Up
-          if (type == 'user_already_exists' || code == 409 || msg.toLowerCase().contains('exists')) {
+          if (code == 'email-already-in-use') {
             userFriendlyMessage = 'A user with this email already exists. Please sign in instead.';
           } else {
             userFriendlyMessage = error.message ?? userFriendlyMessage;
@@ -387,6 +391,42 @@ class _AuthPageState extends State<AuthPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(userFriendlyMessage),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
+  }
+
+  Future<void> _forgotPassword() async {
+    final email = _signInEmail.text.trim();
+    if (email.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter your email in the field to reset password.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Password reset email sent. Please check your inbox.'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      String errorMessage = 'Failed to send password reset email.';
+      if (error is FirebaseAuthException) {
+        errorMessage = error.message ?? errorMessage;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(errorMessage),
           backgroundColor: Colors.redAccent,
         ),
       );
@@ -472,6 +512,19 @@ class _AuthPageState extends State<AuthPage> {
                               hint: 'Password',
                               obscureText: true,
                             ),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton(
+                                onPressed: _forgotPassword,
+                                child: const Text(
+                                  'Forgot password?',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ),
                           ] else ...[
                             _AuthField(controller: _signUpName, hint: 'Display name'),
                             const SizedBox(height: 12),
@@ -546,7 +599,7 @@ class _AuthModeButton extends StatelessWidget {
   }
 }
 
-class _AuthField extends StatelessWidget {
+class _AuthField extends StatefulWidget {
   const _AuthField({
     required this.controller,
     required this.hint,
@@ -560,16 +613,42 @@ class _AuthField extends StatelessWidget {
   final TextInputType? keyboardType;
 
   @override
+  State<_AuthField> createState() => _AuthFieldState();
+}
+
+class _AuthFieldState extends State<_AuthField> {
+  late bool _obscured;
+
+  @override
+  void initState() {
+    super.initState();
+    _obscured = widget.obscureText;
+  }
+
+  @override
   Widget build(BuildContext context) {
     return TextField(
-      controller: controller,
-      obscureText: obscureText,
-      keyboardType: keyboardType,
+      controller: widget.controller,
+      obscureText: _obscured,
+      keyboardType: widget.keyboardType,
       decoration: InputDecoration(
-        hintText: hint,
+        hintText: widget.hint,
         filled: true,
         fillColor: _inputFill(context),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+        suffixIcon: widget.obscureText
+            ? IconButton(
+                icon: Icon(
+                  _obscured ? Icons.visibility : Icons.visibility_off,
+                  size: 20,
+                ),
+                onPressed: () {
+                  setState(() {
+                    _obscured = !_obscured;
+                  });
+                },
+              )
+            : null,
       ),
     );
   }
@@ -607,7 +686,7 @@ class _NotificationBootstrapPageState extends State<NotificationBootstrapPage> {
         provisional: false,
       );
       await Permission.notification.request();
-      await AppwriteSubscriptionService().ensureSubscribed();
+      await FirebaseSubscriptionService().ensureSubscribed();
       await SocialEngagementService.instance.ensureProfile();
       await AdminAccessService.instance.syncFromBackend();
     } catch (error) {
@@ -677,7 +756,23 @@ class _NotificationBootstrapPageState extends State<NotificationBootstrapPage> {
       );
     }
 
-    return const PredictionFeedPage();
+    return AnimatedBuilder(
+      animation: Listenable.merge([
+        GooglePlayBillingService.instance,
+        AdminAccessService.instance,
+      ]),
+      builder: (context, _) {
+        final billing = GooglePlayBillingService.instance;
+        final isAdmin = AdminAccessService.instance.isAdmin;
+        final hasActivePlan = billing.activePlan != null || isAdmin;
+
+        if (!hasActivePlan) {
+          return const PremiumPaywallDialog(isMandatory: true);
+        }
+
+        return const PredictionFeedPage();
+      },
+    );
   }
 }
 
@@ -1055,6 +1150,7 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
                   ),
                   ChatPage(
                     hasAdFreeAccess: adFree || rewardedAdFree || isAdmin,
+                    isPremiumUser: activePlan == SubscriptionPlanId.premium || isAdmin,
                   ),
                   const ProfilesPage(),
                 ],
@@ -1245,6 +1341,21 @@ class _MainMenuPage extends StatelessWidget {
             ),
             _menuTile(
               context,
+              icon: Icons.support_agent_outlined,
+              title: 'Support',
+              subtitle: 'Contact customer support',
+              border: border,
+              textColor: primaryText,
+              onTap: () {
+                Navigator.of(context).pop();
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const SupportPage()),
+                );
+              },
+            ),
+            _menuTile(
+              context,
               icon: Icons.policy_outlined,
               title: 'Policy',
               subtitle: 'App policy and privacy',
@@ -1383,12 +1494,73 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
   String? _unlockingPickKey;
   String _searchQuery = '';
   _ConfidenceFilter _confidenceFilter = _ConfidenceFilter.all;
+  String _selectedDateLabel = 'Today';
   bool _historyMode = false;
 
   @override
   void initState() {
     super.initState();
     _futurePredictions = _repository.fetchPublishedPredictions(includeHistory: _historyMode);
+    _loadUnlockedPickKeys();
+  }
+
+  Future<void> _loadUnlockedPickKeys() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final keys = prefs.getStringList('unlocked_pick_keys') ?? [];
+      if (mounted) {
+        setState(() {
+          _unlockedPickKeys.clear();
+          _unlockedPickKeys.addAll(keys);
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading unlocked pick keys: $e');
+    }
+  }
+
+  Future<void> _saveUnlockedPickKey(String key) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _unlockedPickKeys.add(key);
+      await prefs.setStringList('unlocked_pick_keys', _unlockedPickKeys.toList());
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      debugPrint('Error saving unlocked pick key: $e');
+    }
+  }
+
+  void _showLimitReachedDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Unlock Limit Reached'),
+        content: const Text(
+          'You have unlocked the maximum limit of 20 matches using ads. '
+          'To unlock more matches, please subscribe to our 7-Day Ad-Free plan.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Maybe Later'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  fullscreenDialog: true,
+                  builder: (_) => const PremiumPaywallDialog(),
+                ),
+              );
+            },
+            child: const Text('Subscribe'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _reload() async {
@@ -1426,49 +1598,17 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
   }
 
   bool _isPickUnlocked(String unlockKey) {
-    return widget.adFree || _unlockedPickKeys.contains(unlockKey);
+    return widget.adFree;
   }
 
   Future<void> _unlockPick(PredictionRecord prediction) async {
     if (widget.adFree) {
       return;
     }
-
-    final unlockKey = _predictionUnlockKey(prediction);
-    if (unlockKey.isEmpty || _unlockedPickKeys.contains(unlockKey)) {
-      return;
-    }
-
-    if (_unlockingPickKey == unlockKey) {
-      return;
-    }
-
-    setState(() {
-      _unlockingPickKey = unlockKey;
-    });
-
-    try {
-      final didUnlock = await AdGateService.instance.showRewardedAd();
-      if (!mounted) {
-        return;
-      }
-
-      if (didUnlock) {
-        setState(() {
-          _unlockedPickKeys.add(unlockKey);
-        });
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Ad not ready yet. Please try again.')),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _unlockingPickKey = null;
-        });
-      }
-    }
+    await showDialog<void>(
+      context: context,
+      builder: (context) => const PremiumPaywallDialog(),
+    );
   }
 
   bool _matchesFilter(PredictionRecord prediction) {
@@ -1743,6 +1883,12 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
                           !widget.adFree,
                           widget.isAdmin,
                           _handleAdminPlanOverride,
+                          _selectedDateLabel,
+                          (value) {
+                            setState(() {
+                              _selectedDateLabel = value;
+                            });
+                          },
                         ),
                       ),
                     ),
@@ -1762,7 +1908,9 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
 }
 
 class PremiumPaywallDialog extends StatefulWidget {
-  const PremiumPaywallDialog({super.key});
+  const PremiumPaywallDialog({super.key, this.isMandatory = false});
+
+  final bool isMandatory;
 
   @override
   State<PremiumPaywallDialog> createState() => _PremiumPaywallDialogState();
@@ -1783,10 +1931,20 @@ class _PremiumPaywallDialogState extends State<PremiumPaywallDialog> {
 
   void _onBillingChanged() {
     final billing = GooglePlayBillingService.instance;
+    if (billing.errorMessage != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(billing.errorMessage!),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      billing.clearError();
+    }
+
     final isAdmin = AdminAccessService.instance.isAdmin;
     final isPremium = billing.activePlan != null || isAdmin;
     if (isPremium) {
-      if (mounted) {
+      if (mounted && Navigator.of(context).canPop()) {
         Navigator.of(context).pop();
       }
     }
@@ -1805,22 +1963,24 @@ class _PremiumPaywallDialogState extends State<PremiumPaywallDialog> {
             adFree: adFree,
             isAdmin: isAdmin,
             currentPlans: billing.plans,
+            isMandatory: widget.isMandatory,
           ),
-          Positioned(
-            top: 16,
-            right: 16,
-            child: SafeArea(
-              child: ClipOval(
-                child: Material(
-                  color: Colors.black.withValues(alpha: 0.4),
-                  child: IconButton(
-                    icon: const Icon(Icons.close, color: Colors.white, size: 22),
-                    onPressed: () => Navigator.of(context).pop(),
+          if (!widget.isMandatory)
+            Positioned(
+              top: 16,
+              right: 16,
+              child: SafeArea(
+                child: ClipOval(
+                  child: Material(
+                    color: Colors.black.withValues(alpha: 0.4),
+                    child: IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white, size: 22),
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
         ],
       ),
     );
@@ -1833,11 +1993,13 @@ class PremiumPlanPage extends StatefulWidget {
     required this.adFree,
     required this.isAdmin,
     required this.currentPlans,
+    this.isMandatory = false,
   });
 
   final bool adFree;
   final bool isAdmin;
   final List<SubscriptionPlanId> currentPlans;
+  final bool isMandatory;
 
   @override
   State<PremiumPlanPage> createState() => _PremiumPlanPageState();
@@ -1856,6 +2018,26 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
     _selectedPlanOverride =
         GooglePlayBillingService.instance.activePlan ??
         SubscriptionPlanId.standard;
+    GooglePlayBillingService.instance.addListener(_onBillingChanged);
+  }
+
+  @override
+  void dispose() {
+    GooglePlayBillingService.instance.removeListener(_onBillingChanged);
+    super.dispose();
+  }
+
+  void _onBillingChanged() {
+    final billing = GooglePlayBillingService.instance;
+    if (billing.errorMessage != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(billing.errorMessage!),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      billing.clearError();
+    }
   }
 
   Future<void> _buyPlan(BuildContext context, SubscriptionPlanId plan) async {
@@ -2055,6 +2237,14 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
                                 ),
                               ),
                             ),
+                            if (widget.isMandatory)
+                              IconButton(
+                                tooltip: 'Log out',
+                                onPressed: () async {
+                                  await AppAuthService.instance.signOut();
+                                },
+                                icon: const Icon(Icons.logout, color: Colors.redAccent),
+                              ),
                           ],
                         ),
                         const SizedBox(height: 8),
@@ -4170,92 +4360,55 @@ List<Widget> _buildGroupedPredictionWidgets(
   bool showAds,
   bool isAdmin,
   Future<void> Function(PredictionRecord, String?, double?) onAdminPlanOverride,
+  String selectedDateLabel,
+  void Function(String label) onSelectDateLabel,
 ) {
   final sections = _groupPredictionsByDate(predictions);
   final widgets = <Widget>[];
   const horizontalPadding = EdgeInsets.symmetric(horizontal: 20);
 
-  for (var sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
-    final section = sections[sectionIndex];
-    final isTodaySection = section.label == 'Today';
-    final isExpanded =
-        isTodaySection || expandedSectionKeys.contains(section.keyValue);
-
-    if (sectionIndex > 0) {
-      widgets.add(const SizedBox(height: 20));
-    }
-
-    widgets.add(
-      Padding(
-        padding: horizontalPadding,
-        child: _DateSectionHeader(
-          label: section.label,
-          count: section.predictions.length,
-          isExpanded: isExpanded,
-          canToggle: !isTodaySection,
-          onTap: () => onToggleSection(section.keyValue),
-        ),
-      ),
-    );
-    if (!isExpanded) {
-      continue;
-    }
-
-    widgets.add(SizedBox(height: isTodaySection ? 8 : 12));
-
-    if (isTodaySection) {
-      widgets.addAll(
-        _buildTodayStatusWidgets(
-          section.predictions,
-          selectedTodayBucket,
-          onSelectTodayBucket,
-          isPickUnlocked,
-          onUnlockPick,
-          unlockingPickKey,
-          adFree,
-          isSelected,
-          onToggleSelection,
-          onOpenComments,
-          showAds,
-          isAdmin,
-          onAdminPlanOverride,
-        ),
-      );
-      continue;
-    }
-
-    for (var i = 0; i < section.predictions.length; i++) {
-      final prediction = section.predictions[i];
-      widgets.add(
-        Padding(
-          padding: horizontalPadding,
-            child: PredictionGroupCard(
-              prediction: prediction,
-              isLocked: !isPickUnlocked(_predictionUnlockKey(prediction)),
-              isUnlocking: unlockingPickKey == _predictionUnlockKey(prediction),
-              onUnlockPressed: () => onUnlockPick(prediction),
-              isSelected: isSelected(prediction),
-              canSelect:
-                  (adFree || isPickUnlocked(_predictionUnlockKey(prediction))) &&
-                  !_isFinishedPrediction(prediction, DateTime.now().toLocal()),
-              onSelectionPressed: () => onToggleSelection(prediction),
-              onOpenComments: () => onOpenComments(prediction),
-              isAdmin: isAdmin,
-              onAdminPlanOverride: isAdmin
-                  ? (plan, confidence) => onAdminPlanOverride(prediction, plan, confidence)
-                  : null,
-            ),
-          ),
-      );
-      if (i < section.predictions.length - 1) {
-        widgets.add(const SizedBox(height: 12));
-        if (showAds) {
-          widgets.add(const FeedBannerAd());
-        }
-        widgets.add(const SizedBox(height: 12));
-      }
+  // Find the predictions for the currently selected dropdown date
+  final dropdownPredictions = <PredictionRecord>[];
+  for (final section in sections) {
+    if (section.label == selectedDateLabel) {
+      dropdownPredictions.addAll(section.predictions);
     }
   }
+
+  widgets.add(
+    Padding(
+      padding: horizontalPadding,
+      child: _DateSectionHeader(
+        label: selectedDateLabel,
+        count: dropdownPredictions.length,
+        isExpanded: true,
+        canToggle: false,
+        onTap: () {},
+        selectedDropdownValue: selectedDateLabel,
+        onDropdownChanged: onSelectDateLabel,
+      ),
+    ),
+  );
+
+  widgets.add(const SizedBox(height: 8));
+
+  widgets.addAll(
+    _buildTodayStatusWidgets(
+      dropdownPredictions,
+      selectedTodayBucket,
+      onSelectTodayBucket,
+      isPickUnlocked,
+      onUnlockPick,
+      unlockingPickKey,
+      adFree,
+      isSelected,
+      onToggleSelection,
+      onOpenComments,
+      showAds,
+      isAdmin,
+      onAdminPlanOverride,
+    ),
+  );
 
   return widgets;
 }
@@ -5350,6 +5503,8 @@ class _DateSectionHeader extends StatelessWidget {
     required this.isExpanded,
     required this.canToggle,
     required this.onTap,
+    this.selectedDropdownValue,
+    this.onDropdownChanged,
   });
 
   final String label;
@@ -5357,6 +5512,8 @@ class _DateSectionHeader extends StatelessWidget {
   final bool isExpanded;
   final bool canToggle;
   final VoidCallback onTap;
+  final String? selectedDropdownValue;
+  final ValueChanged<String>? onDropdownChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -5364,6 +5521,8 @@ class _DateSectionHeader extends StatelessWidget {
     final border = _screenBorder(context);
     final primaryText = _primaryText(context);
     final accentText = _accentText(context);
+    final showDropdown = selectedDropdownValue != null && onDropdownChanged != null;
+
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 2),
@@ -5390,16 +5549,47 @@ class _DateSectionHeader extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                      color: primaryText,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
+                if (showDropdown)
+                  PopupMenuButton<String>(
+                    initialValue: selectedDropdownValue,
+                    onSelected: onDropdownChanged,
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(value: 'Yesterday', child: Text('Yesterday')),
+                      const PopupMenuItem(value: 'Today', child: Text('Today')),
+                      const PopupMenuItem(value: 'Tomorrow', child: Text('Tomorrow')),
+                    ],
+                    style: const ButtonStyle(
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      padding: WidgetStatePropertyAll(EdgeInsets.zero),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          selectedDropdownValue!,
+                          style: TextStyle(
+                            color: primaryText,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(width: 2),
+                        Icon(Icons.arrow_drop_down, color: accentText, size: 28),
+                      ],
+                    ),
+                  )
+                else
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: TextStyle(
+                        color: primaryText,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
-                ),
+                if (showDropdown) const Spacer(),
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 10,
@@ -5451,6 +5641,7 @@ class PredictionGroupCard extends StatefulWidget {
     this.isPopular,
     this.isAdmin = false,
     this.onAdminPlanOverride,
+    this.forPlans = false,
   });
 
   final PredictionRecord prediction;
@@ -5464,6 +5655,7 @@ class PredictionGroupCard extends StatefulWidget {
   final bool? isPopular;
   final bool isAdmin;
   final Future<void> Function(String? plan, double? confidence)? onAdminPlanOverride;
+  final bool forPlans;
 
   @override
   State<PredictionGroupCard> createState() => _PredictionGroupCardState();
@@ -5545,7 +5737,7 @@ class _PredictionGroupCardState extends State<PredictionGroupCard> {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(20),
         color: cardColor,
         border: Border.all(color: cardBorder, width: verdict != _PickVerdict.pending || isSelected || popular ? 1.5 : 1.0),
         boxShadow: [
@@ -5570,7 +5762,7 @@ class _PredictionGroupCardState extends State<PredictionGroupCard> {
       child: Stack(
         children: [
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -5587,10 +5779,11 @@ class _PredictionGroupCardState extends State<PredictionGroupCard> {
                   ),
                   confidenceLabel: _confidenceBadgeLabel(prediction),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     _MetaChip(
                       icon: Icons.schedule,
@@ -5604,6 +5797,7 @@ class _PredictionGroupCardState extends State<PredictionGroupCard> {
                       iconColor: _liveMatchTimeStatusLabel(prediction).startsWith('Live') ? Colors.redAccent : Colors.orangeAccent,
                       label: _liveMatchTimeStatusLabel(prediction),
                     ),
+                    _StatusChip(label: _confidenceBadgeLabel(prediction)),
                   ],
                 ),
                 AnimatedSize(
@@ -5615,7 +5809,7 @@ class _PredictionGroupCardState extends State<PredictionGroupCard> {
                           onTap: () => setState(() => _isExpanded = true),
                           borderRadius: BorderRadius.circular(12),
                           child: Padding(
-                            padding: const EdgeInsets.only(top: 14, bottom: 4),
+                            padding: const EdgeInsets.only(top: 10, bottom: 4),
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
@@ -5640,14 +5834,16 @@ class _PredictionGroupCardState extends State<PredictionGroupCard> {
                       : Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const SizedBox(height: 12),
-                            if (prediction.predictedWinner != null) ...[
+                            const SizedBox(height: 10),
+                            if (prediction.predictedWinner != null &&
+                                prediction.predictedWinner!.trim().isNotEmpty &&
+                                prediction.predictedWinner!.trim().toUpperCase() != 'TBD') ...[
                               _MetaChip(
                                 icon: Icons.flag,
                                 iconColor: const Color(0xFF00D4AA),
                                 label: prediction.predictedWinner!,
                               ),
-                              const SizedBox(height: 12),
+                              const SizedBox(height: 10),
                             ],
                             AnimatedSwitcher(
                               duration: const Duration(milliseconds: 220),
@@ -5660,37 +5856,9 @@ class _PredictionGroupCardState extends State<PredictionGroupCard> {
                                   : _PickCard(
                                       key: const ValueKey('unlocked'),
                                       data: primaryPick,
+                                      showReason: widget.forPlans,
                                     ),
                             ),
-                            if (canSelect && !_isFinishedPrediction(prediction, DateTime.now().toLocal())) ...[
-                              const SizedBox(height: 12),
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: FilledButton.tonalIcon(
-                                  onPressed: onSelectionPressed,
-                                  style: FilledButton.styleFrom(
-                                    backgroundColor: isSelected
-                                        ? const Color(0xFF00D4AA).withAlpha(35)
-                                        : null,
-                                    foregroundColor: isSelected
-                                        ? const Color(0xFF00D4AA)
-                                        : null,
-                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                  ),
-                                  icon: Icon(
-                                    isSelected ? Icons.check_circle : Icons.add_circle_outline,
-                                    size: 18,
-                                  ),
-                                  label: Text(
-                                    isSelected ? 'Selected' : 'Select Match',
-                                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-                                  ),
-                                ),
-                              ),
-                            ],
                             if (!isLocked && onOpenComments != null) ...[
                               const SizedBox(height: 14),
                               _PredictionSocialSection(
@@ -5706,31 +5874,62 @@ class _PredictionGroupCardState extends State<PredictionGroupCard> {
                               ),
                             ],
                             const SizedBox(height: 12),
-                            InkWell(
-                              onTap: () => setState(() => _isExpanded = false),
-                              borderRadius: BorderRadius.circular(12),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 8),
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Text(
-                                      'Collapse details',
-                                      style: TextStyle(
-                                        color: _secondaryText(context),
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 12,
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                InkWell(
+                                  onTap: () => setState(() => _isExpanded = false),
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          'Collapse details',
+                                          style: TextStyle(
+                                            color: _secondaryText(context),
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Icon(
+                                          Icons.keyboard_arrow_up,
+                                          color: _secondaryText(context),
+                                          size: 16,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                if (canSelect && !_isFinishedPrediction(prediction, DateTime.now().toLocal()))
+                                  FilledButton.tonalIcon(
+                                    onPressed: onSelectionPressed,
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: isSelected
+                                          ? const Color(0xFF00D4AA).withAlpha(35)
+                                          : null,
+                                      foregroundColor: isSelected
+                                          ? const Color(0xFF00D4AA)
+                                          : null,
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                      minimumSize: Size.zero,
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(10),
                                       ),
                                     ),
-                                    const SizedBox(width: 4),
-                                    Icon(
-                                      Icons.keyboard_arrow_up,
-                                      color: _secondaryText(context),
+                                    icon: Icon(
+                                      isSelected ? Icons.check_circle : Icons.add_circle_outline,
                                       size: 16,
                                     ),
-                                  ],
-                                ),
-                              ),
+                                    label: Text(
+                                      isSelected ? 'Selected' : 'Select Match',
+                                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+                                    ),
+                                  ),
+                              ],
                             ),
                           ],
                         ),
@@ -6396,10 +6595,9 @@ class _MatchHeader extends StatelessWidget {
                   ],
                 ),
               ),
-              _StatusChip(label: confidenceLabel),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
         ],
         Row(
           crossAxisAlignment: CrossAxisAlignment.center,
@@ -6410,14 +6608,33 @@ class _MatchHeader extends StatelessWidget {
                 logoUrl: prediction.homeTeamLogoUrl,
                 teamName: prediction.homeTeamName,
                 isHome: true,
-                scoreText: homeScore,
+                scoreText: null,
               ),
             ),
+            if (homeScore != null) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: _screenBorder(context).withAlpha(100)),
+                ),
+                child: Text(
+                  homeScore!,
+                  style: TextStyle(
+                    color: _primaryText(context),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               child: Container(
-                width: 42,
-                height: 42,
+                width: 36,
+                height: 36,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: RadialGradient(
@@ -6437,8 +6654,8 @@ class _MatchHeader extends StatelessWidget {
                       color: isPopular
                           ? const Color(0xFFFF6D00).withAlpha(35)
                           : const Color(0xFF00D4AA).withAlpha(25),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
                     ),
                   ],
                 ),
@@ -6447,50 +6664,54 @@ class _MatchHeader extends StatelessWidget {
                     'VS',
                     style: TextStyle(
                       color: isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A),
-                      fontSize: 14,
+                      fontSize: 12,
                       fontWeight: FontWeight.w900,
                       letterSpacing: 0.8,
-                      shadows: [
-                        Shadow(
-                          color: isPopular
-                              ? const Color(0xFFFF6D00).withAlpha(40)
-                              : const Color(0xFF00D4AA).withAlpha(40),
-                          blurRadius: 6,
-                          offset: const Offset(0, 1),
-                        ),
-                      ],
                     ),
                   ),
                 ),
               ),
             ),
+            if (awayScore != null) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: _screenBorder(context).withAlpha(100)),
+                ),
+                child: Text(
+                  awayScore!,
+                  style: TextStyle(
+                    color: _primaryText(context),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+            ],
             Expanded(
               child: _teamBadge(
                 context: context,
                 logoUrl: prediction.awayTeamLogoUrl,
                 teamName: prediction.awayTeamName,
                 isHome: false,
-                scoreText: awayScore,
+                scoreText: null,
               ),
             ),
           ],
         ),
-        if (!isPopular) ...[
-          const SizedBox(height: 12),
-          Align(
-            alignment: Alignment.centerRight,
-            child: _StatusChip(label: confidenceLabel),
-          ),
-        ],
       ],
     );
   }
 }
 
 class _PickCard extends StatelessWidget {
-  const _PickCard({super.key, required this.data});
+  const _PickCard({super.key, required this.data, this.showReason = false});
 
   final _PickCardData data;
+  final bool showReason;
 
   @override
   Widget build(BuildContext context) {
@@ -6554,7 +6775,7 @@ class _PickCard extends StatelessWidget {
                           fontWeight: FontWeight.w900,
                         ),
                       ),
-                      if (data.reason != null && data.reason!.trim().isNotEmpty) ...[
+                      if (showReason && data.reason != null && data.reason!.trim().isNotEmpty) ...[
                         const SizedBox(height: 8),
                         Text(
                           data.reason!,
@@ -6601,9 +6822,9 @@ class _LockedPickGate extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         gradient: LinearGradient(
           colors: cardBg,
           begin: Alignment.topLeft,
@@ -6615,7 +6836,7 @@ class _LockedPickGate extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
               color: const Color(0xFF00D4AA).withAlpha(15),
               shape: BoxShape.circle,
@@ -6624,31 +6845,31 @@ class _LockedPickGate extends StatelessWidget {
             child: const Icon(
               Icons.lock_person,
               color: Color(0xFF00D4AA),
-              size: 28,
+              size: 20,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           Text(
             'PREDICTION LOCKED',
             style: TextStyle(
               color: primaryText,
-              fontSize: 14,
+              fontSize: 12,
               fontWeight: FontWeight.w900,
               letterSpacing: 0.8,
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 4),
           Text(
             'Unlock this primary pick by watching a quick sponsor video.',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: secondaryText,
-              fontSize: 12,
+              fontSize: 11,
               fontWeight: FontWeight.w600,
-              height: 1.4,
+              height: 1.3,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 10),
           SizedBox(
             width: double.infinity,
             child: FilledButton(
@@ -6656,19 +6877,19 @@ class _LockedPickGate extends StatelessWidget {
               style: FilledButton.styleFrom(
                 backgroundColor: const Color(0xFF00D4AA),
                 foregroundColor: const Color(0xFF0A0F1E),
-                elevation: 4,
+                elevation: 3,
                 shadowColor: const Color(0xFF00D4AA).withAlpha(60),
-                padding: const EdgeInsets.symmetric(vertical: 14),
+                padding: const EdgeInsets.symmetric(vertical: 10),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(10),
                 ),
               ),
               child: isUnlocking
                   ? const SizedBox(
-                      height: 18,
-                      width: 18,
+                      height: 16,
+                      width: 16,
                       child: CircularProgressIndicator(
-                        strokeWidth: 2.5,
+                        strokeWidth: 2.0,
                         valueColor: AlwaysStoppedAnimation<Color>(
                           Color(0xFF0A0F1E),
                         ),
@@ -6677,11 +6898,11 @@ class _LockedPickGate extends StatelessWidget {
                   : const Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.play_circle_fill, size: 18, color: Color(0xFF0A0F1D)),
-                        SizedBox(width: 8),
+                        Icon(Icons.play_circle_fill, size: 16, color: Color(0xFF0A0F1D)),
+                        SizedBox(width: 6),
                         Text(
                           'Watch Ad to Unlock',
-                          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13),
+                          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 12),
                         ),
                       ],
                     ),
@@ -6992,10 +7213,11 @@ class _StatusChip extends StatelessWidget {
         ? const Color(0xFFB8D5FF)
         : const Color(0xFF4D647A);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: surface,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: labelColor.withAlpha(50)),
       ),
       child: Text(
         label.toUpperCase(),
@@ -7794,10 +8016,73 @@ class _PopularMatchesPageState extends State<PopularMatchesPage> {
   final Set<String> _unlockedPickKeys = <String>{};
   String? _unlockingPickKey;
 
+  @override
+  void initState() {
+    super.initState();
+    _loadUnlockedPickKeys();
+  }
+
+  Future<void> _loadUnlockedPickKeys() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final keys = prefs.getStringList('unlocked_pick_keys') ?? [];
+      if (mounted) {
+        setState(() {
+          _unlockedPickKeys.clear();
+          _unlockedPickKeys.addAll(keys);
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading unlocked pick keys: $e');
+    }
+  }
+
+  Future<void> _saveUnlockedPickKey(String key) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _unlockedPickKeys.add(key);
+      await prefs.setStringList('unlocked_pick_keys', _unlockedPickKeys.toList());
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      debugPrint('Error saving unlocked pick key: $e');
+    }
+  }
+
+  void _showLimitReachedDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Unlock Limit Reached'),
+        content: const Text(
+          'You have unlocked the maximum limit of 20 matches using ads. '
+          'To unlock more matches, please subscribe to our 7-Day Ad-Free plan.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Maybe Later'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  fullscreenDialog: true,
+                  builder: (_) => const PremiumPaywallDialog(),
+                ),
+              );
+            },
+            child: const Text('Subscribe'),
+          ),
+        ],
+      ),
+    );
+  }
+
   bool _isPickUnlocked(PredictionRecord prediction) {
     if (widget.adFree) return true;
-    final unlockKey = _predictionUnlockKey(prediction);
-    if (_unlockedPickKeys.contains(unlockKey)) return true;
     // Check subscription plan access
     final activePlan = GooglePlayBillingService.instance.activePlan;
     if (activePlan != null && _predictionMatchesPlan(prediction, activePlan)) {
@@ -7808,33 +8093,10 @@ class _PopularMatchesPageState extends State<PopularMatchesPage> {
 
   Future<void> _unlockPick(PredictionRecord prediction) async {
     if (widget.adFree) return;
-    final unlockKey = _predictionUnlockKey(prediction);
-    if (unlockKey.isEmpty || _unlockedPickKeys.contains(unlockKey)) return;
-    if (_unlockingPickKey == unlockKey) return;
-
-    setState(() {
-      _unlockingPickKey = unlockKey;
-    });
-
-    try {
-      final didUnlock = await AdGateService.instance.showRewardedAd();
-      if (!mounted) return;
-      if (didUnlock) {
-        setState(() {
-          _unlockedPickKeys.add(unlockKey);
-        });
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Ad not ready yet. Please try again.')),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _unlockingPickKey = null;
-        });
-      }
-    }
+    await showDialog<void>(
+      context: context,
+      builder: (context) => const PremiumPaywallDialog(),
+    );
   }
 
   Future<void> _openComments(PredictionRecord prediction) {

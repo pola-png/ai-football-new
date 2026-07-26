@@ -1,9 +1,9 @@
-import 'package:appwrite/appwrite.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_auth_service.dart';
-import 'appwrite_config.dart';
+import 'firebase_config.dart';
 
 class AdminAccessService extends ChangeNotifier {
   AdminAccessService._();
@@ -16,8 +16,16 @@ class AdminAccessService extends ChangeNotifier {
   SharedPreferences? _preferences;
   bool _initialized = false;
   bool _isAdmin = false;
+  bool _simulateUserMode = false;
 
-  bool get isAdmin => _isAdmin;
+  bool get isAdmin => _isAdmin && !_simulateUserMode;
+  bool get isActuallyAdmin => _isAdmin;
+  bool get simulateUserMode => _simulateUserMode;
+
+  Future<void> toggleUserMode() async {
+    _simulateUserMode = !_simulateUserMode;
+    notifyListeners();
+  }
 
   Future<void> initialize() async {
     if (_initialized) {
@@ -47,14 +55,12 @@ class AdminAccessService extends ChangeNotifier {
     }
 
     try {
-      final tables = TablesDB(AppAuthService.instance.client);
-      final row = await tables.getRow(
-        databaseId: appwriteDatabaseId,
-        tableId: appwriteUserProfilesTableId,
-        rowId: user.id,
-      );
+      final doc = await FirebaseFirestore.instance
+          .collection(firebaseUserProfilesCollection)
+          .doc(user.id)
+          .get();
 
-      final backendIsAdmin = _asBool(row.data['is_admin']);
+      final backendIsAdmin = doc.exists && _asBool(doc.data()?['is_admin']);
 
       _isAdmin = backendIsAdmin;
       await _preferences?.setBool(_adminAccessKey, backendIsAdmin);
@@ -82,6 +88,7 @@ class AdminAccessService extends ChangeNotifier {
 
   Future<void> revoke() async {
     _isAdmin = false;
+    _simulateUserMode = false;
     await _preferences?.setBool(_adminAccessKey, false);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       notifyListeners();

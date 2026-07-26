@@ -11,7 +11,7 @@ class PushNotificationService {
       FlutterLocalNotificationsPlugin();
 
   static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
-    'appwrite_predictions',
+    'football_predictions',
     'Prediction notifications',
     description: 'Notifications for published football predictions.',
     importance: Importance.high,

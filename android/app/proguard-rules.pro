@@ -22,3 +22,21 @@
 # Keep Play Core classes
 -keep class com.google.android.play.core.** { *; }
 -dontwarn com.google.android.play.core.**
+
+# Google Play Billing Library rules
+-keep class com.android.billingclient.** { *; }
+-dontwarn com.android.billingclient.**
+
+# Keep classes for flutter_local_notifications (GSON / dexterous)
+-keepattributes InnerClasses
+-keepattributes Signature
+-keepattributes *Annotation*
+-dontwarn sun.misc.**
+-keep class * extends com.google.gson.TypeAdapter
+-keep class * implements com.google.gson.TypeAdapterFactory
+-keep class * implements com.google.gson.JsonSerializer
+-keep class * implements com.google.gson.JsonDeserializer
+-keepclassmembers,allowobfuscation class * {
+  @com.google.gson.annotations.SerializedName <fields>;
+}
+-keep class com.dexterous.** { *; }

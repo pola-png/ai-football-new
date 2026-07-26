@@ -1,11 +1,5 @@
-import 'dart:convert';
-
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
-import 'package:appwrite/appwrite.dart' as appwrite;
-import 'package:appwrite/enums.dart' as appwrite_enums;
-
-import 'app_auth_service.dart';
-import 'appwrite_config.dart';
 
 class AdminNotificationService {
   AdminNotificationService._();
@@ -13,8 +7,7 @@ class AdminNotificationService {
   static final AdminNotificationService instance =
       AdminNotificationService._();
 
-  late final appwrite.Functions _functions =
-      appwrite.Functions(AppAuthService.instance.client);
+  final FirebaseFunctions _functions = FirebaseFunctions.instance;
 
   Future<void> sendNotification({
     required String title,
@@ -28,18 +21,10 @@ class AdminNotificationService {
     };
 
     try {
-      final execution = await _functions.createExecution(
-        functionId: appwriteAdminNotificationFunctionId,
-        method: appwrite_enums.ExecutionMethod.pOST,
-        body: jsonEncode(payload),
-      );
+      final result = await _functions.httpsCallable('adminSendNotification').call(payload);
 
       debugPrint(
-        'Admin notification execution started: '
-        'id=${execution.$id}, status=${execution.status.value}, '
-        'responseStatus=${execution.responseStatusCode}, '
-        'responseBody=${execution.responseBody}, '
-        'errors=${execution.errors}, logs=${execution.logs}',
+        'Admin notification call complete. Status: ${result.data}',
       );
     } catch (error) {
       debugPrint('Admin notification execution failed: $error');

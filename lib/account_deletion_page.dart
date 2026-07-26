@@ -1,4 +1,4 @@
-import 'package:appwrite/appwrite.dart' as appwrite;
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 
 import 'account_deletion_service.dart';
@@ -74,11 +74,10 @@ class _AccountDeletionPageState extends State<AccountDeletionPage> {
   }
 
   String _formatError(Object error) {
-    if (error is appwrite.AppwriteException) {
+    if (error is FirebaseException) {
       final details = <String>[
-        if (error.type != null && error.type!.isNotEmpty) error.type!,
+        if (error.code.isNotEmpty) error.code,
         if (error.message != null && error.message!.isNotEmpty) error.message!,
-        if (error.code != null) 'Code ${error.code}',
       ];
       if (details.isNotEmpty) {
         return details.join(' - ');
@@ -143,7 +142,7 @@ class _AccountDeletionPageState extends State<AccountDeletionPage> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  _bullet('Appwrite auth account'),
+                  _bullet('Firebase auth account'),
                   _bullet('Profile row in `user_profiles`'),
                   _bullet('Comments, selections, check-ins, and challenge entries'),
                   _bullet('Signed-in session on this device'),

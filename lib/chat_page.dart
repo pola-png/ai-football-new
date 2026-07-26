@@ -1,17 +1,20 @@
 import 'package:flutter/material.dart';
 
 import 'ad_gate_service.dart';
-import 'appwrite_config.dart';
+import 'firebase_config.dart';
 import 'feed_banner_ad.dart';
 import 'social_engagement_service.dart';
+import 'main.dart';
 
 class ChatPage extends StatefulWidget {
   const ChatPage({
     super.key,
     required this.hasAdFreeAccess,
+    required this.isPremiumUser,
   });
 
   final bool hasAdFreeAccess;
+  final bool isPremiumUser;
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -34,8 +37,8 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<_ChatMeta> _loadChatMeta() async {
     final results = await Future.wait([
-      SocialEngagementService.instance.fetchChatLikeCounts(roomId: appwriteChatRoomId),
-      SocialEngagementService.instance.fetchMyLikedChatMessageIds(roomId: appwriteChatRoomId),
+      SocialEngagementService.instance.fetchChatLikeCounts(roomId: firebaseChatRoomId),
+      SocialEngagementService.instance.fetchMyLikedChatMessageIds(roomId: firebaseChatRoomId),
     ]);
 
     return _ChatMeta(
@@ -61,6 +64,43 @@ class _ChatPageState extends State<ChatPage> {
     super.dispose();
   }
 
+  bool _containsContactInfo(String text) {
+    final emailRegex = RegExp(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,4}');
+    final urlRegex = RegExp(
+      r'(https?:\/\/)?(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)',
+      caseSensitive: false,
+    );
+    final phoneRegex = RegExp(r'\+?\b\d[\d\s-]{6,}\d\b');
+    final keywords = [
+      'whatsapp', 'telegram', 'instagram', 'snapchat', 'facebook', 'twitter', 'tiktok',
+      'contact me', 'text me', 'dm me', 'call me', 'reach me', 'email me', 'mail me', 'my number', 'phone number'
+    ];
+
+    if (emailRegex.hasMatch(text) || urlRegex.hasMatch(text)) {
+      return true;
+    }
+
+    for (final match in phoneRegex.allMatches(text)) {
+      final value = match.group(0) ?? '';
+      final digits = value.replaceAll(RegExp(r'\D'), '');
+      if (digits.length >= 8) {
+        final dateRegex = RegExp(r'\d{4}[-\s]\d{2}[-\s]\d{2}');
+        if (!dateRegex.hasMatch(value)) {
+          return true;
+        }
+      }
+    }
+
+    final lowerText = text.toLowerCase();
+    for (final keyword in keywords) {
+      if (lowerText.contains(keyword)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   Future<void> _sendMessage() async {
     if (_sending) {
       return;
@@ -70,6 +110,15 @@ class _ChatPageState extends State<ChatPage> {
     if (text.isEmpty && _attachedPick == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Write a message or attach a pick.')),
+      );
+      return;
+    }
+
+    if (!widget.isPremiumUser && _containsContactInfo(text)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Sharing links, emails, numbers, or social handles is a Premium feature. Please upgrade your plan.'),
+        ),
       );
       return;
     }
@@ -86,7 +135,7 @@ class _ChatPageState extends State<ChatPage> {
           : text;
 
       await SocialEngagementService.instance.sendChatMessage(
-        roomId: appwriteChatRoomId,
+        roomId: firebaseChatRoomId,
         message: messageText,
         parentMessageId: _replyingToMessageId,
         selectionFixtureApiId: selectionFixtureApiId,
@@ -104,9 +153,6 @@ class _ChatPageState extends State<ChatPage> {
         _attachedPick = null;
       });
       _reloadChatMeta();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Message posted.')),
-      );
     } catch (error) {
       if (!mounted) {
         return;
@@ -134,7 +180,7 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _toggleLike(ChatMessageRecord message) async {
     try {
       await SocialEngagementService.instance.toggleChatLike(
-        roomId: appwriteChatRoomId,
+        roomId: firebaseChatRoomId,
         messageId: message.id,
       );
       _reloadChatMeta();
@@ -210,16 +256,11 @@ class _ChatPageState extends State<ChatPage> {
     }
 
     if (!widget.hasAdFreeAccess) {
-      final unlocked = await AdGateService.instance.showRewardedAd();
-      if (!unlocked) {
-        if (!mounted) {
-          return;
-        }
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Watch a rewarded ad to share a pick.')),
-        );
-        return;
-      }
+      showDialog<void>(
+        context: context,
+        builder: (context) => const PremiumPaywallDialog(),
+      );
+      return;
     }
 
     setState(() {
@@ -301,7 +342,7 @@ class _ChatPageState extends State<ChatPage> {
                     likedMessageIds: <String>{},
                   );
                   return StreamBuilder<List<ChatMessageRecord>>(
-                    stream: SocialEngagementService.instance.watchChatMessages(roomId: appwriteChatRoomId),
+                    stream: SocialEngagementService.instance.watchChatMessages(roomId: firebaseChatRoomId),
                     builder: (context, snapshot) {
                       final messages = snapshot.data ?? const <ChatMessageRecord>[];
                       final rootMessages = messages
@@ -518,12 +559,40 @@ class _ChatMessageCardShellState extends State<_ChatMessageCardShell> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        message.userName,
-                        style: TextStyle(
-                          color: primaryText,
-                          fontWeight: FontWeight.w800,
-                        ),
+                      Row(
+                        children: [
+                          Text(
+                            message.userName,
+                            style: TextStyle(
+                              color: message.isAdmin ? const Color(0xFF00D4AA) : primaryText,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          if (message.isAdmin) ...[
+                            const SizedBox(width: 4),
+                            const Icon(
+                              Icons.verified,
+                              color: Color(0xFF00D4AA),
+                              size: 14,
+                            ),
+                            const SizedBox(width: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF00D4AA).withAlpha(30),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text(
+                                'ADMIN',
+                                style: TextStyle(
+                                  color: Color(0xFF00D4AA),
+                                  fontSize: 8,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                       if (message.createdAt != null)
                         Text(
@@ -621,13 +690,41 @@ class _ChatMessageCardShellState extends State<_ChatMessageCardShell> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  reply.userName,
-                                  style: TextStyle(
-                                    color: primaryText,
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 12,
-                                  ),
+                                Row(
+                                  children: [
+                                    Text(
+                                      reply.userName,
+                                      style: TextStyle(
+                                        color: reply.isAdmin ? const Color(0xFF00D4AA) : primaryText,
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    if (reply.isAdmin) ...[
+                                      const SizedBox(width: 4),
+                                      const Icon(
+                                        Icons.verified,
+                                        color: Color(0xFF00D4AA),
+                                        size: 12,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF00D4AA).withAlpha(30),
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: const Text(
+                                          'ADMIN',
+                                          style: TextStyle(
+                                            color: Color(0xFF00D4AA),
+                                            fontSize: 7,
+                                            fontWeight: FontWeight.w900,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
                                 const SizedBox(height: 4),
                                 Text(

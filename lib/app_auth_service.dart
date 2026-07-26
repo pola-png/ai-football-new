@@ -1,8 +1,6 @@
-import 'package:appwrite/appwrite.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
-import 'appwrite_config.dart';
 
 class AppUserProfile {
   const AppUserProfile({
@@ -19,25 +17,20 @@ class AppUserProfile {
 class AppAuthService extends ChangeNotifier {
   AppAuthService._();
 
-  static final AppAuthService instance = AppAuthService._();
-
   static const String _sessionReadyKey = 'app_auth_session_ready';
 
-  final Client _client = Client();
-  Account? _account;
+  static final AppAuthService instance = AppAuthService._();
+
+  final FirebaseAuth _auth = FirebaseAuth.instance;
   SharedPreferences? _prefs;
   AppUserProfile? _currentUser;
   bool _initialized = false;
   bool _loading = false;
+  bool _authResolved = false;
 
   bool get isLoading => _loading;
   bool get isSignedIn => _currentUser != null;
   AppUserProfile? get currentUser => _currentUser;
-
-  Client get client {
-    _configureClient();
-    return _client;
-  }
 
   Future<void> initialize() async {
     if (_initialized) {
@@ -45,48 +38,55 @@ class AppAuthService extends ChangeNotifier {
     }
     _initialized = true;
     _prefs = await SharedPreferences.getInstance();
-    _configureClient();
-    await refreshSession();
-  }
 
-  void _configureClient() {
-    if (appwriteEndpoint.isNotEmpty && appwriteProjectId.isNotEmpty) {
-      _client.setEndpoint(appwriteEndpoint).setProject(appwriteProjectId);
+    // Resolve the persisted Firebase session before the UI decides which page to show.
+    User? initialUser;
+    try {
+      initialUser = await _auth.authStateChanges().first.timeout(
+        const Duration(seconds: 5),
+      );
+    } catch (_) {
+      initialUser = _auth.currentUser;
     }
-    _account ??= Account(_client);
-  }
 
-  Future<void> refreshSession() async {
-    _configureClient();
-    _loading = true;
+    await _applyUser(initialUser);
+    _authResolved = true;
     notifyListeners();
 
-    try {
-      final user = await _account!.get();
-      _currentUser = AppUserProfile(
-        id: user.$id,
-        email: user.email,
-        name: user.name.isNotEmpty ? user.name : user.email.split('@').first,
-      );
-      await _prefs?.setBool(_sessionReadyKey, true);
-    } catch (_) {
-      _currentUser = null;
-      await _prefs?.setBool(_sessionReadyKey, false);
-    } finally {
-      _loading = false;
+    // Keep listening for future sign-in/sign-out changes.
+    _auth.authStateChanges().listen((User? user) async {
+      _loading = true;
       notifyListeners();
+      await _applyUser(user);
+      _loading = false;
+      _authResolved = true;
+      notifyListeners();
+    });
+  }
+
+  bool get isAuthResolved => _authResolved;
+
+  Future<void> refreshSession() async {
+    final user = _auth.currentUser;
+    if (user != null) {
+      try {
+        await user.reload();
+      } catch (_) {
+        // user reload fail (e.g. user deleted or network issue)
+      }
     }
+    await _applyUser(_auth.currentUser);
+    notifyListeners();
   }
 
   Future<void> signIn({
     required String email,
     required String password,
   }) async {
-    _configureClient();
     _loading = true;
     notifyListeners();
     try {
-      await _account!.createEmailPasswordSession(
+      await _auth.signInWithEmailAndPassword(
         email: email.trim(),
         password: password,
       );
@@ -102,28 +102,20 @@ class AppAuthService extends ChangeNotifier {
     required String password,
     required String name,
   }) async {
-    _configureClient();
     _loading = true;
     notifyListeners();
     try {
-      await _account!.create(
-        userId: ID.unique(),
+      final credential = await _auth.createUserWithEmailAndPassword(
         email: email.trim(),
         password: password,
-        name: name.trim(),
       );
       
-      // Delay to allow Appwrite Cloud database replication/indexing to complete
-      await Future.delayed(const Duration(milliseconds: 1000));
-      
-      try {
-        await signIn(email: email, password: password);
-      } catch (e) {
-        // Retry one more time if replication takes slightly longer
-        debugPrint('Auto-login failed on first attempt, retrying: $e');
-        await Future.delayed(const Duration(milliseconds: 1500));
-        await signIn(email: email, password: password);
+      // Set display name in Firebase Auth
+      if (credential.user != null) {
+        await credential.user!.updateDisplayName(name.trim());
       }
+      
+      await refreshSession();
     } finally {
       _loading = false;
       notifyListeners();
@@ -131,18 +123,30 @@ class AppAuthService extends ChangeNotifier {
   }
 
   Future<void> signOut() async {
-    _configureClient();
     _loading = true;
     notifyListeners();
     try {
-      await _account!.deleteSession(sessionId: 'current');
-    } catch (_) {
-      // Ignore stale sessions.
+      await _auth.signOut();
     } finally {
       _currentUser = null;
       _loading = false;
+      _authResolved = true;
       await _prefs?.setBool(_sessionReadyKey, false);
       notifyListeners();
+    }
+  }
+
+  Future<void> _applyUser(User? user) async {
+    if (user != null) {
+      _currentUser = AppUserProfile(
+        id: user.uid,
+        email: user.email ?? '',
+        name: user.displayName ?? user.email?.split('@').first ?? '',
+      );
+      await _prefs?.setBool(_sessionReadyKey, true);
+    } else {
+      _currentUser = null;
+      await _prefs?.setBool(_sessionReadyKey, false);
     }
   }
 }

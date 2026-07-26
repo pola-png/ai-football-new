@@ -1,8 +1,9 @@
 import 'dart:async';
-import 'package:appwrite/appwrite.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'app_auth_service.dart';
-import 'appwrite_config.dart';
+import 'admin_access_service.dart';
+import 'firebase_config.dart';
 import 'prediction_repository.dart';
 
 class PredictionComment {
@@ -73,6 +74,7 @@ class ChatMessageRecord {
     required this.roomId,
     required this.userId,
     required this.userName,
+    required this.isAdmin,
     required this.message,
     required this.createdAt,
     required this.parentMessageId,
@@ -84,6 +86,7 @@ class ChatMessageRecord {
   final String roomId;
   final String userId;
   final String userName;
+  final bool isAdmin;
   final String message;
   final DateTime? createdAt;
   final String? parentMessageId;
@@ -122,18 +125,37 @@ class SocialEngagementService {
 
   static final SocialEngagementService instance = SocialEngagementService._();
 
-  final Client _client = AppAuthService.instance.client;
-  TablesDB? _tables;
-  Realtime? _realtime;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   bool get hasCurrentUser => AppAuthService.instance.currentUser != null;
 
-  TablesDB get _db => _tables ??= TablesDB(_client);
-  Realtime get _rt => _realtime ??= Realtime(_client);
-
   Future<void> initialize() async {
-    _tables ??= TablesDB(_client);
-    _realtime ??= Realtime(_client);
+    // Firestore is self-initializing in Flutter.
+  }
+
+  // Merges multiple streams into a single stream using standard Dart libraries
+  Stream<void> _mergeStreams(List<Stream<dynamic>> streams) {
+    final controller = StreamController<void>();
+    final subscriptions = <StreamSubscription<dynamic>>[];
+
+    void start() {
+      for (final stream in streams) {
+        final sub = stream.listen(
+          (_) => controller.add(null),
+          onError: controller.addError,
+        );
+        subscriptions.add(sub);
+      }
+    }
+
+    controller.onListen = start;
+    controller.onCancel = () async {
+      for (final sub in subscriptions) {
+        await sub.cancel();
+      }
+    };
+
+    return controller.stream;
   }
 
   Future<void> ensureProfile() async {
@@ -143,44 +165,28 @@ class SocialEngagementService {
     }
 
     final now = DateTime.now().toUtc().toIso8601String();
-    final existing = await _db.getRow(
-      databaseId: appwriteDatabaseId,
-      tableId: appwriteUserProfilesTableId,
-      rowId: user.id,
-    ).catchError((_) => null);
+    final docRef = _firestore.collection(firebaseUserProfilesCollection).doc(user.id);
+    DocumentSnapshot<Map<String, dynamic>>? docSnap;
+    try {
+      docSnap = await docRef.get();
+    } catch (_) {
+      docSnap = null;
+    }
 
+    final exists = docSnap != null && docSnap.exists;
     final data = <String, dynamic>{
       'user_name': user.name,
       'email': user.email,
-      'points': _asInt(existing?.data['points']),
-      'coins': _asInt(existing?.data['coins']),
-      'streak_days': _asString(existing?.data['streak_days']) ?? '0',
-      'last_checkin_at': existing?.data['last_checkin_at'],
-      'created_at': existing?.data['created_at'] ?? now,
+      'is_admin': exists ? _asBool(docSnap.data()?['is_admin']) : false,
+      'points': exists ? _asInt(docSnap.data()?['points']) : 0,
+      'coins': exists ? _asInt(docSnap.data()?['coins']) : 0,
+      'streak_days': exists ? (_asString(docSnap.data()?['streak_days']) ?? '0') : '0',
+      'last_checkin_at': exists ? (docSnap.data()?['last_checkin_at']) : null,
+      'created_at': exists ? (docSnap.data()?['created_at'] ?? now) : now,
       'updated_at': now,
     };
 
-    if (existing == null) {
-      await _db.createRow(
-        databaseId: appwriteDatabaseId,
-        tableId: appwriteUserProfilesTableId,
-        rowId: user.id,
-        data: data,
-        permissions: [
-          Permission.read(Role.user(user.id)),
-          Permission.update(Role.user(user.id)),
-          Permission.delete(Role.user(user.id)),
-        ],
-      );
-      return;
-    }
-
-    await _db.updateRow(
-      databaseId: appwriteDatabaseId,
-      tableId: appwriteUserProfilesTableId,
-      rowId: user.id,
-      data: data,
-    );
+    await docRef.set(data, SetOptions(merge: true));
   }
 
   Future<void> recordSelection({
@@ -193,111 +199,21 @@ class SocialEngagementService {
     }
 
     final rowId = '${fixtureApiId}_${user.id}';
+    final docRef = _firestore.collection(firebasePredictionSelectionsCollection).doc(rowId);
+
     if (selection.trim().isEmpty) {
-      await _db.deleteRow(
-        databaseId: appwriteDatabaseId,
-        tableId: appwritePredictionSelectionsTableId,
-        rowId: rowId,
-      ).catchError((_) {});
+      await docRef.delete();
       return;
     }
 
-    final now = DateTime.now().toUtc().toIso8601String();
-    await _db.createRow(
-      databaseId: appwriteDatabaseId,
-      tableId: appwritePredictionSelectionsTableId,
-      rowId: rowId,
-      data: {
-        'fixture_api_id': fixtureApiId,
-        'user_id': user.id,
-        'user_name': user.name,
-        'selection': selection,
-        'created_at': now,
-        'updated_at': now,
-      },
-    ).catchError((_) async {
-      await _db.updateRow(
-        databaseId: appwriteDatabaseId,
-        tableId: appwritePredictionSelectionsTableId,
-        rowId: rowId,
-        data: {
-          'selection': selection,
-          'updated_at': now,
-        },
-      );
+    await docRef.set({
+      'fixture_api_id': fixtureApiId,
+      'user_id': user.id,
+      'user_name': user.name,
+      'selection': selection.trim(),
+      'created_at': DateTime.now().toUtc().toIso8601String(),
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
     });
-  }
-
-  Future<Map<String, int>> fetchSelectionCounts(String fixtureApiId) async {
-    final rows = await _db.listRows(
-      databaseId: appwriteDatabaseId,
-      tableId: appwritePredictionSelectionsTableId,
-      queries: [
-        Query.equal('fixture_api_id', fixtureApiId),
-        Query.limit(200),
-      ],
-      total: false,
-    );
-
-    final counts = <String, int>{};
-    for (final row in rows.rows) {
-      final selection = _asString(row.data['selection'])?.trim();
-      if (selection == null || selection.isEmpty) {
-        continue;
-      }
-      counts[selection] = (counts[selection] ?? 0) + 1;
-    }
-    return counts;
-  }
-
-  Future<List<PredictionComment>> fetchComments(String fixtureApiId) async {
-    final rows = await _db.listRows(
-      databaseId: appwriteDatabaseId,
-      tableId: appwritePredictionCommentsTableId,
-      queries: [
-        Query.equal('fixture_api_id', fixtureApiId),
-        Query.orderDesc('created_at'),
-        Query.limit(50),
-      ],
-      total: false,
-    );
-
-    return rows.rows.map((row) {
-      return PredictionComment(
-        id: row.$id,
-        fixtureApiId: fixtureApiId,
-        userName: _asString(row.data['user_name']) ?? 'User',
-        message: _asString(row.data['message']) ?? '',
-        createdAt: DateTime.tryParse(_asString(row.data['created_at']) ?? ''),
-        selection: _asString(row.data['selection']),
-      );
-    }).toList();
-  }
-
-  Future<void> addComment({
-    required String fixtureApiId,
-    required String message,
-    String? selection,
-  }) async {
-    final user = AppAuthService.instance.currentUser;
-    if (user == null) {
-      return;
-    }
-
-    await _db.createRow(
-      databaseId: appwriteDatabaseId,
-      tableId: appwritePredictionCommentsTableId,
-      rowId: ID.unique(),
-      data: {
-        'fixture_api_id': fixtureApiId,
-        'user_id': user.id,
-        'user_name': user.name,
-        'message': message.trim(),
-        'selection': selection,
-        'created_at': DateTime.now().toUtc().toIso8601String(),
-        'updated_at': DateTime.now().toUtc().toIso8601String(),
-      },
-    );
   }
 
   Future<void> clearSelectedPicks() async {
@@ -306,45 +222,80 @@ class SocialEngagementService {
       return;
     }
 
-    final rows = await _listAllRowsHelper(
-      db: _db,
-      databaseId: appwriteDatabaseId,
-      tableId: appwritePredictionSelectionsTableId,
-      queries: [
-        Query.equal('user_id', user.id),
-      ],
-    );
+    final snapshot = await _firestore
+        .collection(firebasePredictionSelectionsCollection)
+        .where('user_id', isEqualTo: user.id)
+        .get();
 
-    for (final row in rows.rows) {
-      await _db.deleteRow(
-        databaseId: appwriteDatabaseId,
-        tableId: appwritePredictionSelectionsTableId,
-        rowId: row.$id,
-      ).catchError((_) {});
+    final batch = _firestore.batch();
+    for (final doc in snapshot.docs) {
+      batch.delete(doc.reference);
     }
+    await batch.commit();
   }
 
-  Future<List<LeaderboardEntry>> fetchLeaderboard() async {
-    final rows = await _db.listRows(
-      databaseId: appwriteDatabaseId,
-      tableId: appwriteUserProfilesTableId,
-      queries: [
-        Query.orderDesc('points'),
-        Query.orderDesc('coins'),
-        Query.limit(100),
-      ],
-      total: false,
-    );
+  Future<Map<String, int>> fetchSelectionCounts(String fixtureApiId) async {
+    final snapshot = await _firestore
+        .collection(firebasePredictionSelectionsCollection)
+        .where('fixture_api_id', isEqualTo: fixtureApiId)
+        .get();
 
-    return rows.rows.map((row) {
-      return LeaderboardEntry(
-        userId: _asString(row.data['user_id']) ?? row.$id,
-        userName: _asString(row.data['user_name']) ?? 'User',
-        points: _asInt(row.data['points']),
-        coins: _asInt(row.data['coins']),
-        streakDays: _asInt(row.data['streak_days']),
+    final counts = <String, int>{};
+    for (final doc in snapshot.docs) {
+      final sel = _asString(doc.data()['selection'])?.trim();
+      if (sel != null && sel.isNotEmpty) {
+        counts[sel] = (counts[sel] ?? 0) + 1;
+      }
+    }
+    return counts;
+  }
+
+  Future<List<PredictionComment>> fetchComments(String fixtureApiId) async {
+    final snapshot = await _firestore
+        .collection(firebasePredictionCommentsCollection)
+        .where('fixture_api_id', isEqualTo: fixtureApiId)
+        .get();
+
+    final comments = snapshot.docs.map((doc) {
+      final data = doc.data();
+      return PredictionComment(
+        id: doc.id,
+        fixtureApiId: _asString(data['fixture_api_id']) ?? fixtureApiId,
+        userName: _asString(data['user_name']) ?? 'User',
+        message: _asString(data['message']) ?? '',
+        createdAt: _asDateTime(data['created_at']),
+        selection: _asString(data['selection']),
       );
     }).toList();
+
+    comments.sort((a, b) {
+      final aTime = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final bTime = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return bTime.compareTo(aTime);
+    });
+
+    return comments;
+  }
+
+  Future<void> addComment({
+    required String fixtureApiId,
+    required String message,
+    String? selection,
+  }) async {
+    final user = AppAuthService.instance.currentUser;
+    if (user == null || message.trim().isEmpty) {
+      return;
+    }
+
+    await _firestore.collection(firebasePredictionCommentsCollection).add({
+      'fixture_api_id': fixtureApiId,
+      'user_id': user.id,
+      'user_name': user.name,
+      'message': message.trim(),
+      'selection': selection,
+      'created_at': DateTime.now().toUtc().toIso8601String(),
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    });
   }
 
   Future<void> checkInToday() async {
@@ -355,13 +306,23 @@ class SocialEngagementService {
 
     await ensureProfile();
 
-    final existing = await _db.getRow(
-      databaseId: appwriteDatabaseId,
-      tableId: appwriteUserProfilesTableId,
-      rowId: user.id,
-    ).catchError((_) => null);
-    final currentCoins = _asInt(existing?.data['coins']);
-    final currentStreak = _asInt(existing?.data['streak_days']);
+    final profileRef = _firestore.collection(firebaseUserProfilesCollection).doc(user.id);
+    DocumentSnapshot<Map<String, dynamic>>? profileSnap;
+    try {
+      profileSnap = await profileRef.get();
+    } catch (_) {
+      profileSnap = null;
+    }
+    
+    int currentCoins = 0;
+    int currentStreak = 0;
+    
+    if (profileSnap != null && profileSnap.exists) {
+      final profileData = profileSnap.data();
+      currentCoins = _asInt(profileData?['coins']);
+      currentStreak = _asInt(profileData?['streak_days']);
+    }
+
     final nextStreak = currentStreak <= 0 ? 1 : currentStreak + 1;
     final rewardCoins = switch (nextStreak) {
       1 => 10,
@@ -374,67 +335,73 @@ class SocialEngagementService {
     final dateKey = '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
     final checkInId = '${user.id}_$dateKey';
 
-    final alreadyCheckedIn = await _db.listRows(
-      databaseId: appwriteDatabaseId,
-      tableId: appwriteDailyCheckinsTableId,
-      queries: [
-        Query.equal('date_key', dateKey),
-        Query.equal('user_id', user.id),
-        Query.limit(1),
-      ],
-      total: false,
-    );
-    if (alreadyCheckedIn.rows.isNotEmpty) {
+    final checkinRef = _firestore.collection(firebaseDailyCheckinsCollection).doc(checkInId);
+    DocumentSnapshot<Map<String, dynamic>>? checkinSnap;
+    try {
+      checkinSnap = await checkinRef.get();
+    } catch (_) {
+      checkinSnap = null;
+    }
+    if (checkinSnap != null && checkinSnap.exists) {
       return;
     }
 
-    await _db.createRow(
-      databaseId: appwriteDatabaseId,
-      tableId: appwriteDailyCheckinsTableId,
-      rowId: checkInId,
-      data: {
+    final nowStr = today.toIso8601String();
+    try {
+      await checkinRef.set({
         'user_id': user.id,
         'date_key': dateKey,
         'reward_coins': rewardCoins,
-        'created_at': today.toIso8601String(),
-        'updated_at': today.toIso8601String(),
-      },
-    ).catchError((_) async {
+        'created_at': nowStr,
+        'updated_at': nowStr,
+      });
+    } catch (_) {
       // Already checked in.
-    });
+      return;
+    }
 
-    await _db.updateRow(
-      databaseId: appwriteDatabaseId,
-      tableId: appwriteUserProfilesTableId,
-      rowId: existing?.$id ?? user.id,
-      data: {
-        'coins': currentCoins + rewardCoins,
-        'streak_days': '$nextStreak',
-        'last_checkin_at': today.toIso8601String(),
-        'updated_at': today.toIso8601String(),
-      },
-    ).catchError((_) async {});
+    await profileRef.update({
+      'coins': currentCoins + rewardCoins,
+      'streak_days': '$nextStreak',
+      'last_checkin_at': nowStr,
+      'updated_at': nowStr,
+    });
+  }
+
+  Future<List<LeaderboardEntry>> fetchLeaderboard() async {
+    final snapshot = await _firestore
+        .collection(firebaseUserProfilesCollection)
+        .orderBy('points', descending: true)
+        .limit(100)
+        .get();
+
+    return snapshot.docs.map((doc) {
+      final data = doc.data();
+      return LeaderboardEntry(
+        userId: doc.id,
+        userName: _asString(data['user_name']) ?? 'User',
+        points: _asInt(data['points']),
+        coins: _asInt(data['coins']),
+        streakDays: _asInt(data['streak_days']),
+      );
+    }).toList();
   }
 
   Future<List<PredictionChallenge>> fetchChallenges() async {
-    final rows = await _db.listRows(
-      databaseId: appwriteDatabaseId,
-      tableId: appwritePredictionChallengesTableId,
-      queries: [
-        Query.orderDesc('created_at'),
-        Query.limit(50),
-      ],
-      total: false,
-    );
+    final snapshot = await _firestore
+        .collection(firebasePredictionChallengesCollection)
+        .where('status', isEqualTo: 'open')
+        .get();
 
-    return rows.rows.map((row) {
+    return snapshot.docs.map((doc) {
+      final data = doc.data();
       return PredictionChallenge(
-        id: row.$id,
-        title: _asString(row.data['title']) ?? 'Challenge',
-        description: _asString(row.data['description']) ?? '',
-        targetCount: _asInt(row.data['target_count']),
-        rewardPoints: _asInt(row.data['reward_points']),
-        status: _asString(row.data['status']) ?? 'open',
+        id: doc.id,
+        title: _asString(data['title']) ?? '',
+        description: _asString(data['description']) ?? '',
+        targetCount: _asInt(data['target_count']),
+        rewardPoints: _asInt(data['reward_points']),
+        status: _asString(data['status']) ?? 'open',
       );
     }).toList();
   }
@@ -444,223 +411,131 @@ class SocialEngagementService {
     required String entryText,
   }) async {
     final user = AppAuthService.instance.currentUser;
-    if (user == null) {
+    if (user == null || entryText.trim().isEmpty) {
       return;
     }
 
-    final now = DateTime.now().toUtc().toIso8601String();
-    await _db.createRow(
-      databaseId: appwriteDatabaseId,
-      tableId: appwriteChallengeEntriesTableId,
-      rowId: ID.unique(),
-      data: {
-        'challenge_id': challengeId,
-        'user_id': user.id,
-        'user_name': user.name,
-        'entry_text': entryText.trim(),
-        'created_at': now,
-        'updated_at': now,
-      },
-    );
+    await _firestore.collection(firebaseChallengeEntriesCollection).add({
+      'challenge_id': challengeId,
+      'user_id': user.id,
+      'user_name': user.name,
+      'entry_text': entryText.trim(),
+      'created_at': DateTime.now().toUtc().toIso8601String(),
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    });
   }
 
-  Future<List<PickedMatchGroup>> fetchPickedMatchesByDate() async {
-    final user = AppAuthService.instance.currentUser;
-    if (user == null) {
-      return const [];
-    }
+  Future<List<Map<String, dynamic>>> fetchChallengeEntries(String challengeId) async {
+    final snapshot = await _firestore
+        .collection(firebaseChallengeEntriesCollection)
+        .where('challenge_id', isEqualTo: challengeId)
+        .get();
 
-    final selectedRows = await _listAllRowsHelper(
-      db: _db,
-      databaseId: appwriteDatabaseId,
-      tableId: appwritePredictionSelectionsTableId,
-      queries: [
-        Query.equal('user_id', user.id),
-        Query.orderDesc('created_at'),
-      ],
-    );
-
-    final activeSelections = selectedRows.rows.where((row) {
-      final selection = _asString(row.data['selection'])?.trim() ?? '';
-      return selection.isNotEmpty;
+    return snapshot.docs.map((doc) {
+      return {
+        ...doc.data(),
+        r'$id': doc.id,
+      };
     }).toList();
-
-    if (activeSelections.isEmpty) {
-      return const [];
-    }
-
-    final publishedPredictions = await PredictionRepository(client: _client)
-        .fetchPublishedPredictions(includeHistory: true);
-    final predictionByFixture = {
-      for (final prediction in publishedPredictions) prediction.fixtureApiId: prediction,
-    };
-
-    final grouped = <String, _PickedMatchGroupBuilder>{};
-    for (final row in activeSelections) {
-      final fixtureApiId = _asString(row.data['fixture_api_id'])?.trim() ?? '';
-      if (fixtureApiId.isEmpty) {
-        continue;
-      }
-
-      final prediction = predictionByFixture[fixtureApiId];
-      if (prediction == null) {
-        continue;
-      }
-
-      final selectedAt = DateTime.tryParse(_asString(row.data['created_at']) ?? '');
-      final groupDate = (prediction.kickoffAt ?? selectedAt ?? DateTime.now()).toLocal();
-      final dateKey = _dateOnlyKey(groupDate);
-      grouped.putIfAbsent(
-        dateKey,
-        () => _PickedMatchGroupBuilder(date: _dateOnly(groupDate)),
-      ).picks.add(
-        PickedMatchRecord(
-          selectionRowId: row.$id,
-          selectedAt: selectedAt,
-          selection: _asString(row.data['selection'])?.trim() ?? '',
-          prediction: prediction,
-        ),
-      );
-    }
-
-    final groups = grouped.values.toList()
-      ..sort((left, right) => right.date.compareTo(left.date));
-
-    return groups
-        .map((group) => PickedMatchGroup(
-              date: group.date,
-              label: _formatPickedGroupLabel(group.date),
-              picks: List<PickedMatchRecord>.from(group.picks)
-                ..sort((left, right) {
-                  final leftKickoff = left.prediction.kickoffAt ?? left.selectedAt;
-                  final rightKickoff = right.prediction.kickoffAt ?? right.selectedAt;
-                  if (leftKickoff == null && rightKickoff == null) {
-                    return left.prediction.fixtureApiId.compareTo(right.prediction.fixtureApiId);
-                  }
-                  if (leftKickoff == null) return 1;
-                  if (rightKickoff == null) return -1;
-                  return leftKickoff.toUtc().compareTo(rightKickoff.toUtc());
-                }),
-            ))
-        .toList();
   }
 
-  Future<List<ChatMessageRecord>> fetchChatMessages({String roomId = appwriteChatRoomId}) async {
-    final rows = await _listAllRowsHelper(
-      db: _db,
-      databaseId: appwriteDatabaseId,
-      tableId: appwriteChatMessagesTableId,
-      queries: [
-        Query.equal('room_id', roomId),
-        Query.orderAsc('created_at'),
-      ],
-    );
+  Future<List<ChatMessageRecord>> fetchChatMessages({String roomId = firebaseChatRoomId}) async {
+    final snapshot = await _firestore
+        .collection(firebaseChatMessagesCollection)
+        .where('room_id', isEqualTo: roomId)
+        .get();
 
-    return rows.rows.map((row) {
+    final messages = snapshot.docs.map((doc) {
+      final data = doc.data();
       return ChatMessageRecord(
-        id: row.$id,
-        roomId: _asString(row.data['room_id']) ?? roomId,
-        userId: _asString(row.data['user_id']) ?? '',
-        userName: _asString(row.data['user_name']) ?? 'User',
-        message: _asString(row.data['message']) ?? '',
-        createdAt: DateTime.tryParse(_asString(row.data['created_at']) ?? ''),
-        parentMessageId: _asString(row.data['parent_message_id']),
-        selectionFixtureApiId: _asString(row.data['selection_fixture_api_id']),
-        selectionText: _asString(row.data['selection_text']),
+        id: doc.id,
+        roomId: _asString(data['room_id']) ?? roomId,
+        userId: _asString(data['user_id']) ?? '',
+        userName: _asString(data['user_name']) ?? 'User',
+        isAdmin: _asBool(data['is_admin']),
+        message: _asString(data['message']) ?? '',
+        createdAt: _asDateTime(data['created_at']),
+        parentMessageId: _asString(data['parent_message_id']),
+        selectionFixtureApiId: _asString(data['selection_fixture_api_id']),
+        selectionText: _asString(data['selection_text']),
       );
     }).toList();
+
+    messages.sort((a, b) {
+      final aTime = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final bTime = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return aTime.compareTo(bTime);
+    });
+
+    return messages;
   }
 
-  Future<Map<String, int>> fetchChatLikeCounts({String roomId = appwriteChatRoomId}) async {
-    final rows = await _listAllRowsHelper(
-      db: _db,
-      databaseId: appwriteDatabaseId,
-      tableId: appwriteChatMessageLikesTableId,
-      queries: [
-        Query.equal('room_id', roomId),
-      ],
-    );
+  Future<Map<String, int>> fetchChatLikeCounts({String roomId = firebaseChatRoomId}) async {
+    final snapshot = await _firestore
+        .collection(firebaseChatMessageLikesCollection)
+        .where('room_id', isEqualTo: roomId)
+        .get();
 
     final counts = <String, int>{};
-    for (final row in rows.rows) {
-      final messageId = _asString(row.data['message_id'])?.trim();
-      if (messageId == null || messageId.isEmpty) {
-        continue;
+    for (final doc in snapshot.docs) {
+      final msgId = _asString(doc.data()['message_id'])?.trim();
+      if (msgId != null && msgId.isNotEmpty) {
+        counts[msgId] = (counts[msgId] ?? 0) + 1;
       }
-      counts[messageId] = (counts[messageId] ?? 0) + 1;
     }
     return counts;
   }
 
-  Future<Set<String>> fetchMyLikedChatMessageIds({String roomId = appwriteChatRoomId}) async {
+  Future<Set<String>> fetchMyLikedChatMessageIds({String roomId = firebaseChatRoomId}) async {
     final user = AppAuthService.instance.currentUser;
     if (user == null) {
       return const <String>{};
     }
 
-    final rows = await _listAllRowsHelper(
-      db: _db,
-      databaseId: appwriteDatabaseId,
-      tableId: appwriteChatMessageLikesTableId,
-      queries: [
-        Query.equal('room_id', roomId),
-        Query.equal('user_id', user.id),
-      ],
-    );
+    final snapshot = await _firestore
+        .collection(firebaseChatMessageLikesCollection)
+        .where('room_id', isEqualTo: roomId)
+        .where('user_id', isEqualTo: user.id)
+        .get();
 
     final likedIds = <String>{};
-    for (final row in rows.rows) {
-      final messageId = _asString(row.data['message_id'])?.trim();
-      if (messageId == null || messageId.isEmpty) {
-        continue;
+    for (final doc in snapshot.docs) {
+      final msgId = _asString(doc.data()['message_id'])?.trim();
+      if (msgId != null && msgId.isNotEmpty) {
+        likedIds.add(msgId);
       }
-      likedIds.add(messageId);
     }
     return likedIds;
   }
 
   Future<void> sendChatMessage({
-    String roomId = appwriteChatRoomId,
+    String roomId = firebaseChatRoomId,
     required String message,
     String? parentMessageId,
     String? selectionFixtureApiId,
     String? selectionText,
   }) async {
     final user = AppAuthService.instance.currentUser;
-    if (user == null) {
+    if (user == null || message.trim().isEmpty) {
       return;
     }
 
-    final text = message.trim();
-    if (text.isEmpty) {
-      return;
-    }
-
-    final now = DateTime.now().toUtc().toIso8601String();
-    await _db.createRow(
-      databaseId: appwriteDatabaseId,
-      tableId: appwriteChatMessagesTableId,
-      rowId: ID.unique(),
-      data: {
-        'room_id': roomId,
-        'user_id': user.id,
-        'user_name': user.name,
-        'message': text,
-        'parent_message_id': parentMessageId,
-        'selection_fixture_api_id': selectionFixtureApiId,
-        'selection_text': selectionText,
-        'created_at': now,
-        'updated_at': now,
-      },
-      permissions: [
-        Permission.read(Role.users()),
-        Permission.write(Role.user(user.id)),
-      ],
-    );
+    await _firestore.collection(firebaseChatMessagesCollection).add({
+      'room_id': roomId,
+      'user_id': user.id,
+      'user_name': user.name,
+      'is_admin': AdminAccessService.instance.isActuallyAdmin,
+      'message': message.trim(),
+      'parent_message_id': parentMessageId,
+      'selection_fixture_api_id': selectionFixtureApiId,
+      'selection_text': selectionText,
+      'created_at': DateTime.now().toUtc().toIso8601String(),
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    });
   }
 
   Future<void> toggleChatLike({
-    String roomId = appwriteChatRoomId,
+    String roomId = firebaseChatRoomId,
     required String messageId,
   }) async {
     final user = AppAuthService.instance.currentUser;
@@ -668,49 +543,26 @@ class SocialEngagementService {
       return;
     }
 
-    final likeRowId = _chatLikeRowId(
-      roomId: roomId,
-      messageId: messageId,
-      userId: user.id,
-    );
-    final existing = await (() async {
-      try {
-        return await _db.getRow(
-          databaseId: appwriteDatabaseId,
-          tableId: appwriteChatMessageLikesTableId,
-          rowId: likeRowId,
-        );
-      } catch (_) {
-        return null;
-      }
-    })();
-
-    if (existing == null) {
-      final now = DateTime.now().toUtc().toIso8601String();
-      await _db.createRow(
-        databaseId: appwriteDatabaseId,
-        tableId: appwriteChatMessageLikesTableId,
-        rowId: likeRowId,
-        data: {
-          'room_id': roomId,
-          'message_id': messageId,
-          'user_id': user.id,
-          'created_at': now,
-          'updated_at': now,
-        },
-        permissions: [
-          Permission.read(Role.users()),
-          Permission.write(Role.user(user.id)),
-        ],
-      );
-      return;
+    final docId = '${messageId}_${user.id}';
+    final docRef = _firestore.collection(firebaseChatMessageLikesCollection).doc(docId);
+    DocumentSnapshot<Map<String, dynamic>>? doc;
+    try {
+      doc = await docRef.get();
+    } catch (_) {
+      doc = null;
     }
 
-    await _db.deleteRow(
-      databaseId: appwriteDatabaseId,
-      tableId: appwriteChatMessageLikesTableId,
-      rowId: likeRowId,
-    );
+    if (doc != null && doc.exists) {
+      await docRef.delete();
+    } else {
+      await docRef.set({
+        'room_id': roomId,
+        'message_id': messageId,
+        'user_id': user.id,
+        'created_at': DateTime.now().toUtc().toIso8601String(),
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      });
+    }
   }
 
   Stream<PredictionSocialSnapshot> watchPrediction(String fixtureApiId) async* {
@@ -719,37 +571,39 @@ class SocialEngagementService {
       selectionCounts: await fetchSelectionCounts(fixtureApiId),
     );
 
-    final subscription = _rt.subscribe([
-      'databases.$appwriteDatabaseId.tables.$appwritePredictionCommentsTableId.rows',
-      'databases.$appwriteDatabaseId.tables.$appwritePredictionSelectionsTableId.rows',
-    ]);
+    final commentsStream = _firestore
+        .collection(firebasePredictionCommentsCollection)
+        .where('fixture_api_id', isEqualTo: fixtureApiId)
+        .snapshots();
 
-    try {
-      await for (final _ in subscription.stream) {
-        yield PredictionSocialSnapshot(
-          comments: await fetchComments(fixtureApiId),
-          selectionCounts: await fetchSelectionCounts(fixtureApiId),
-        );
-      }
-    } finally {
-      subscription.close();
+    final selectionsStream = _firestore
+        .collection(firebasePredictionSelectionsCollection)
+        .where('fixture_api_id', isEqualTo: fixtureApiId)
+        .snapshots();
+
+    await for (final _ in _mergeStreams([commentsStream, selectionsStream])) {
+      yield PredictionSocialSnapshot(
+        comments: await fetchComments(fixtureApiId),
+        selectionCounts: await fetchSelectionCounts(fixtureApiId),
+      );
     }
   }
 
-  Stream<List<ChatMessageRecord>> watchChatMessages({String roomId = appwriteChatRoomId}) async* {
+  Stream<List<ChatMessageRecord>> watchChatMessages({String roomId = firebaseChatRoomId}) async* {
     yield await fetchChatMessages(roomId: roomId);
 
-    final subscription = _rt.subscribe([
-      'databases.$appwriteDatabaseId.tables.$appwriteChatMessagesTableId.rows',
-      'databases.$appwriteDatabaseId.tables.$appwriteChatMessageLikesTableId.rows',
-    ]);
+    final messagesStream = _firestore
+        .collection(firebaseChatMessagesCollection)
+        .where('room_id', isEqualTo: roomId)
+        .snapshots();
 
-    try {
-      await for (final _ in subscription.stream) {
-        yield await fetchChatMessages(roomId: roomId);
-      }
-    } finally {
-      subscription.close();
+    final likesStream = _firestore
+        .collection(firebaseChatMessageLikesCollection)
+        .where('room_id', isEqualTo: roomId)
+        .snapshots();
+
+    await for (final _ in _mergeStreams([messagesStream, likesStream])) {
+      yield await fetchChatMessages(roomId: roomId);
     }
   }
 
@@ -758,35 +612,98 @@ class SocialEngagementService {
     return groups.expand((group) => group.picks.map((pick) => pick.prediction)).toList();
   }
 
+  Future<List<PickedMatchGroup>> fetchPickedMatchesByDate() async {
+    final user = AppAuthService.instance.currentUser;
+    if (user == null) {
+      return const <PickedMatchGroup>[];
+    }
+
+    final selectionSnapshot = await _firestore
+        .collection(firebasePredictionSelectionsCollection)
+        .where('user_id', isEqualTo: user.id)
+        .get();
+
+    if (selectionSnapshot.docs.isEmpty) {
+      return const <PickedMatchGroup>[];
+    }
+
+    final selections = selectionSnapshot.docs;
+    final fixtureIds = selections.map((doc) => _asString(doc.data()['fixture_api_id']) ?? '').where((id) => id.isNotEmpty).toSet().toList();
+
+    if (fixtureIds.isEmpty) {
+      return const <PickedMatchGroup>[];
+    }
+
+    final predictionsSnapshot = await _firestore
+        .collection(firebasePredictionsCollection)
+        .where('fixture_api_id', whereIn: fixtureIds)
+        .get();
+
+    final predictionsMap = {
+      for (final doc in predictionsSnapshot.docs)
+        _asString(doc.data()['fixture_api_id']) ?? '': PredictionRecord.fromMap({
+          ...doc.data(),
+          r'$id': doc.id,
+        })
+    };
+
+    final records = <PickedMatchRecord>[];
+    for (final doc in selections) {
+      final data = doc.data();
+      final fixtureId = _asString(data['fixture_api_id']) ?? '';
+      final prediction = predictionsMap[fixtureId];
+      if (prediction == null) {
+        continue;
+      }
+      records.add(PickedMatchRecord(
+        selectionRowId: doc.id,
+        selectedAt: _asDateTime(data['created_at']),
+        selection: _asString(data['selection']) ?? '',
+        prediction: prediction,
+      ));
+    }
+
+    // Grouping logic in memory
+    final groups = <DateTime, _PickedMatchGroupBuilder>{};
+    for (final pick in records) {
+      final dt = pick.prediction.kickoffAt ?? pick.prediction.publishedAt ?? pick.prediction.releaseAt;
+      if (dt == null) continue;
+      final local = dt.toLocal();
+      final dateKey = DateTime(local.year, local.month, local.day);
+      final builder = groups.putIfAbsent(dateKey, () => _PickedMatchGroupBuilder(date: dateKey));
+      builder.picks.add(pick);
+    }
+
+    final sortedKeys = groups.keys.toList()..sort((a, b) => b.compareTo(a));
+    return sortedKeys.map((key) {
+      final builder = groups[key]!;
+      builder.picks.sort((a, b) => (a.selectedAt ?? DateTime.now()).compareTo(b.selectedAt ?? DateTime.now()));
+      final dateStr = '${key.day.toString().padLeft(2, '0')}/${key.month.toString().padLeft(2, '0')}/${key.year}';
+      return PickedMatchGroup(
+        date: key,
+        label: dateStr,
+        picks: builder.picks,
+      );
+    }).toList();
+  }
+
   Stream<List<LeaderboardEntry>> watchLeaderboard() async* {
     yield await fetchLeaderboard();
 
-    final subscription = _rt.subscribe([
-      'databases.$appwriteDatabaseId.tables.$appwriteUserProfilesTableId.rows',
-    ]);
+    final subscription = _firestore.collection(firebaseUserProfilesCollection).snapshots();
 
-    try {
-      await for (final _ in subscription.stream) {
-        yield await fetchLeaderboard();
-      }
-    } finally {
-      subscription.close();
+    await for (final _ in subscription) {
+      yield await fetchLeaderboard();
     }
   }
 
   Stream<List<PredictionChallenge>> watchChallenges() async* {
     yield await fetchChallenges();
 
-    final subscription = _rt.subscribe([
-      'databases.$appwriteDatabaseId.tables.$appwritePredictionChallengesTableId.rows',
-    ]);
+    final subscription = _firestore.collection(firebasePredictionChallengesCollection).snapshots();
 
-    try {
-      await for (final _ in subscription.stream) {
-        yield await fetchChallenges();
-      }
-    } finally {
-      subscription.close();
+    await for (final _ in subscription) {
+      yield await fetchChallenges();
     }
   }
 }
@@ -800,6 +717,17 @@ class _PickedMatchGroupBuilder {
 
 String? _asString(dynamic value) => value is String ? value : value?.toString();
 
+bool _asBool(dynamic value) {
+  if (value is bool) {
+    return value;
+  }
+  if (value is num) {
+    return value != 0;
+  }
+  final text = _asString(value)?.toLowerCase().trim();
+  return text == 'true' || text == '1' || text == 'yes';
+}
+
 int _asInt(dynamic value) {
   if (value is int) {
     return value;
@@ -807,81 +735,14 @@ int _asInt(dynamic value) {
   return int.tryParse(_asString(value) ?? '') ?? 0;
 }
 
-Future<_ListRowsResult> _listAllRowsHelper({
-  required TablesDB db,
-  required String databaseId,
-  required String tableId,
-  required List<String> queries,
-}) async {
-  final rows = <dynamic>[];
-  var offset = 0;
-  while (true) {
-    final response = await db.listRows(
-      databaseId: databaseId,
-      tableId: tableId,
-      queries: [
-        ...queries,
-        Query.limit(100),
-        Query.offset(offset),
-      ],
-      total: false,
-    );
-    rows.addAll(response.rows);
-    if (response.rows.length < 100) {
-      break;
-    }
-    offset += 100;
+DateTime? _asDateTime(Object? value) {
+  if (value == null) return null;
+  if (value is Timestamp) {
+    return value.toDate();
   }
-  return _ListRowsResult(rows);
-}
-
-class _ListRowsResult {
-  _ListRowsResult(this.rows);
-  final List<dynamic> rows;
-}
-
-String _dateOnlyKey(DateTime date) {
-  final local = date.toLocal();
-  final year = local.year.toString().padLeft(4, '0');
-  final month = local.month.toString().padLeft(2, '0');
-  final day = local.day.toString().padLeft(2, '0');
-  return '$year-$month-$day';
-}
-
-DateTime _dateOnly(DateTime date) => DateTime(date.year, date.month, date.day);
-
-String _formatPickedGroupLabel(DateTime date) {
-  final now = DateTime.now();
-  final local = date.toLocal();
-  final diff = _dateOnly(local).difference(_dateOnly(now)).inDays;
-  if (diff == 0) {
-    return 'Today';
+  final text = _asString(value);
+  if (text == null || text.isEmpty) {
+    return null;
   }
-  if (diff == 1) {
-    return 'Tomorrow';
-  }
-  if (diff == -1) {
-    return 'Yesterday';
-  }
-  return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')}';
-}
-
-String _chatLikeRowId({
-  required String roomId,
-  required String messageId,
-  required String userId,
-}) {
-  final input = '$roomId|$messageId|$userId';
-  var h1 = 0x9dc5812f;
-  var h2 = 0x7e8f4320;
-
-  for (var i = 0; i < input.length; i++) {
-    final c = input.codeUnitAt(i);
-    h1 = ((h1 ^ c) * 0x1000193) & 0xFFFFFFFF;
-    h2 = ((h2 ^ c) * 0x811c9dc5) & 0xFFFFFFFF;
-  }
-
-  final hex = (h1.toRadixString(16).padLeft(8, '0')) +
-      (h2.toRadixString(16).padLeft(8, '0'));
-  return 'cl_$hex';
+  return DateTime.tryParse(text);
 }

@@ -1,19 +1,12 @@
-import 'dart:convert';
-
-import 'package:appwrite/appwrite.dart' as appwrite;
-import 'package:appwrite/enums.dart' as appwrite_enums;
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
-
-import 'app_auth_service.dart';
-import 'appwrite_config.dart';
 
 class AccountDeletionService {
   AccountDeletionService._();
 
   static final AccountDeletionService instance = AccountDeletionService._();
 
-  late final appwrite.Functions _functions =
-      appwrite.Functions(AppAuthService.instance.client);
+  final FirebaseFunctions _functions = FirebaseFunctions.instance;
 
   Future<void> deleteAccount({String? reason}) async {
     final payload = <String, dynamic>{
@@ -22,18 +15,10 @@ class AccountDeletionService {
     };
 
     try {
-      final execution = await _functions.createExecution(
-        functionId: appwriteDeleteAccountFunctionId,
-        method: appwrite_enums.ExecutionMethod.pOST,
-        body: jsonEncode(payload),
-      );
-
+      final result = await _functions.httpsCallable('deleteAccount').call(payload);
+      
       debugPrint(
-        'Account deletion execution started: '
-        'id=${execution.$id}, status=${execution.status.value}, '
-        'responseStatus=${execution.responseStatusCode}, '
-        'responseBody=${execution.responseBody}, '
-        'errors=${execution.errors}, logs=${execution.logs}',
+        'Account deletion call complete. Status: ${result.data}',
       );
     } catch (error) {
       debugPrint('Account deletion execution failed: $error');

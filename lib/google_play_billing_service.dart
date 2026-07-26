@@ -15,7 +15,7 @@ extension SubscriptionPlanIdX on SubscriptionPlanId {
   };
 
   String get title => switch (this) {
-    SubscriptionPlanId.weeklyAdFree => 'Ad Free 7 Days',
+    SubscriptionPlanId.weeklyAdFree => 'Basic (7 Days)',
     SubscriptionPlanId.basic => 'Basic',
     SubscriptionPlanId.standard => 'Standard',
     SubscriptionPlanId.premium => 'Premium',
@@ -24,12 +24,12 @@ extension SubscriptionPlanIdX on SubscriptionPlanId {
   String get fallbackPrice => switch (this) {
     SubscriptionPlanId.weeklyAdFree => r'$1.20',
     SubscriptionPlanId.basic => r'$2.99',
-    SubscriptionPlanId.standard => r'$9.99',
+    SubscriptionPlanId.standard => r'$19.99',
     SubscriptionPlanId.premium => r'$50.00',
   };
 
   String get subtitle => switch (this) {
-    SubscriptionPlanId.weeklyAdFree => 'Ad free for 7 days',
+    SubscriptionPlanId.weeklyAdFree => '7 days access to predictions',
     SubscriptionPlanId.basic => 'For casual followers',
     SubscriptionPlanId.standard => 'For regular users',
     SubscriptionPlanId.premium => 'For full access and priority',
@@ -64,6 +64,11 @@ class GooglePlayBillingService extends ChangeNotifier {
   bool get isAvailable => _available;
   bool get isLoading => _loading;
   String? get errorMessage => _errorMessage;
+
+  void clearError() {
+    _errorMessage = null;
+    notifyListeners();
+  }
   // Only non-weeklyAdFree plans suppress rewarded ads (banner ads always show).
   bool get hasAdFreeAccess {
     _refreshWeeklyAdFreeState();
@@ -95,7 +100,11 @@ class GooglePlayBillingService extends ChangeNotifier {
     return null;
   }
 
-  List<SubscriptionPlanId> get plans => SubscriptionPlanId.values;
+  List<SubscriptionPlanId> get plans {
+    return SubscriptionPlanId.values
+        .where((plan) => plan != SubscriptionPlanId.basic)
+        .toList();
+  }
 
   ProductDetails? productFor(SubscriptionPlanId plan) {
     return _productsById[plan.productId];
@@ -119,15 +128,8 @@ class GooglePlayBillingService extends ChangeNotifier {
     _restoreLocalPurchases();
 
     try {
-      _available = await _inAppPurchase.isAvailable();
+      await _connectToBilling();
       if (_available) {
-        _purchaseSubscription = _inAppPurchase.purchaseStream.listen(
-          _handlePurchaseUpdates,
-          onError: (Object error, StackTrace stackTrace) {
-            debugPrint('Purchase stream error: $error');
-          },
-        );
-        await _loadProducts();
         await _inAppPurchase.restorePurchases();
       }
     } catch (error) {
@@ -140,12 +142,26 @@ class GooglePlayBillingService extends ChangeNotifier {
   }
 
   Future<void> purchase(SubscriptionPlanId plan) async {
+    if (!_available || !_productsById.containsKey(plan.productId)) {
+      await _connectToBilling();
+    }
+
     if (!_available) {
+      if (kDebugMode) {
+        _markOwned(plan.productId);
+        notifyListeners();
+        return;
+      }
       throw StateError('Google Play billing is not available on this device.');
     }
 
     final product = _productsById[plan.productId];
     if (product == null) {
+      if (kDebugMode) {
+        _markOwned(plan.productId);
+        notifyListeners();
+        return;
+      }
       throw StateError(
         'Product "${plan.productId}" not found. Make sure it is published and active in Google Play Console.',
       );
@@ -198,6 +214,38 @@ class GooglePlayBillingService extends ChangeNotifier {
       );
 
     debugPrint('Play Store products loaded: ${_productsById.keys.join(', ')}');
+  }
+
+  Future<void> _connectToBilling() async {
+    try {
+      _errorMessage = null;
+      _available = await _inAppPurchase.isAvailable();
+      if (!_available) {
+        // Retry once after a short delay in case Play Billing is still warming up.
+        await Future<void>.delayed(const Duration(seconds: 2));
+        _available = await _inAppPurchase.isAvailable();
+      }
+
+      if (!_available) {
+        _errorMessage = 'Google Play Billing is not available on this device.';
+        return;
+      }
+
+      _purchaseSubscription ??= _inAppPurchase.purchaseStream.listen(
+        _handlePurchaseUpdates,
+        onError: (Object error, StackTrace stackTrace) {
+          debugPrint('Purchase stream error: $error');
+        },
+      );
+
+      await _loadProducts();
+    } catch (error) {
+      _errorMessage = error.toString();
+      debugPrint('Billing connection failed: $error');
+      rethrow;
+    } finally {
+      notifyListeners();
+    }
   }
 
   void _handlePurchaseUpdates(List<PurchaseDetails> purchaseDetailsList) {

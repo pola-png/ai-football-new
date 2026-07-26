@@ -1,0 +1,12 @@
+const String firebasePredictionsCollection = 'predictions';
+const String firebaseFixturesCollection = 'fixtures';
+const String firebasePredictionTopic = 'predictions';
+const String firebaseUserProfilesCollection = 'user_profiles';
+const String firebasePredictionCommentsCollection = 'prediction_comments';
+const String firebasePredictionSelectionsCollection = 'prediction_selections';
+const String firebaseChatMessagesCollection = 'chat_messages';
+const String firebaseChatMessageLikesCollection = 'chat_message_likes';
+const String firebaseChatRoomId = 'general';
+const String firebaseDailyCheckinsCollection = 'daily_checkins';
+const String firebasePredictionChallengesCollection = 'prediction_challenges';
+const String firebaseChallengeEntriesCollection = 'challenge_entries';

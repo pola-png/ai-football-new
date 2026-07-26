@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "811335879104",
-    "project_id": "ai-football-predicction",
-    "storage_bucket": "ai-football-predicction.firebasestorage.app"
+    "project_number": "98283332019",
+    "project_id": "ai-football-predictions-48890",
+    "storage_bucket": "ai-football-predictions-48890.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:811335879104:android:684ba923e1f47e9a71a025",
+        "mobilesdk_app_id": "1:98283332019:android:07587439df39babe502bc6",
         "android_client_info": {
           "package_name": "com.Aifootballprediction.app"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyDL7GcZAuGg5aJhfATkgdViyXFHOvzfKqs"
+          "current_key": "AIzaSyDo5_yysFrO90u17VgfTgYLAUU_GOccsSo"
         }
       ],
       "services": {

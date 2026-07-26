@@ -51,7 +51,7 @@ android {
     defaultConfig {
         applicationId = "com.Aifootballprediction.app"
         minSdk = flutter.minSdkVersion
-        targetSdk = 35
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         multiDexEnabled = true
@@ -63,9 +63,13 @@ android {
 
     buildTypes {
         release {
-            // Disable obfuscation temporarily for Android 15 compatibility
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // Enable R8 optimization and shrinking
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
             
             signingConfig = signingConfigs.getByName("release")
         }
@@ -85,9 +89,6 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
     implementation("androidx.activity:activity-ktx:1.9.2")
     implementation("androidx.core:core-ktx:1.13.1")
-    // Force billing library v7+ to avoid deprecated querySkuDetailsAsync warning
-    implementation("com.android.billingclient:billing:7.1.1")
-    implementation("com.android.billingclient:billing-ktx:7.1.1")
 }
 
 flutter {

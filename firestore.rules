@@ -1,0 +1,89 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper: check if user is admin
+    function isAdmin() {
+      return request.auth != null && 
+        exists(/databases/$(database)/documents/user_profiles/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/user_profiles/$(request.auth.uid)).data.is_admin == true;
+    }
+
+    // Public collections: read by anyone, write by Admin
+    match /teams/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /leagues/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /fixtures/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /fixture_odds/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /fixture_h2h_history/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /predictions/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /results/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    
+    // Private collections: Cloud functions only (no client access)
+    match /sync_runs/{docId} {
+      allow read, write: if false;
+    }
+
+    // User profile rules: read/write by authenticated user, write only by the owner
+    match /user_profiles/{userId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Social collections: read by authenticated users, write by authenticated users
+    match /prediction_comments/{docId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid;
+      allow update, delete: if request.auth != null && resource.data.user_id == request.auth.uid;
+    }
+    match /prediction_selections/{docId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid;
+      allow update, delete: if request.auth != null && resource.data.user_id == request.auth.uid;
+    }
+    match /chat_messages/{docId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid;
+      allow update, delete: if request.auth != null && resource.data.user_id == request.auth.uid;
+    }
+    match /chat_message_likes/{docId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid;
+      allow delete: if request.auth != null && resource.data.user_id == request.auth.uid;
+    }
+    match /daily_checkins/{docId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid;
+      allow update, delete: if request.auth != null && resource.data.user_id == request.auth.uid;
+    }
+    match /prediction_challenges/{docId} {
+      allow read: if request.auth != null;
+      allow write: if isAdmin();
+    }
+    match /challenge_entries/{docId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null && request.resource.data.user_id == request.auth.uid;
+      allow update, delete: if request.auth != null && resource.data.user_id == request.auth.uid;
+    }
+  }
+}
