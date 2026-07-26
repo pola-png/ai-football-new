@@ -39,6 +39,22 @@ class AppAuthService extends ChangeNotifier {
     _initialized = true;
     _prefs = await SharedPreferences.getInstance();
 
+    // Restore from SharedPreferences first for immediate availability
+    final isLogged = _prefs?.getBool('logged') ?? false;
+    if (isLogged) {
+      final savedId = _prefs?.getString('user_id');
+      final savedEmail = _prefs?.getString('user_email');
+      final savedName = _prefs?.getString('user_name');
+      if (savedId != null) {
+        _currentUser = AppUserProfile(
+          id: savedId,
+          email: savedEmail ?? '',
+          name: savedName ?? '',
+        );
+        _authResolved = true;
+      }
+    }
+
     // Resolve the persisted Firebase session before the UI decides which page to show.
     User? initialUser;
     try {
@@ -132,6 +148,10 @@ class AppAuthService extends ChangeNotifier {
       _loading = false;
       _authResolved = true;
       await _prefs?.setBool(_sessionReadyKey, false);
+      await _prefs?.setBool('logged', false);
+      await _prefs?.remove('user_id');
+      await _prefs?.remove('user_email');
+      await _prefs?.remove('user_name');
       notifyListeners();
     }
   }
@@ -144,7 +164,13 @@ class AppAuthService extends ChangeNotifier {
         name: user.displayName ?? user.email?.split('@').first ?? '',
       );
       await _prefs?.setBool(_sessionReadyKey, true);
+      await _prefs?.setBool('logged', true);
+      await _prefs?.setString('user_id', user.uid);
+      await _prefs?.setString('user_email', user.email ?? '');
+      await _prefs?.setString('user_name', _currentUser!.name);
     } else {
+      // Note: We don't force 'logged' to false here to prevent transient null values on startup
+      // from logging the user out. Logout only happens via explicit signOut call.
       _currentUser = null;
       await _prefs?.setBool(_sessionReadyKey, false);
     }

@@ -63,13 +63,8 @@ android {
 
     buildTypes {
         release {
-            // Enable R8 optimization and shrinking
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+            isMinifyEnabled = false
+            isShrinkResources = false
             
             signingConfig = signingConfigs.getByName("release")
         }

@@ -26,6 +26,7 @@
 # Google Play Billing Library rules
 -keep class com.android.billingclient.** { *; }
 -dontwarn com.android.billingclient.**
+-keep class com.android.vending.billing.** { *; }
 
 # Keep classes for flutter_local_notifications (GSON / dexterous)
 -keepattributes InnerClasses
