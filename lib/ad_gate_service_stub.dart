@@ -6,4 +6,10 @@ class AdGateService {
   Future<void> initialize() async {}
 
   Future<bool> showRewardedAd() async => false;
+
+  Future<bool> showInterstitialAd() async => false;
+
+  Future<void> showAppOpenAdIfAvailable() async {}
+
+  Future<bool> showRewardedInterstitialAd() async => false;
 }

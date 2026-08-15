@@ -331,7 +331,7 @@ class _ChatPageState extends State<ChatPage> {
                 ),
               ),
             ),
-            if (!widget.hasAdFreeAccess) const FeedBannerAd(),
+            const FeedBannerAd(),
             const SizedBox(height: 12),
             Expanded(
               child: FutureBuilder<_ChatMeta>(

@@ -18,6 +18,7 @@ import 'chat_page.dart';
 import 'firebase_subscription_service.dart';
 import 'community_page.dart';
 import 'feed_banner_ad.dart';
+import 'feed_native_ad.dart';
 import 'google_play_billing_service.dart';
 import 'prediction_repository.dart';
 import 'play_store_update_service.dart';
@@ -756,23 +757,7 @@ class _NotificationBootstrapPageState extends State<NotificationBootstrapPage> {
       );
     }
 
-    return AnimatedBuilder(
-      animation: Listenable.merge([
-        GooglePlayBillingService.instance,
-        AdminAccessService.instance,
-      ]),
-      builder: (context, _) {
-        final billing = GooglePlayBillingService.instance;
-        final isAdmin = AdminAccessService.instance.isAdmin;
-        final hasActivePlan = billing.activePlan != null || isAdmin;
-
-        if (!hasActivePlan) {
-          return const PremiumPaywallDialog(isMandatory: true);
-        }
-
-        return const PredictionFeedPage();
-      },
-    );
+    return const PredictionFeedPage();
   }
 }
 
@@ -978,18 +963,53 @@ class PredictionFeedPage extends StatefulWidget {
   State<PredictionFeedPage> createState() => _PredictionFeedPageState();
 }
 
-class _PredictionFeedPageState extends State<PredictionFeedPage> {
+class _PredictionFeedPageState extends State<PredictionFeedPage> with WidgetsBindingObserver {
   final Map<String, PredictionRecord> _selectedPredictions =
       <String, PredictionRecord>{};
   int _currentIndex = 0;
   bool _adFreeUpsellShown = false;
 
+  Timer? _interstitialTimer;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _showPaywallIfNeeded();
+      final billing = GooglePlayBillingService.instance;
+      final isAdmin = AdminAccessService.instance.isAdmin;
+      if (billing.activePlan == null && !isAdmin) {
+        AdGateService.instance.showAppOpenAdIfAvailable();
+      }
     });
+
+    _interstitialTimer = Timer.periodic(const Duration(minutes: 1), (timer) {
+      final billing = GooglePlayBillingService.instance;
+      final isAdmin = AdminAccessService.instance.isAdmin;
+      final isFreeUser = billing.activePlan == null && !isAdmin;
+      if (isFreeUser) {
+        AdGateService.instance.showInterstitialAd();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _interstitialTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      final billing = GooglePlayBillingService.instance;
+      final isAdmin = AdminAccessService.instance.isAdmin;
+      final isFreeUser = billing.activePlan == null && !isAdmin;
+      if (isFreeUser) {
+        AdGateService.instance.showAppOpenAdIfAvailable();
+      }
+    }
   }
 
   void _showPaywallIfNeeded() {
@@ -1008,6 +1028,7 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
   }
 
   Future<void> _openMainMenu(bool isAdmin) async {
+    await _showNavigationAd();
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         fullscreenDialog: true,
@@ -1050,10 +1071,24 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
     return items;
   }
 
+  Future<void> _showNavigationAd() async {
+    final billing = GooglePlayBillingService.instance;
+    final isAdmin = AdminAccessService.instance.isAdmin;
+    final isFreeUser = billing.activePlan == null && !isAdmin;
+    if (isFreeUser) {
+      final shown = await AdGateService.instance.showInterstitialAd();
+      if (!shown) {
+        await AdGateService.instance.showRewardedInterstitialAd();
+      }
+    }
+  }
+
   void _setIndex(int index) {
     if (_currentIndex == index) {
       return;
     }
+
+    _showNavigationAd();
 
     setState(() {
       _currentIndex = index;
@@ -1095,6 +1130,7 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
   }
 
   void _openPickedTab() {
+    _showNavigationAd();
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => PickedMatchesPage(
@@ -1158,6 +1194,7 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> {
               bottomNavigationBar: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  const FeedBannerAd(),
                   if (_selectedItems.isNotEmpty)
                     _SelectedMatchesBar(
                       count: _selectedItems.length,
@@ -1496,6 +1533,24 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
   _ConfidenceFilter _confidenceFilter = _ConfidenceFilter.all;
   String _selectedDateLabel = 'Today';
   bool _historyMode = false;
+  int _tabSwitchCount = 0;
+
+  Future<void> _handleTabSwitchAd() async {
+    final billing = GooglePlayBillingService.instance;
+    final isAdmin = widget.isAdmin;
+    final isFreeUser = billing.activePlan == null && !isAdmin;
+    if (!isFreeUser) {
+      return;
+    }
+
+    _tabSwitchCount++;
+    if (_tabSwitchCount % 2 == 0) {
+      final shown = await AdGateService.instance.showInterstitialAd();
+      if (!shown) {
+        await AdGateService.instance.showRewardedInterstitialAd();
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -1592,23 +1647,36 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
       return;
     }
 
+    _handleTabSwitchAd();
+
     setState(() {
       _selectedTodayBucket = bucket;
     });
   }
 
   bool _isPickUnlocked(String unlockKey) {
-    return widget.adFree;
+    if (widget.adFree) {
+      return true;
+    }
+    return _unlockedPickKeys.contains(unlockKey);
   }
 
   Future<void> _unlockPick(PredictionRecord prediction) async {
     if (widget.adFree) {
       return;
     }
-    await showDialog<void>(
-      context: context,
-      builder: (context) => const PremiumPaywallDialog(),
-    );
+    final shown = await AdGateService.instance.showInterstitialAd();
+    if (shown) {
+      final key = _predictionUnlockKey(prediction);
+      await _saveUnlockedPickKey(key);
+      return;
+    }
+
+    final shown2 = await AdGateService.instance.showRewardedInterstitialAd();
+    if (shown2) {
+      final key = _predictionUnlockKey(prediction);
+      await _saveUnlockedPickKey(key);
+    }
   }
 
   bool _matchesFilter(PredictionRecord prediction) {
@@ -1774,9 +1842,12 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
                       child: _OddsTabSelector(
                         selectedTab: _selectedOddsTab,
                         onSelectTab: (tab) {
-                          setState(() {
-                            _selectedOddsTab = tab;
-                          });
+                          if (_selectedOddsTab != tab) {
+                            _handleTabSwitchAd();
+                            setState(() {
+                              _selectedOddsTab = tab;
+                            });
+                          }
                         },
                       ),
                     ),
@@ -1880,7 +1951,7 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
                           widget.isPredictionSelected,
                           _handleSelectPrediction,
                           _openComments,
-                          !widget.adFree,
+                          true,
                           widget.isAdmin,
                           _handleAdminPlanOverride,
                           _selectedDateLabel,
@@ -2011,6 +2082,10 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
   SubscriptionPlanId? _selectedPlanOverride;
   bool _showPurchaseScreen = false;
 
+  List<SubscriptionPlanId> get _visiblePlans {
+    return widget.currentPlans;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -2122,7 +2197,7 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
                                       });
                                     },
                                     itemBuilder: (context) {
-                                      return widget.currentPlans.map((plan) {
+                                      return _visiblePlans.map((plan) {
                                         return PopupMenuItem<SubscriptionPlanId>(
                                           value: plan,
                                           child: Row(
@@ -2145,7 +2220,7 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
                                   ),
                                 if (!isAdmin &&
                                     activePlan != null &&
-                                    widget.currentPlans.any((plan) => plan != activePlan))
+                                    _visiblePlans.any((plan) => plan != activePlan))
                                   PopupMenuButton<SubscriptionPlanId>(
                                     tooltip: 'Choose a plan',
                                     onSelected: (plan) {
@@ -2155,7 +2230,7 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
                                       });
                                     },
                                     itemBuilder: (context) {
-                                      return widget.currentPlans
+                                      return _visiblePlans
                                           .where((plan) => plan != activePlan)
                                           .map((plan) {
                                             return PopupMenuItem<SubscriptionPlanId>(
@@ -2201,7 +2276,7 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
                               futurePredictions: _futurePredictions,
                               isAdmin: isAdmin,
                               onRefresh: _reload,
-                              plans: widget.currentPlans,
+                              plans: _visiblePlans,
                               showSummaryCard: false,
                               isPickUnlocked: (key) => true,
                               unlockingPickKey: null,
@@ -2260,7 +2335,7 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
                         SizedBox(
                           height: 460,
                           child: _PlanCarousel(
-                            plans: widget.currentPlans,
+                            plans: _visiblePlans,
                             billing: billing,
                             compact: false,
                             onBuyPlan: (plan) => _buyPlan(context, plan),
@@ -5048,7 +5123,11 @@ List<Widget> _buildTodayStatusWidgets(
     if (i < selectedItems.length - 1) {
       widgets.add(const SizedBox(height: 12));
       if (showAds) {
-        widgets.add(const FeedBannerAd());
+        if (i % 3 == 1) {
+          widgets.add(const FeedNativeAd());
+        } else {
+          widgets.add(const FeedBannerAd());
+        }
       }
       widgets.add(const SizedBox(height: 12));
     }
@@ -5111,6 +5190,12 @@ List<Widget> _buildPlanPredictionWidgets(
         ),
       );
       if (i < section.predictions.length - 1) {
+        widgets.add(const SizedBox(height: 12));
+        if (i % 3 == 1) {
+          widgets.add(const FeedNativeAd());
+        } else {
+          widgets.add(const FeedBannerAd());
+        }
         widgets.add(const SizedBox(height: 12));
       }
     }
@@ -8083,20 +8168,28 @@ class _PopularMatchesPageState extends State<PopularMatchesPage> {
 
   bool _isPickUnlocked(PredictionRecord prediction) {
     if (widget.adFree) return true;
-    // Check subscription plan access
     final activePlan = GooglePlayBillingService.instance.activePlan;
     if (activePlan != null && _predictionMatchesPlan(prediction, activePlan)) {
       return true;
     }
-    return false;
+    final key = _predictionUnlockKey(prediction);
+    return _unlockedPickKeys.contains(key);
   }
 
   Future<void> _unlockPick(PredictionRecord prediction) async {
     if (widget.adFree) return;
-    await showDialog<void>(
-      context: context,
-      builder: (context) => const PremiumPaywallDialog(),
-    );
+    final shown = await AdGateService.instance.showInterstitialAd();
+    if (shown) {
+      final key = _predictionUnlockKey(prediction);
+      await _saveUnlockedPickKey(key);
+      return;
+    }
+
+    final shown2 = await AdGateService.instance.showRewardedInterstitialAd();
+    if (shown2) {
+      final key = _predictionUnlockKey(prediction);
+      await _saveUnlockedPickKey(key);
+    }
   }
 
   Future<void> _openComments(PredictionRecord prediction) {

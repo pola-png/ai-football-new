@@ -22,8 +22,8 @@ extension SubscriptionPlanIdX on SubscriptionPlanId {
   };
 
   String get fallbackPrice => switch (this) {
-    SubscriptionPlanId.weeklyAdFree => r'$1.20',
-    SubscriptionPlanId.basic => r'$2.99',
+    SubscriptionPlanId.weeklyAdFree => r'$1.99',
+    SubscriptionPlanId.basic => r'$4.99',
     SubscriptionPlanId.standard => r'$19.99',
     SubscriptionPlanId.premium => r'$50.00',
   };
@@ -101,9 +101,7 @@ class GooglePlayBillingService extends ChangeNotifier {
   }
 
   List<SubscriptionPlanId> get plans {
-    return SubscriptionPlanId.values
-        .where((plan) => plan != SubscriptionPlanId.basic)
-        .toList();
+    return SubscriptionPlanId.values.toList();
   }
 
   ProductDetails? productFor(SubscriptionPlanId plan) {
