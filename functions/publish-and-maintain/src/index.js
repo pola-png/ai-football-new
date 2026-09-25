@@ -90,7 +90,7 @@ const NOTIFICATION_CALL_TO_ACTIONS = [
 ];
 
 function shouldSendPredictionNotification(confidence) {
-  return Number.isFinite(confidence) && confidence >= 0.85;
+  return Number.isFinite(confidence) && confidence >= 0.60;
 }
 
 function selectNotificationCTA(seedValue) {
@@ -265,8 +265,10 @@ function isVoidStatus(statusShort) {
 }
 
 function shouldPublishPrediction(row, now) {
-  // Disabled draft publishing via maintenance: predictions are saved directly as published.
-  return false;
+  const kickoffAt = parseDate(row.kickoff_at);
+  if (!kickoffAt) return true;
+  // Publish drafts that kick off in the future or within the last 2 hours
+  return kickoffAt.getTime() > now.getTime() - 2 * 60 * 60 * 1000;
 }
 
 function needsOutcomeRefresh(row, now) {
@@ -1113,6 +1115,50 @@ export default async function main() {
       if (result.published) {
         published += 1;
       }
+      if (result.notified) {
+        notified += 1;
+      }
+    }
+
+    // Process upcoming published predictions that have not sent notifications yet
+    const unnotifiedPublished = publishedPredictions.filter((row) => {
+      if (row.notification_sent) return false;
+      const kickoffAt = parseDate(row.kickoff_at);
+      if (!kickoffAt || kickoffAt.getTime() <= now.getTime()) return false;
+      const primaryConfidence = Number.isFinite(Number(row.primary_confidence))
+        ? Number(row.primary_confidence)
+        : Number.isFinite(Number(row.confidence))
+          ? Number(row.confidence)
+          : 0;
+      return shouldSendPredictionNotification(primaryConfidence);
+    });
+
+    // Notify top upcoming matches (up to 3 per run to prevent notification spam)
+    const notificationCandidates = unnotifiedPublished
+      .sort((a, b) => {
+        const confA = Number(a.primary_confidence || a.confidence || 0);
+        const confB = Number(b.primary_confidence || b.confidence || 0);
+        return confB - confA;
+      })
+      .slice(0, 3);
+
+    for (const row of notificationCandidates) {
+      log(JSON.stringify({
+        job: 'publish-and-maintain',
+        fixture_api_id: row.fixture_api_id || null,
+        prediction_id: row.$id || null,
+        stage: 'notification-loop',
+        message: 'Sending notification for published upcoming prediction.',
+      }));
+
+      const result = await publishPredictionRow({
+        tablesdb,
+        databaseId,
+        predictionsTable,
+        topicId,
+        row,
+        logFn: log,
+      });
       if (result.notified) {
         notified += 1;
       }

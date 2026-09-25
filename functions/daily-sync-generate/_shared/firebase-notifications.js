@@ -62,13 +62,11 @@ export async function sendPredictionTopicNotification({
   body,
   data = {},
 }) {
-  if (!topicId) {
-    throw new Error('Missing Firebase topic id.');
-  }
+  const targetTopic = topicId || process.env.FIREBASE_PREDICTION_TOPIC || 'predictions';
 
   const messaging = getFirebaseMessaging();
   return messaging.send({
-    topic: topicId,
+    topic: targetTopic,
     notification: {
       title,
       body,
@@ -79,7 +77,7 @@ export async function sendPredictionTopicNotification({
     android: {
       priority: 'high',
       notification: {
-        channelId: 'appwrite_predictions',
+        channelId: 'football_predictions',
       },
     },
   });
