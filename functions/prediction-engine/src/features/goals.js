@@ -135,5 +135,50 @@ export function extractGoalsFeatures(h2hRows = [], homeStats = null, awayStats =
   if (features.avgCorners === 0) features.avgCorners = 9.5; // football default
   if (features.avgCards === 0) features.avgCards = 4.2; // football default
 
+  // 3. Estimate probability rates if H2H is missing
+  if (validH2H.length === 0) {
+    if (homeStats || awayStats) {
+      const homeScored = features.avgGoalsScoredHome || 1.45;
+      const awayConceded = features.avgGoalsConcededAway || features.avgGoalsScoredHome || 1.25;
+      const awayScored = features.avgGoalsScoredAway || 1.15;
+      const homeConceded = features.avgGoalsConcededHome || features.avgGoalsScoredAway || 1.25;
+
+      const lambda = (homeScored + awayConceded) / 2;
+      const mu = (awayScored + homeConceded) / 2;
+      const G = lambda + mu;
+
+      if (G > 0) {
+        const pZeroHome = Math.exp(-lambda);
+        const pZeroAway = Math.exp(-mu);
+        
+        // BTTS Rate: probability both score
+        features.bttsRate = Number(((1 - pZeroHome) * (1 - pZeroAway)).toFixed(2));
+
+        // Over/Under probabilities
+        const pZeroTotal = Math.exp(-G);
+        const pOneTotal = G * pZeroTotal;
+        const pTwoTotal = (Math.pow(G, 2) / 2) * pZeroTotal;
+
+        features.over15Rate = Number((1 - pZeroTotal - pOneTotal).toFixed(2));
+        features.over25Rate = Number((1 - pZeroTotal - pOneTotal - pTwoTotal).toFixed(2));
+        features.under25Rate = Number((1 - features.over25Rate).toFixed(2));
+      }
+    } else {
+      // Baseline world football distribution priors when no data is available
+      features.avgGoalsScoredHome = 1.45;
+      features.avgGoalsScoredAway = 1.15;
+      features.avgGoalsConcededHome = 1.15;
+      features.avgGoalsConcededAway = 1.45;
+      features.over15Rate = 0.76;
+      features.over25Rate = 0.52;
+      features.under25Rate = 0.48;
+      features.bttsRate = 0.51;
+      features.cleanSheetRateHome = 0.32;
+      features.cleanSheetRateAway = 0.24;
+      features.failedToScoreRateHome = 0.22;
+      features.failedToScoreRateAway = 0.30;
+    }
+  }
+
   return features;
 }

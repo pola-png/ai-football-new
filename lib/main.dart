@@ -503,12 +503,14 @@ class _AuthPageState extends State<AuthPage> {
                           const SizedBox(height: 20),
                           if (_isSignIn) ...[
                             _AuthField(
+                              key: const ValueKey('sign_in_email'),
                               controller: _signInEmail,
                               hint: 'Email',
                               keyboardType: TextInputType.emailAddress,
                             ),
                             const SizedBox(height: 12),
                             _AuthField(
+                              key: const ValueKey('sign_in_password'),
                               controller: _signInPassword,
                               hint: 'Password',
                               obscureText: true,
@@ -527,15 +529,21 @@ class _AuthPageState extends State<AuthPage> {
                               ),
                             ),
                           ] else ...[
-                            _AuthField(controller: _signUpName, hint: 'Display name'),
+                            _AuthField(
+                              key: const ValueKey('sign_up_name'),
+                              controller: _signUpName,
+                              hint: 'Display name',
+                            ),
                             const SizedBox(height: 12),
                             _AuthField(
+                              key: const ValueKey('sign_up_email'),
                               controller: _signUpEmail,
                               hint: 'Email',
                               keyboardType: TextInputType.emailAddress,
                             ),
                             const SizedBox(height: 12),
                             _AuthField(
+                              key: const ValueKey('sign_up_password'),
                               controller: _signUpPassword,
                               hint: 'Password',
                               obscureText: true,
@@ -602,6 +610,7 @@ class _AuthModeButton extends StatelessWidget {
 
 class _AuthField extends StatefulWidget {
   const _AuthField({
+    super.key,
     required this.controller,
     required this.hint,
     this.obscureText = false,
@@ -624,6 +633,14 @@ class _AuthFieldState extends State<_AuthField> {
   void initState() {
     super.initState();
     _obscured = widget.obscureText;
+  }
+
+  @override
+  void didUpdateWidget(covariant _AuthField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.obscureText != widget.obscureText) {
+      _obscured = widget.obscureText;
+    }
   }
 
   @override
@@ -1428,19 +1445,54 @@ class _MainMenuPage extends StatelessWidget {
                 onOpenDeleteAccount();
               },
             ),
-            if (isAdmin)
+            if (AdminAccessService.instance.isActuallyAdmin) ...[
               _menuTile(
                 context,
-                icon: Icons.notifications_active_outlined,
-                title: 'Admin Notification',
-                subtitle: 'Send a broadcast to users',
-                border: border,
-                textColor: primaryText,
-                onTap: () {
-                  Navigator.of(context).pop();
-                  onOpenAdminNotification();
+                icon: AdminAccessService.instance.simulateUserMode
+                    ? Icons.admin_panel_settings_outlined
+                    : Icons.preview_outlined,
+                title: AdminAccessService.instance.simulateUserMode
+                    ? 'Switch to Admin View'
+                    : 'View as User',
+                subtitle: AdminAccessService.instance.simulateUserMode
+                    ? 'Exit user simulation and restore admin mode'
+                    : 'Preview predictions and app as a free user',
+                border: const Color(0xFF00D4AA).withValues(alpha: 0.5),
+                textColor: const Color(0xFF00D4AA),
+                onTap: () async {
+                  await AdminAccessService.instance.toggleUserMode();
+                  final isUserMode = AdminAccessService.instance.simulateUserMode;
+                  if (context.mounted) {
+                    Navigator.of(context).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          isUserMode
+                              ? 'Switched to User View (Free Mode)'
+                              : 'Switched back to Admin View',
+                        ),
+                        backgroundColor: isUserMode
+                            ? const Color(0xFF1E293B)
+                            : const Color(0xFF00D4AA),
+                      ),
+                    );
+                  }
                 },
               ),
+              if (isAdmin)
+                _menuTile(
+                  context,
+                  icon: Icons.notifications_active_outlined,
+                  title: 'Admin Notification',
+                  subtitle: 'Send a broadcast to users',
+                  border: border,
+                  textColor: primaryText,
+                  onTap: () {
+                    Navigator.of(context).pop();
+                    onOpenAdminNotification();
+                  },
+                ),
+            ],
             const SizedBox(height: 8),
             _menuTile(
               context,
@@ -1908,6 +1960,7 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
                           onOpenComments: _openComments,
                           isAdmin: widget.isAdmin,
                           onAdminPlanOverride: _handleAdminPlanOverride,
+                          onOpenPremium: widget.onOpenPremium,
                         ),
                       ),
                     )
@@ -1960,6 +2013,7 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
                               _selectedDateLabel = value;
                             });
                           },
+                          onOpenPremium: widget.onOpenPremium,
                         ),
                       ),
                     ),
@@ -4418,6 +4472,126 @@ class _PredictionDateSection {
   final List<PredictionRecord> predictions;
 }
 
+class _FreeLimitUpsellCard extends StatelessWidget {
+  const _FreeLimitUpsellCard({
+    required this.hiddenCount,
+    this.customTitle,
+    this.customSubtitle,
+    this.onOpenPremium,
+  });
+
+  final int hiddenCount;
+  final String? customTitle;
+  final String? customSubtitle;
+  final VoidCallback? onOpenPremium;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = _isDarkContext(context);
+    final accent = const Color(0xFF00D4AA);
+    final gold = const Color(0xFFFFB300);
+
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: isDark
+              ? [const Color(0xFF161F33), const Color(0xFF0F172A)]
+              : [const Color(0xFFF0FDF4), const Color(0xFFFFFFFF)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: accent.withValues(alpha: 0.35),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withValues(alpha: 0.08),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: gold.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+              border: Border.all(color: gold.withValues(alpha: 0.35)),
+            ),
+            child: Icon(
+              Icons.lock_outline_rounded,
+              color: gold,
+              size: 28,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            customTitle ?? 'Free Plan Limit (5 of ${5 + hiddenCount} Shown)',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: _primaryText(context),
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            customSubtitle ??
+                'You are viewing 5 free predictions. Upgrade to Premium to unlock all $hiddenCount more predictions, high-confidence picks, and accumulator combinations!',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: _secondaryText(context),
+              fontSize: 13,
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () {
+                if (onOpenPremium != null) {
+                  onOpenPremium!();
+                } else {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      fullscreenDialog: true,
+                      builder: (_) => const PremiumPaywallDialog(),
+                    ),
+                  );
+                }
+              },
+              icon: const Icon(Icons.workspace_premium_rounded, size: 20),
+              label: const Text(
+                'Unlock All Predictions',
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 14,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: accent,
+                foregroundColor: const Color(0xFF0A0F1E),
+                elevation: 2,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 List<Widget> _buildGroupedPredictionWidgets(
   BuildContext buildContext,
   List<PredictionRecord> predictions,
@@ -4436,8 +4610,9 @@ List<Widget> _buildGroupedPredictionWidgets(
   bool isAdmin,
   Future<void> Function(PredictionRecord, String?, double?) onAdminPlanOverride,
   String selectedDateLabel,
-  void Function(String label) onSelectDateLabel,
-) {
+  void Function(String label) onSelectDateLabel, {
+  VoidCallback? onOpenPremium,
+}) {
   final sections = _groupPredictionsByDate(predictions);
   final widgets = <Widget>[];
   const horizontalPadding = EdgeInsets.symmetric(horizontal: 20);
@@ -4482,6 +4657,7 @@ List<Widget> _buildGroupedPredictionWidgets(
       showAds,
       isAdmin,
       onAdminPlanOverride,
+      onOpenPremium: onOpenPremium,
     ),
   );
 
@@ -4653,6 +4829,7 @@ List<Widget> _buildOddsAccumulatorWidgets({
   required Future<void> Function(PredictionRecord, String?, double?) onAdminPlanOverride,
   bool forPlans = false,
   double horizontalPadding = 20,
+  VoidCallback? onOpenPremium,
 }) {
   final accumulators = _buildAccumulatorGroups(predictions, targetOdds, forPlans: forPlans);
   final widgets = <Widget>[];
@@ -4671,8 +4848,12 @@ List<Widget> _buildOddsAccumulatorWidgets({
     return widgets;
   }
 
-  for (var i = 0; i < accumulators.length; i++) {
-    final ticket = accumulators[i];
+  final isFreeUser = !adFree && !isAdmin && GooglePlayBillingService.instance.activePlan == null;
+  final visibleAccumulators = (isFreeUser && accumulators.length > 1) ? accumulators.take(1).toList() : accumulators;
+  final hiddenTicketsCount = (isFreeUser && accumulators.length > 1) ? accumulators.length - 1 : 0;
+
+  for (var i = 0; i < visibleAccumulators.length; i++) {
+    final ticket = visibleAccumulators[i];
     final ticketTotalOdds = ticket.fold<double>(
       1.0,
       (sum, p) => sum * _predictionOddValue(p),
@@ -4694,6 +4875,22 @@ List<Widget> _buildOddsAccumulatorWidgets({
           onOpenComments: onOpenComments,
           isAdmin: isAdmin,
           onAdminPlanOverride: onAdminPlanOverride,
+        ),
+      ),
+    );
+  }
+
+  if (hiddenTicketsCount > 0) {
+    widgets.add(const SizedBox(height: 8));
+    widgets.add(
+      Padding(
+        padding: EdgeInsets.symmetric(horizontal: horizontalPadding, vertical: 8),
+        child: _FreeLimitUpsellCard(
+          hiddenCount: hiddenTicketsCount,
+          customTitle: 'Free Plan Limit (1 Ticket Shown)',
+          customSubtitle:
+              'You are viewing 1 free accumulator ticket. Upgrade to Premium to unlock all $hiddenTicketsCount other accumulator tickets and high odds combos!',
+          onOpenPremium: onOpenPremium,
         ),
       ),
     );
@@ -5045,8 +5242,9 @@ List<Widget> _buildTodayStatusWidgets(
   Future<void> Function(PredictionRecord prediction) onOpenComments,
   bool showAds,
   bool isAdmin,
-  Future<void> Function(PredictionRecord, String?, double?) onAdminPlanOverride,
-) {
+  Future<void> Function(PredictionRecord, String?, double?) onAdminPlanOverride, {
+  VoidCallback? onOpenPremium,
+}) {
   final now = DateTime.now();
   final grouped = <_TodayBucket, List<PredictionRecord>>{
     _TodayBucket.coming: <PredictionRecord>[],
@@ -5097,8 +5295,12 @@ List<Widget> _buildTodayStatusWidgets(
     return widgets;
   }
 
-  for (var i = 0; i < selectedItems.length; i++) {
-    final prediction = selectedItems[i];
+  final isFreeUser = !adFree && !isAdmin && GooglePlayBillingService.instance.activePlan == null;
+  final visibleItems = (isFreeUser && selectedItems.length > 5) ? selectedItems.take(5).toList() : selectedItems;
+  final hiddenCount = (isFreeUser && selectedItems.length > 5) ? selectedItems.length - 5 : 0;
+
+  for (var i = 0; i < visibleItems.length; i++) {
+    final prediction = visibleItems[i];
     widgets.add(
       Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -5120,7 +5322,7 @@ List<Widget> _buildTodayStatusWidgets(
         ),
       ),
     );
-    if (i < selectedItems.length - 1) {
+    if (i < visibleItems.length - 1) {
       widgets.add(const SizedBox(height: 12));
       if (showAds) {
         if (i % 3 == 1) {
@@ -5131,6 +5333,19 @@ List<Widget> _buildTodayStatusWidgets(
       }
       widgets.add(const SizedBox(height: 12));
     }
+  }
+
+  if (hiddenCount > 0) {
+    widgets.add(const SizedBox(height: 14));
+    widgets.add(
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: _FreeLimitUpsellCard(
+          hiddenCount: hiddenCount,
+          onOpenPremium: onOpenPremium,
+        ),
+      ),
+    );
   }
 
   return widgets;
@@ -7030,11 +7245,11 @@ Future<void> _openPlayStoreRating() async {
   final InAppReview inAppReview = InAppReview.instance;
   if (await inAppReview.isAvailable()) {
     try {
-      await inAppReview.openStoreListing(appStoreId: 'com.Aifootballprediction.app');
+      await inAppReview.openStoreListing(appStoreId: 'aifootballtodayprediction.com.app');
       return;
     } catch (_) {}
   }
-  final playStoreUri = Uri.parse('https://play.google.com/store/apps/details?id=com.Aifootballprediction.app');
+  final playStoreUri = Uri.parse('https://play.google.com/store/apps/details?id=aifootballtodayprediction.com.app');
   if (await canLaunchUrl(playStoreUri)) {
     await launchUrl(playStoreUri, mode: LaunchMode.externalApplication);
   }
@@ -8200,6 +8415,9 @@ class _PopularMatchesPageState extends State<PopularMatchesPage> {
   Widget build(BuildContext context) {
     final popularList = widget.predictions.where(_isPopularPrediction).toList();
     final isDark = _isDarkContext(context);
+    final isFreeUser = !widget.adFree && !widget.isAdmin && GooglePlayBillingService.instance.activePlan == null;
+    final visiblePopularList = (isFreeUser && popularList.length > 5) ? popularList.take(5).toList() : popularList;
+    final hiddenCount = (isFreeUser && popularList.length > 5) ? popularList.length - 5 : 0;
 
     return Scaffold(
       appBar: AppBar(
@@ -8228,9 +8446,28 @@ class _PopularMatchesPageState extends State<PopularMatchesPage> {
                 )
               : ListView.builder(
                   padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-                  itemCount: popularList.length,
+                  itemCount: visiblePopularList.length + (hiddenCount > 0 ? 1 : 0),
                   itemBuilder: (context, index) {
-                    final prediction = popularList[index];
+                    if (index == visiblePopularList.length) {
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 8, bottom: 14),
+                        child: _FreeLimitUpsellCard(
+                          hiddenCount: hiddenCount,
+                          customTitle: 'Free Plan Limit (5 of ${5 + hiddenCount} Shown)',
+                          customSubtitle:
+                              'You are viewing 5 free popular matches. Upgrade to Premium to unlock all $hiddenCount more popular matches today!',
+                          onOpenPremium: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                fullscreenDialog: true,
+                                builder: (_) => const PremiumPaywallDialog(),
+                              ),
+                            );
+                          },
+                        ),
+                      );
+                    }
+                    final prediction = visiblePopularList[index];
                     final unlockKey = _predictionUnlockKey(prediction);
                     final isLocked = !_isPickUnlocked(prediction);
                     return Padding(

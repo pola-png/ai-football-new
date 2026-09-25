@@ -1,21 +1,20 @@
-import { Query } from 'node-appwrite';
+import { Query } from '../db/query.js';
 
 /**
  * Loads team statistics for a given team, league, and season.
  * Gracefully handles missing collections by returning null, allowing features
- * to be derived from historical H2H data.
- * @param {object} tablesdb - Appwrite TablesDB instance
+ * to be derived from historical data.
+ * @param {object} tablesdb - Firestore Database instance
  * @param {string} databaseId - Database ID
- * @param {string} tableId - Optional team stats table ID (defaults to APPWRITE_TABLE_TEAM_STATS env var)
+ * @param {string} tableId - Optional team stats table ID
  * @param {string} teamApiId - API team ID
  * @param {string} leagueApiId - API league ID
  * @param {string} season - League season
  * @returns {Promise<object|null>} The team statistics record or null if not found
  */
 export async function loadTeamStats(tablesdb, databaseId, tableId, teamApiId, leagueApiId, season, cache = null) {
-  const actualTableId = tableId || process.env.APPWRITE_TABLE_TEAM_STATS;
+  const actualTableId = tableId || process.env.TABLE_TEAM_STATS || process.env.APPWRITE_TABLE_TEAM_STATS || 'team_statistics';
   if (!actualTableId) {
-    console.warn('APPWRITE_TABLE_TEAM_STATS environment variable is not defined. Returning fallback stats.');
     return null;
   }
 

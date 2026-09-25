@@ -21,7 +21,7 @@ if (keyPropertiesFile.exists()) {
 
 
 android {
-    namespace = "com.Aifootballprediction.app"
+    namespace = "aifootballtodayprediction.com.app"
     compileSdk = 36
     ndkVersion = "28.2.13676358"
     
@@ -49,23 +49,22 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.Aifootballprediction.app"
+        applicationId = "aifootballtodayprediction.com.app"
         minSdk = flutter.minSdkVersion
         targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         multiDexEnabled = true
-        
-        ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
-        }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
-            isShrinkResources = false
-            
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
             signingConfig = signingConfigs.getByName("release")
         }
     }

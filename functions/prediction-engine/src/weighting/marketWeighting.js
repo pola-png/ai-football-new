@@ -3,13 +3,13 @@
  * These reflect typical long-term prediction hit rates per market.
  */
 export const DEFAULT_MARKET_ACCURACIES = {
-  'Winner': 0.68,
-  'BTTS': 0.78,
-  'Over/Under': 0.71,
-  'Draw': 0.65,
-  'Double Chance': 0.83,
-  'Corners': 0.72,
-  'Cards': 0.70,
+  'Over/Under': 0.78,
+  'Double Chance': 0.82,
+  'Winner': 0.75,
+  'BTTS': 0.68,
+  'Draw': 0.60,
+  'Corners': 0.70,
+  'Cards': 0.68,
 };
 
 /**

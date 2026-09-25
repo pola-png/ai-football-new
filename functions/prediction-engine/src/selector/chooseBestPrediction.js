@@ -6,13 +6,13 @@
  * @returns {object} The chosen best prediction object
  */
 const MARKET_VALUE_MULTIPLIERS = {
-  'Winner': 1.00,
-  'BTTS': 1.10,
-  'Over/Under': 1.05,
-  'Draw': 1.00,
-  'Double Chance': 0.85,
+  'Over/Under': 1.15,
+  'Winner': 1.12,
+  'Double Chance': 1.10,
+  'BTTS': 1.00,
   'Corners': 0.90,
   'Cards': 0.90,
+  'Draw': 0.80,
 };
 
 export function chooseBestPrediction(weightedPredictions = [], features = {}) {
@@ -20,9 +20,24 @@ export function chooseBestPrediction(weightedPredictions = [], features = {}) {
     throw new Error('No candidate predictions provided to select from.');
   }
 
-  // Calculate final selection score by applying the value multipliers
+  const h2hCount = features.h2hMatchCount ?? 0;
+
+  // Calculate final selection score by applying the value multipliers and contextual intelligence
   const evaluated = weightedPredictions.map(pred => {
-    const multiplier = MARKET_VALUE_MULTIPLIERS[pred.market] ?? 1.0;
+    let multiplier = MARKET_VALUE_MULTIPLIERS[pred.market] ?? 1.0;
+
+    // Intelligent context adjustments:
+    // When H2H history is missing, BTTS is less certain than Over/Under or Double Chance
+    if (h2hCount === 0) {
+      if (pred.market === 'BTTS') {
+        multiplier *= 0.85; // dampen BTTS when no head-to-head records exist
+      } else if (pred.market === 'Over/Under' && (pred.selection === 'Over 1.5' || pred.selection === 'Under 3.5')) {
+        multiplier *= 1.08; // boost ultra-safe goal lines when H2H is missing
+      } else if (pred.market === 'Double Chance') {
+        multiplier *= 1.05; // boost double chance safety margin
+      }
+    }
+
     const selectionScore = Number((pred.weightedScore * multiplier).toFixed(2));
     return {
       ...pred,
@@ -30,20 +45,8 @@ export function chooseBestPrediction(weightedPredictions = [], features = {}) {
     };
   });
 
-  // Filter out restricted Over/Under lines if they do not meet the 98% confidence requirement
-  const filtered = evaluated.filter(pred => {
-    const isRestricted =
-      pred.market === 'Over/Under' &&
-      (pred.selection === 'Under 2.5' || pred.selection === 'Under 3.5' || pred.selection === 'Over 3.5');
-
-    if (isRestricted && pred.confidence < 0.98) {
-      return false;
-    }
-    return true;
-  });
-
-  // Sort candidates by selectionScore descending (tie-break on confidence)
-  const sorted = (filtered.length > 0 ? filtered : evaluated).sort((a, b) => {
+  // Sort candidates by selectionScore descending (tie-break on confidence, then weightedScore)
+  const sorted = [...evaluated].sort((a, b) => {
     if (b.selectionScore !== a.selectionScore) {
       return b.selectionScore - a.selectionScore;
     }

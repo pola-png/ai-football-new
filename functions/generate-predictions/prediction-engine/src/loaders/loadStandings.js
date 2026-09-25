@@ -1,20 +1,19 @@
-import { Query } from 'node-appwrite';
+import { Query } from '../db/query.js';
 
 /**
  * Loads standings for a given league and season.
  * Gracefully handles missing collections by returning an empty list, allowing features
- * to be derived from historical H2H data.
- * @param {object} tablesdb - Appwrite TablesDB instance
+ * to be derived from historical data.
+ * @param {object} tablesdb - Firestore Database instance
  * @param {string} databaseId - Database ID
- * @param {string} tableId - Optional standings table ID (defaults to APPWRITE_TABLE_STANDINGS env var)
+ * @param {string} tableId - Optional standings table ID
  * @param {string} leagueApiId - API league ID
  * @param {string} season - League season
  * @returns {Promise<Array>} List of standings records
  */
 export async function loadStandings(tablesdb, databaseId, tableId, leagueApiId, season, cache = null) {
-  const actualTableId = tableId || process.env.APPWRITE_TABLE_STANDINGS;
+  const actualTableId = tableId || process.env.TABLE_STANDINGS || process.env.APPWRITE_TABLE_STANDINGS || 'standings';
   if (!actualTableId) {
-    console.warn('APPWRITE_TABLE_STANDINGS environment variable is not defined. Returning fallback standings.');
     return [];
   }
 

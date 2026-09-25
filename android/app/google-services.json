@@ -7,12 +7,17 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:98283332019:android:07587439df39babe502bc6",
+        "mobilesdk_app_id": "1:98283332019:android:acfbd737ecf6e0e1502bc6",
         "android_client_info": {
-          "package_name": "com.Aifootballprediction.app"
+          "package_name": "aifootballtodayprediction.com.app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "98283332019-3ue8r7cp1mrkbhu9ab8ccpj2ibglh1d8.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyDo5_yysFrO90u17VgfTgYLAUU_GOccsSo"
@@ -20,7 +25,49 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "98283332019-3ue8r7cp1mrkbhu9ab8ccpj2ibglh1d8.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:98283332019:android:07587439df39babe502bc6",
+        "android_client_info": {
+          "package_name": "com.Aifootballprediction.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "98283332019-oer5oqre3kb53r23rdlusdo8j2pcq4ir.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.Aifootballprediction.app",
+            "certificate_hash": "6767b2d280790870270cdde3f521a855b85656db"
+          }
+        },
+        {
+          "client_id": "98283332019-3ue8r7cp1mrkbhu9ab8ccpj2ibglh1d8.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDo5_yysFrO90u17VgfTgYLAUU_GOccsSo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "98283332019-3ue8r7cp1mrkbhu9ab8ccpj2ibglh1d8.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

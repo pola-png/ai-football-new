@@ -2,7 +2,7 @@ import { runPredictionEngine } from '../src/index.js';
 import { evaluatePrediction } from '../src/learning/updateAccuracy.js';
 
 /**
- * MockTablesDB — intercepts Firestore listRows queries and applies
+ * MockTablesDB — intercepts Appwrite listRows queries and applies
  * basic equality filtering so that loadTeamStats, loadOdds, loadH2H,
  * and loadStandings all receive the correct subset of rows.
  */
@@ -14,7 +14,7 @@ class MockTablesDB {
   async listRows({ tableId, queries }) {
     const allRows = this.mockData[tableId] || [];
 
-    // Parse Query.equal() objects — TablesDB query format:
+    // Parse Query.equal() objects — node-appwrite serialises them as
     // JSON strings like: {"method":"equal","attribute":"team_api_id","values":["test123"]}
     const eqFilters = [];
     for (const q of queries || []) {
@@ -250,6 +250,38 @@ async function testLowDataFixture() {
   assert('Confidence is low due to missing data', result.chosen.confidence < 0.80);
 }
 
+// ── Test 3.5: No H2H but strong team stats (tests fallback estimators)
+
+async function testNoH2HWithTeamStats() {
+  console.log('\n═══ Test 3.5: No H2H, but Strong Team Stats ═══');
+
+  const fixture = MOCK_FIXTURES.lowdata_fixture; // reuse unknown teams
+  const mockdb = new MockTablesDB({
+    'team_statistics': [
+      { team_api_id: 'teamA', league_api_id: 'unknown_league', season: '2025', goals: { for: { average: { home: '2.8', total: '2.6' } }, against: { average: { home: '1.2', total: '1.2' } } } },
+      { team_api_id: 'teamB', league_api_id: 'unknown_league', season: '2025', goals: { for: { average: { away: '2.2', total: '2.0' } }, against: { average: { away: '1.8', total: '1.8' } } } },
+    ],
+  });
+
+  const result = await runPredictionEngine({
+    tablesdb: mockdb,
+    databaseId: 'test_db',
+    tablesConfig: { oddsTable: 'fixture_odds', h2hTable: 'fixture_h2h_history', standingsTable: 'standings', teamStatsTable: 'team_statistics' },
+    fixtureDoc: fixture,
+  });
+
+  printFeatureSnapshot(result.features);
+  printAllCandidates(result.chosen.allCandidates);
+  console.log(`  Winner: ${result.chosen.market} → ${result.chosen.selection}  (confidence ${result.chosen.confidence})`);
+  console.log(`  Reason: ${result.reason}\n`);
+
+  // Because goals stats are high, expected goals G = (2.8+1.8)/2 + (2.2+1.2)/2 = 2.3 + 1.7 = 4.0 goals.
+  // This should result in high Over 1.5 / Over 2.5 or BTTS Yes scoring.
+  assert('Estimates over25Rate from team stats', result.features.over25Rate > 0.5);
+  assert('Estimates bttsRate from team stats', result.features.bttsRate > 0.5);
+  assert('Selects a goals market (Over/Under or BTTS) instead of Double Chance 12', ['Over/Under', 'BTTS'].includes(result.chosen.market));
+}
+
 // ── Test 4: Learning module — evaluatePrediction ──────────────────
 
 function testEvaluatePrediction() {
@@ -294,6 +326,7 @@ async function main() {
     await testManCityVsArsenal();
     await testRealMadridVsGetafe();
     await testLowDataFixture();
+    await testNoH2HWithTeamStats();
     testEvaluatePrediction();
 
     console.log(`\n══════════════════════════════════════`);

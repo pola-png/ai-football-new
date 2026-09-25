@@ -1,10 +1,10 @@
-import { Query } from 'node-appwrite';
+import { Query } from '../db/query.js';
 
 /**
  * Loads a single fixture by its API ID.
- * @param {object} tablesdb - Appwrite TablesDB instance
+ * @param {object} tablesdb - Firestore Database instance
  * @param {string} databaseId - Database ID
- * @param {string} tableId - Fixtures table ID
+ * @param {string} tableId - Fixtures collection/table ID
  * @param {string} fixtureApiId - API fixture ID
  * @returns {Promise<object|null>} The fixture document or null if not found
  */

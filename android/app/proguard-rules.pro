@@ -1,4 +1,4 @@
-# Flutter specific rules
+# Flutter & Dart rules
 -keep class io.flutter.app.** { *; }
 -keep class io.flutter.plugin.**  { *; }
 -keep class io.flutter.util.**  { *; }
@@ -6,29 +6,43 @@
 -keep class io.flutter.**  { *; }
 -keep class io.flutter.plugins.**  { *; }
 
-# Remove deprecated system UI methods to prevent Android 15 warnings
+# Strip deprecated Android 15 Window color calls in release R8 pass
 -assumenosideeffects class android.view.Window {
     public void setStatusBarColor(int);
     public void setNavigationBarColor(int);
     public void setNavigationBarDividerColor(int);
 }
 
-# Keep essential Flutter methods
+# Flutter Activity & Engine
 -keep class io.flutter.embedding.android.FlutterActivity {
     public <init>(...);
     public void onCreate(android.os.Bundle);
 }
+-keep class io.flutter.embedding.engine.** { *; }
 
-# Keep Play Core classes
+# Google Play Core & In-App Review / In-App Update
 -keep class com.google.android.play.core.** { *; }
 -dontwarn com.google.android.play.core.**
 
-# Google Play Billing Library rules
+# Google Play Billing Library
 -keep class com.android.billingclient.** { *; }
 -dontwarn com.android.billingclient.**
 -keep class com.android.vending.billing.** { *; }
 
-# Keep classes for flutter_local_notifications (GSON / dexterous)
+# Google Mobile Ads (AdMob)
+-keep public class com.google.android.gms.ads.** {
+   public *;
+}
+-keep public class com.google.ads.** {
+   public *;
+}
+-dontwarn com.google.android.gms.ads.**
+
+# Firebase
+-keep class com.google.firebase.** { *; }
+-dontwarn com.google.firebase.**
+
+# Flutter Local Notifications & Gson serialization
 -keepattributes InnerClasses
 -keepattributes Signature
 -keepattributes *Annotation*

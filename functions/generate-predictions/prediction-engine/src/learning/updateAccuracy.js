@@ -1,4 +1,4 @@
-import { Query } from 'node-appwrite';
+import { Query } from '../db/query.js';
 import { DEFAULT_MARKET_ACCURACIES } from '../weighting/marketWeighting.js';
 
 function isoNow() {

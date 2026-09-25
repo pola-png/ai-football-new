@@ -27,9 +27,9 @@ import { buildReason } from './reasons/buildReason.js';
  * Executes the entire prediction pipeline for a single fixture.
  * 
  * @param {object} params - Pipeline parameters
- * @param {object} params.tablesdb - Appwrite TablesDB instance
+ * @param {object} params.tablesdb - Firestore Database instance
  * @param {string} params.databaseId - Database ID
- * @param {object} params.tablesConfig - Mapping of table keys to table names/IDs
+ * @param {object} params.tablesConfig - Mapping of table keys to collection/table names
  * @param {object} params.fixtureDoc - Fixture document to predict for
  * @param {object} [params.customAccuracies] - Custom historical market accuracy weights
  * @returns {Promise<object>} The chosen prediction, reason, confidence, and features
@@ -67,12 +67,12 @@ export async function runPredictionEngine({
     loadTeamStats(tablesdb, databaseId, tablesConfig.teamStatsTable, awayTeamId, leagueApiId, season, cache),
   ]);
 
-  debugLog(`[Engine] Data loaded from Appwrite: ` +
+  debugLog(`[Engine] Data loaded from Firestore: ` +
       `oddsRows=${oddsRows.length}, ` +
       `h2hRows=${h2hRows.length}, ` +
       `standingsList=${standingsList.length}, ` +
-      `homeTeamStats=${homeTeamStats ? 'Found (Appwrite Table)' : 'Calculated (Fallback)'}, ` +
-      `awayTeamStats=${awayTeamStats ? 'Found (Appwrite Table)' : 'Calculated (Fallback)'}`);
+      `homeTeamStats=${homeTeamStats ? 'Found (Firestore Table)' : 'Calculated (Fallback)'}, ` +
+      `awayTeamStats=${awayTeamStats ? 'Found (Firestore Table)' : 'Calculated (Fallback)'}`);
 
   // 2. Feature Extraction Phase
   const goalsFeatures = extractGoalsFeatures(h2hRows, homeTeamStats, awayTeamStats, homeTeamId, awayTeamId);

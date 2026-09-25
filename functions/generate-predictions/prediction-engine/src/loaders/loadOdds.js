@@ -1,12 +1,12 @@
-import { Query } from 'node-appwrite';
+import { Query } from '../db/query.js';
 
 /**
  * Loads odds for a given fixture.
- * Attempts to load from the fixture_odds table.
+ * Attempts to load from the fixture_odds collection/table.
  * Falls back to parsing fixtureDoc.odds_summary if table loading fails or is empty.
- * @param {object} tablesdb - Appwrite TablesDB instance
+ * @param {object} tablesdb - Firestore Database instance
  * @param {string} databaseId - Database ID
- * @param {string} tableId - Odds table ID
+ * @param {string} tableId - Odds collection/table ID
  * @param {string} fixtureApiId - API fixture ID
  * @param {object} [fixtureDoc] - Optional fixture document to parse summary from
  * @returns {Promise<Array>} List of odds rows

@@ -29,9 +29,9 @@ export function predictDoubleChance(features) {
   pDraw /= total;
 
   // 2. Score selections (max 100)
-  let score1X = (pHome + pDraw) * 100;
-  let scoreX2 = (pAway + pDraw) * 100;
-  let score12 = (pHome + pAway) * 100;
+  let score1X = (pHome + pDraw * 0.8) * 90;
+  let scoreX2 = (pAway + pDraw * 0.8) * 90;
+  let score12 = (pHome * 0.7 + pAway * 0.7) * 90;
 
   const reasons1X = [];
   const reasonsX2 = [];
@@ -39,8 +39,8 @@ export function predictDoubleChance(features) {
 
   // Form adjustments
   const formDiff = homeFormScore - awayFormScore;
-  score1X += formDiff * 0.1;
-  scoreX2 -= formDiff * 0.1;
+  score1X += formDiff * 0.15;
+  scoreX2 -= formDiff * 0.15;
 
   if (homeFormScore > 60) {
     reasons1X.push(`Home team has strong recent form, undefeated in recent matches (form score ${homeFormScore}%)`);
@@ -51,16 +51,16 @@ export function predictDoubleChance(features) {
 
   // Elo adjustment
   if (strengthDifference > 80) {
-    score1X += 8;
+    score1X += 10;
     reasons1X.push(`Home team carries a clear Elo strength advantage (+${strengthDifference})`);
   } else if (strengthDifference < -80) {
-    scoreX2 += 8;
+    scoreX2 += 10;
     reasonsX2.push(`Away team carries a clear Elo strength advantage (+${Math.abs(strengthDifference)})`);
   }
 
   // Draw rate adjustment for 12 (no draw)
   if (drawRateH2H < 0.15 && drawRateH2H > 0) {
-    score12 += 10;
+    score12 += 8;
     reasons12.push(`Low historical H2H draw rate (${Math.round(drawRateH2H * 100)}%) favors a decisive outcome`);
   }
   if (pDraw < 0.20) {
