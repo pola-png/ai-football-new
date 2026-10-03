@@ -261,7 +261,7 @@ export default async function main() {
     syncRunsTable = required('APPWRITE_TABLE_SYNC_RUNS');
     const topicId = process.env.APPWRITE_TOPIC_PREDICTIONS
       ? String(process.env.APPWRITE_TOPIC_PREDICTIONS).trim()
-      : '';
+      : (process.env.FIREBASE_PREDICTION_TOPIC || 'predictions');
 
     appwriteLog(JSON.stringify({
       level: 'info',

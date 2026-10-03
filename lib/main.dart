@@ -36,16 +36,46 @@ Future<void> main() async {
   try {
     await Firebase.initializeApp();
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+  } catch (error) {
+    debugPrint('Firebase init failed: $error');
+  }
+
+  try {
     await PushNotificationService.initialize();
+  } catch (error) {
+    debugPrint('Push notification init failed: $error');
+  }
+
+  try {
     await AdGateService.instance.initialize();
+  } catch (error) {
+    debugPrint('AdGate init failed: $error');
+  }
+
+  try {
     await GooglePlayBillingService.instance.initialize();
+  } catch (error) {
+    debugPrint('GooglePlayBilling init failed: $error');
+  }
+
+  try {
     await AdminAccessService.instance.initialize();
+  } catch (error) {
+    debugPrint('AdminAccess init failed: $error');
+  }
+
+  try {
     await AppAuthService.instance.initialize();
+  } catch (error) {
+    debugPrint('AppAuth init failed: $error');
+  }
+
+  try {
     await SocialEngagementService.instance.initialize();
   } catch (error) {
-    debugPrint('Push subscription failed: $error');
-    // Push subscription issues should not block the prediction feed.
+    debugPrint('SocialEngagement init failed: $error');
   }
+
   runApp(const MyApp());
 }
 
@@ -2148,6 +2178,10 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
         GooglePlayBillingService.instance.activePlan ??
         SubscriptionPlanId.standard;
     GooglePlayBillingService.instance.addListener(_onBillingChanged);
+    if (!GooglePlayBillingService.instance.isAvailable &&
+        !GooglePlayBillingService.instance.isLoading) {
+      GooglePlayBillingService.instance.retryConnection();
+    }
   }
 
   @override
@@ -3870,15 +3904,33 @@ class _PlanCarouselState extends State<_PlanCarousel> {
                   final plan = widget.plans[index];
                   final product = widget.billing.productFor(plan);
                   final isOwned = widget.billing.isOwned(plan);
-                  final canPurchase = widget.billing.isAvailable && !isOwned;
+                  final isLoading = widget.billing.isLoading;
+                  final isAvailable = widget.billing.isAvailable;
                   final String price;
                   if (isOwned) {
                     price = 'Active';
-                  } else if (widget.billing.isLoading) {
+                  } else if (isLoading) {
                     price = '...';
                   } else {
                     price = product?.price ?? plan.fallbackPrice;
                   }
+
+                  final VoidCallback? onPressed;
+                  final String buttonLabel;
+                  if (isOwned) {
+                    onPressed = null;
+                    buttonLabel = 'Active';
+                  } else if (isLoading) {
+                    onPressed = null;
+                    buttonLabel = 'Connecting...';
+                  } else if (isAvailable) {
+                    onPressed = () => widget.onBuyPlan(plan);
+                    buttonLabel = 'Subscribe Now';
+                  } else {
+                    onPressed = () => widget.billing.retryConnection();
+                    buttonLabel = 'Retry Connection';
+                  }
+
                   return Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 6),
                     child: _CarouselPlanCard(
@@ -3886,7 +3938,8 @@ class _PlanCarouselState extends State<_PlanCarousel> {
                       price: price,
                       isOwned: isOwned,
                       compact: widget.compact,
-                      onPressed: canPurchase ? () => widget.onBuyPlan(plan) : null,
+                      buttonLabel: buttonLabel,
+                      onPressed: onPressed,
                     ),
                   );
                 },
@@ -3924,6 +3977,7 @@ class _CarouselPlanCard extends StatelessWidget {
     required this.price,
     required this.isOwned,
     required this.compact,
+    required this.buttonLabel,
     required this.onPressed,
   });
 
@@ -3931,6 +3985,7 @@ class _CarouselPlanCard extends StatelessWidget {
   final String price;
   final bool isOwned;
   final bool compact;
+  final String buttonLabel;
   final VoidCallback? onPressed;
 
   @override
@@ -4094,11 +4149,7 @@ class _CarouselPlanCard extends StatelessWidget {
                           ),
                         ),
                         child: Text(
-                          isOwned
-                              ? 'Active'
-                              : onPressed == null
-                                  ? 'Unavailable'
-                                  : 'Subscribe Now',
+                          buttonLabel,
                           style: const TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 15,
@@ -5296,8 +5347,8 @@ List<Widget> _buildTodayStatusWidgets(
   }
 
   final isFreeUser = !adFree && !isAdmin && GooglePlayBillingService.instance.activePlan == null;
-  final visibleItems = (isFreeUser && selectedItems.length > 5) ? selectedItems.take(5).toList() : selectedItems;
-  final hiddenCount = (isFreeUser && selectedItems.length > 5) ? selectedItems.length - 5 : 0;
+  final visibleItems = (isFreeUser && selectedItems.length > 3) ? selectedItems.take(3).toList() : selectedItems;
+  final hiddenCount = (isFreeUser && selectedItems.length > 3) ? selectedItems.length - 3 : 0;
 
   for (var i = 0; i < visibleItems.length; i++) {
     final prediction = visibleItems[i];
@@ -8416,8 +8467,8 @@ class _PopularMatchesPageState extends State<PopularMatchesPage> {
     final popularList = widget.predictions.where(_isPopularPrediction).toList();
     final isDark = _isDarkContext(context);
     final isFreeUser = !widget.adFree && !widget.isAdmin && GooglePlayBillingService.instance.activePlan == null;
-    final visiblePopularList = (isFreeUser && popularList.length > 5) ? popularList.take(5).toList() : popularList;
-    final hiddenCount = (isFreeUser && popularList.length > 5) ? popularList.length - 5 : 0;
+    final visiblePopularList = (isFreeUser && popularList.length > 3) ? popularList.take(3).toList() : popularList;
+    final hiddenCount = (isFreeUser && popularList.length > 3) ? popularList.length - 3 : 0;
 
     return Scaffold(
       appBar: AppBar(

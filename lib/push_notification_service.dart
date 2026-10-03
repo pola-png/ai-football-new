@@ -35,6 +35,28 @@ class PushNotificationService {
     await androidPlugin?.requestNotificationsPermission();
     await androidPlugin?.createNotificationChannel(_channel);
 
+    try {
+      final messaging = FirebaseMessaging.instance;
+      await messaging.setAutoInitEnabled(true);
+      await messaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+        provisional: false,
+      );
+      await messaging.subscribeToTopic('predictions');
+      await messaging.subscribeToTopic('chat_general');
+
+      messaging.onTokenRefresh.listen((_) async {
+        try {
+          await messaging.subscribeToTopic('predictions');
+          await messaging.subscribeToTopic('chat_general');
+        } catch (_) {}
+      });
+    } catch (e) {
+      // Background topic subscription will retry
+    }
+
     FirebaseMessaging.onMessage.listen(_showRemoteMessage);
     FirebaseMessaging.onMessageOpenedApp.listen(_handleOpenedMessage);
 

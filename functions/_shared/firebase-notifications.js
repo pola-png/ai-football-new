@@ -31,7 +31,8 @@ function buildServiceAccount() {
 }
 
 export function getFirebaseMessaging() {
-  if (!getApps().length) {
+  const apps = getApps();
+  if (!apps.length) {
     const hasServiceAccountJson = Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
     const hasSplitEnv = Boolean(
       process.env.FIREBASE_SERVICE_ACCOUNT_PROJECT_ID &&
@@ -46,14 +47,18 @@ export function getFirebaseMessaging() {
         });
       } catch (error) {
         console.warn('Failed to initialize Firebase Admin with credentials, falling back to default:', error.message);
-        initializeApp();
+        initializeApp({
+          projectId: process.env.FIREBASE_PROJECT_ID || process.env.GCLOUD_PROJECT || 'ai-football-predictions-48890',
+        });
       }
     } else {
-      initializeApp();
+      initializeApp({
+        projectId: process.env.FIREBASE_PROJECT_ID || process.env.GCLOUD_PROJECT || 'ai-football-predictions-48890',
+      });
     }
   }
 
-  return getMessaging();
+  return getMessaging(getApps()[0]);
 }
 
 export async function sendPredictionTopicNotification({
@@ -62,7 +67,7 @@ export async function sendPredictionTopicNotification({
   body,
   data = {},
 }) {
-  const targetTopic = topicId || process.env.FIREBASE_PREDICTION_TOPIC || 'predictions';
+  const targetTopic = topicId || process.env.FIREBASE_PREDICTION_TOPIC || process.env.APPWRITE_TOPIC_PREDICTIONS || 'predictions';
 
   const messaging = getFirebaseMessaging();
   return messaging.send({
@@ -78,6 +83,17 @@ export async function sendPredictionTopicNotification({
       priority: 'high',
       notification: {
         channelId: 'football_predictions',
+        sound: 'default',
+        icon: 'ic_launcher',
+        clickAction: 'FLUTTER_NOTIFICATION_CLICK',
+      },
+    },
+    apns: {
+      payload: {
+        aps: {
+          sound: 'default',
+          badge: 1,
+        },
       },
     },
   });

@@ -95,6 +95,7 @@ export async function loadH2H(tablesdb, databaseId, tableId, fixtureDoc) {
           home_score: String(m.home_score),
           away_score: String(m.away_score),
           winner: m.winner,
+          kickoff_at: m.kickoff_at || new Date().toISOString(),
           status_short: m.status_short || 'FT',
           source: m.source || 'web_search',
           created_at: new Date().toISOString(),

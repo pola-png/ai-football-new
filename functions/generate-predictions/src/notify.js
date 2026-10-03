@@ -1,5 +1,5 @@
 function shouldSendPredictionNotification(confidence) {
-  return Number.isFinite(confidence) && confidence >= 0.85;
+  return Number.isFinite(confidence) && confidence >= 0.60;
 }
 
 function buildMatchNotificationCopy({ fixture, confidence }) {

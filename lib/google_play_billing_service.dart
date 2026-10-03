@@ -139,9 +139,28 @@ class GooglePlayBillingService extends ChangeNotifier {
     }
   }
 
+  Future<void> retryConnection() async {
+    _loading = true;
+    _errorMessage = null;
+    notifyListeners();
+
+    try {
+      await _connectToBilling();
+      if (_available) {
+        await _inAppPurchase.restorePurchases();
+      }
+    } catch (error) {
+      _errorMessage = error.toString();
+      debugPrint('Billing retry failed: $error');
+    } finally {
+      _loading = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> purchase(SubscriptionPlanId plan) async {
     if (!_available || !_productsById.containsKey(plan.productId)) {
-      await _connectToBilling();
+      await retryConnection();
     }
 
     if (!_available) {
@@ -150,7 +169,7 @@ class GooglePlayBillingService extends ChangeNotifier {
         notifyListeners();
         return;
       }
-      throw StateError('Google Play billing is not available on this device.');
+      throw StateError('Google Play billing is not available on this device. Please check your internet connection or Google Play Services.');
     }
 
     final product = _productsById[plan.productId];
@@ -161,7 +180,7 @@ class GooglePlayBillingService extends ChangeNotifier {
         return;
       }
       throw StateError(
-        'Product "${plan.productId}" not found. Make sure it is published and active in Google Play Console.',
+        'Product "${plan.productId}" not found in Google Play Store. Please verify base plan is active.',
       );
     }
 
@@ -173,9 +192,11 @@ class GooglePlayBillingService extends ChangeNotifier {
 
   Future<void> restorePurchases() async {
     if (!_available) {
-      return;
+      await _connectToBilling();
     }
-    await _inAppPurchase.restorePurchases();
+    if (_available) {
+      await _inAppPurchase.restorePurchases();
+    }
   }
 
   Future<void> disposeService() async {
@@ -184,44 +205,50 @@ class GooglePlayBillingService extends ChangeNotifier {
   }
 
   Future<void> _loadProducts() async {
-    final response = await _inAppPurchase.queryProductDetails(
-      _availableProductIds,
-    );
-
-    // Log not-found products to help diagnose mismatched IDs
-    if (response.notFoundIDs.isNotEmpty) {
-      debugPrint(
-        'Play Store products NOT found: ${response.notFoundIDs.join(', ')}. '
-        'Check that the product IDs are Active in Play Console and the app '
-        'is published to at least the Internal Testing track.',
-      );
-      _errorMessage =
-          'Some products were not found in the Play Store: '
-          '${response.notFoundIDs.join(', ')}. '
-          'Make sure each product ID is Active in Play Console.';
-    }
-
-    if (response.error != null) {
-      throw StateError(response.error!.message);
-    }
-
-    _productsById
-      ..clear()
-      ..addEntries(
-        response.productDetails.map((product) => MapEntry(product.id, product)),
+    try {
+      final response = await _inAppPurchase.queryProductDetails(
+        _availableProductIds,
       );
 
-    debugPrint('Play Store products loaded: ${_productsById.keys.join(', ')}');
+      // Log not-found products to help diagnose mismatched IDs
+      if (response.notFoundIDs.isNotEmpty) {
+        debugPrint(
+          'Play Store products NOT found: ${response.notFoundIDs.join(', ')}. '
+          'Check that the product IDs are Active in Play Console with active base plans.',
+        );
+      }
+
+      if (response.error != null) {
+        debugPrint('Billing queryProductDetails error: ${response.error!.message}');
+        _errorMessage = response.error!.message;
+      }
+
+      if (response.productDetails.isNotEmpty) {
+        _productsById
+          ..clear()
+          ..addEntries(
+            response.productDetails.map((product) => MapEntry(product.id, product)),
+          );
+        debugPrint('Play Store products loaded: ${_productsById.keys.join(', ')}');
+      }
+    } catch (error) {
+      debugPrint('Error loading product details: $error');
+      _errorMessage = error.toString();
+    }
   }
 
   Future<void> _connectToBilling() async {
     try {
       _errorMessage = null;
       _available = await _inAppPurchase.isAvailable();
+      
+      // If not immediately available, retry up to 2 times with a short pause
       if (!_available) {
-        // Retry once after a short delay in case Play Billing is still warming up.
-        await Future<void>.delayed(const Duration(seconds: 2));
-        _available = await _inAppPurchase.isAvailable();
+        for (int i = 0; i < 2; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 1500));
+          _available = await _inAppPurchase.isAvailable();
+          if (_available) break;
+        }
       }
 
       if (!_available) {
@@ -240,7 +267,6 @@ class GooglePlayBillingService extends ChangeNotifier {
     } catch (error) {
       _errorMessage = error.toString();
       debugPrint('Billing connection failed: $error');
-      rethrow;
     } finally {
       notifyListeners();
     }
