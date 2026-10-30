@@ -38,7 +38,7 @@ class AdGateService {
 
     _initialized = true;
     await MobileAds.instance.initialize();
-    if (kDebugMode) {
+    if (!kReleaseMode && kDebugMode) {
       await MobileAds.instance.updateRequestConfiguration(
         RequestConfiguration(testDeviceIds: [kTestDeviceId]),
       );
@@ -58,7 +58,7 @@ class AdGateService {
 
     _loadingRewardedAd = true;
     RewardedAd.load(
-      adUnitId: kDebugMode ? kTestRewardedAdUnitId : kRewardedAdUnitId,
+      adUnitId: kReleaseMode ? kRewardedAdUnitId : kTestRewardedAdUnitId,
       request: const AdRequest(),
       rewardedAdLoadCallback: RewardedAdLoadCallback(
         onAdLoaded: (ad) {
@@ -150,7 +150,7 @@ class AdGateService {
 
     _loadingInterstitialAd = true;
     InterstitialAd.load(
-      adUnitId: kDebugMode ? kTestInterstitialAdUnitId : kInterstitialAdUnitId,
+      adUnitId: kReleaseMode ? kInterstitialAdUnitId : kTestInterstitialAdUnitId,
       request: const AdRequest(),
       adLoadCallback: InterstitialAdLoadCallback(
         onAdLoaded: (ad) {
@@ -234,7 +234,7 @@ class AdGateService {
 
     _loadingAppOpenAd = true;
     AppOpenAd.load(
-      adUnitId: kDebugMode ? kTestAppOpenAdUnitId : kAppOpenAdUnitId,
+      adUnitId: kReleaseMode ? kAppOpenAdUnitId : kTestAppOpenAdUnitId,
       request: const AdRequest(),
       adLoadCallback: AppOpenAdLoadCallback(
         onAdLoaded: (ad) {
@@ -301,7 +301,7 @@ class AdGateService {
 
     _loadingRewardedInterstitial = true;
     RewardedInterstitialAd.load(
-      adUnitId: kDebugMode ? kTestRewardedInterstitialAdUnitId : kRewardedInterstitialAdUnitId,
+      adUnitId: kReleaseMode ? kRewardedInterstitialAdUnitId : kTestRewardedInterstitialAdUnitId,
       request: const AdRequest(),
       rewardedInterstitialAdLoadCallback: RewardedInterstitialAdLoadCallback(
         onAdLoaded: (ad) {

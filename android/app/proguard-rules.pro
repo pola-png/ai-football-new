@@ -26,6 +26,13 @@
 -keep class com.google.android.play.core.appupdate.** { *; }
 -dontwarn com.google.android.play.core.**
 
+# Firebase App Check & Play Integrity
+-keep class com.google.firebase.appcheck.** { *; }
+-dontwarn com.google.firebase.appcheck.**
+-keep class com.google.android.play.core.integrity.** { *; }
+-dontwarn com.google.android.play.core.integrity.**
+-keep class com.google.android.gms.tasks.** { *; }
+
 # Flutter Local Notifications & Serialization
 -keepattributes InnerClasses
 -keepattributes Signature

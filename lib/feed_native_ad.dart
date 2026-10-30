@@ -36,7 +36,7 @@ class _FeedNativeAdState extends State<FeedNativeAd> {
     }
 
     _nativeAd = NativeAd(
-      adUnitId: kDebugMode ? kTestNativeAdUnitId : kNativeAdUnitId,
+      adUnitId: kReleaseMode ? kNativeAdUnitId : kTestNativeAdUnitId,
       factoryId: 'listTile',
       request: const AdRequest(),
       listener: NativeAdListener(

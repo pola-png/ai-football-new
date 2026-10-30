@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -38,6 +40,19 @@ Future<void> main() async {
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   } catch (error) {
     debugPrint('Firebase init failed: $error');
+  }
+
+  try {
+    final appleProvider = kReleaseMode ? AppleProvider.appAttest : AppleProvider.debug;
+    final androidProvider = kReleaseMode ? AndroidProvider.playIntegrity : AndroidProvider.debug;
+    await FirebaseAppCheck.instance.activate(
+      androidProvider: androidProvider,
+      appleProvider: appleProvider,
+    );
+    await FirebaseAppCheck.instance.setTokenAutoRefreshEnabled(true);
+    debugPrint('Firebase App Check activated successfully (Android: $androidProvider, Apple: $appleProvider)');
+  } catch (error) {
+    debugPrint('Firebase App Check activation failed: $error');
   }
 
   try {
@@ -1021,11 +1036,16 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> with WidgetsBin
   @override
   void initState() {
     super.initState();
+    final billing = GooglePlayBillingService.instance;
+    final isAdmin = AdminAccessService.instance.isAdmin;
+    final isFreeUser = billing.activePlan == null && !isAdmin;
+    if (isFreeUser) {
+      _currentIndex = 1; // Direct free users to plans screen
+    }
+
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final billing = GooglePlayBillingService.instance;
-      final isAdmin = AdminAccessService.instance.isAdmin;
-      if (billing.activePlan == null && !isAdmin) {
+      if (isFreeUser) {
         AdGateService.instance.showAppOpenAdIfAvailable();
       }
     });
@@ -1131,6 +1151,27 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> with WidgetsBin
   }
 
   void _setIndex(int index) {
+    final billing = GooglePlayBillingService.instance;
+    final isAdmin = AdminAccessService.instance.isAdmin;
+    final isFreeUser = billing.activePlan == null && !isAdmin;
+
+    if (isFreeUser && index == 0) {
+      if (_currentIndex != 1) {
+        setState(() {
+          _currentIndex = 1;
+        });
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'A subscription plan is required to access predictions. Please choose a plan below.',
+          ),
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
     if (_currentIndex == index) {
       return;
     }
@@ -1207,6 +1248,10 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> with WidgetsBin
             final rewardedAdFree =
                 GooglePlayBillingService.instance.hasRewardedAdFreeAccess || isAdmin;
             final activePlan = GooglePlayBillingService.instance.activePlan;
+            final isFreeUser = activePlan == null && !isAdmin;
+            if (isFreeUser && _currentIndex == 0) {
+              _currentIndex = 1;
+            }
             _maybeShowAdFreeUpsell(adFree);
 
             return Scaffold(
@@ -1282,7 +1327,7 @@ class _PredictionFeedPageState extends State<PredictionFeedPage> with WidgetsBin
                                 icon: Icons.workspace_premium,
                                 isActive: _currentIndex == 1,
                               ),
-                              label: 'Premium Plan',
+                              label: 'Plans',
                             ),
                             NavigationDestination(
                               icon: const Icon(Icons.chat_bubble_outline),
@@ -1390,8 +1435,8 @@ class _MainMenuPage extends StatelessWidget {
             _menuTile(
               context,
               icon: Icons.workspace_premium_outlined,
-              title: 'Premium Plan',
-              subtitle: 'View your plans and unlockables',
+              title: 'Plans',
+              subtitle: 'Choose a subscription plan and unlock predictions',
               border: border,
               textColor: primaryText,
               onTap: () {
@@ -1486,7 +1531,7 @@ class _MainMenuPage extends StatelessWidget {
                     : 'View as User',
                 subtitle: AdminAccessService.instance.simulateUserMode
                     ? 'Exit user simulation and restore admin mode'
-                    : 'Preview predictions and app as a free user',
+                    : 'Preview app as an unsubscribed user',
                 border: const Color(0xFF00D4AA).withValues(alpha: 0.5),
                 textColor: const Color(0xFF00D4AA),
                 onTap: () async {
@@ -1498,7 +1543,7 @@ class _MainMenuPage extends StatelessWidget {
                       SnackBar(
                         content: Text(
                           isUserMode
-                              ? 'Switched to User View (Free Mode)'
+                              ? 'Switched to User View (Unsubscribed)'
                               : 'Switched back to Admin View',
                         ),
                         backgroundColor: isUserMode
@@ -1656,50 +1701,6 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
     }
   }
 
-  Future<void> _saveUnlockedPickKey(String key) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      _unlockedPickKeys.add(key);
-      await prefs.setStringList('unlocked_pick_keys', _unlockedPickKeys.toList());
-      if (mounted) {
-        setState(() {});
-      }
-    } catch (e) {
-      debugPrint('Error saving unlocked pick key: $e');
-    }
-  }
-
-  void _showLimitReachedDialog() {
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Unlock Limit Reached'),
-        content: const Text(
-          'You have unlocked the maximum limit of 20 matches using ads. '
-          'To unlock more matches, please subscribe to our 7-Day Ad-Free plan.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Maybe Later'),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  fullscreenDialog: true,
-                  builder: (_) => const PremiumPaywallDialog(),
-                ),
-              );
-            },
-            child: const Text('Subscribe'),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<void> _reload() async {
     setState(() {
       _futurePredictions = _repository.fetchPublishedPredictions(includeHistory: _historyMode);
@@ -1747,18 +1748,8 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
     if (widget.adFree) {
       return;
     }
-    final shown = await AdGateService.instance.showInterstitialAd();
-    if (shown) {
-      final key = _predictionUnlockKey(prediction);
-      await _saveUnlockedPickKey(key);
-      return;
-    }
-
-    final shown2 = await AdGateService.instance.showRewardedInterstitialAd();
-    if (shown2) {
-      final key = _predictionUnlockKey(prediction);
-      await _saveUnlockedPickKey(key);
-    }
+    // Free ad-unlocks removed; direct to plans screen
+    widget.onOpenPremium();
   }
 
   bool _matchesFilter(PredictionRecord prediction) {
@@ -1829,7 +1820,92 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
     final isDark = _isDarkContext(context);
     final pageGradient = _screenGradient(context);
     final surface = _screenSurface(context);
+    final billing = GooglePlayBillingService.instance;
+    final isAdmin = widget.isAdmin;
+    final isFreeUser = billing.activePlan == null && !isAdmin;
 
+    if (isFreeUser) {
+      return Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: pageGradient,
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(22),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF00D4AA).withAlpha(25),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: const Color(0xFF00D4AA).withAlpha(70),
+                        width: 2,
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.workspace_premium_rounded,
+                      size: 56,
+                      color: Color(0xFF00D4AA),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    'Subscription Required',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: _primaryText(context),
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Free predictions are no longer available. Subscribe to any of our plans to unlock accurate match predictions, high odds accumulators, and premium analytics.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: _secondaryText(context),
+                      fontSize: 15,
+                      height: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 28),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: widget.onOpenPremium,
+                      icon: const Icon(Icons.arrow_forward_rounded, size: 20),
+                      label: const Text(
+                        'View Subscription Plans',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF00D4AA),
+                        foregroundColor: const Color(0xFF0A0F1E),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
 
     return Container(
       decoration: BoxDecoration(
@@ -1856,6 +1932,7 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
                 physics: const AlwaysScrollableScrollPhysics(),
                 slivers: [
                   SliverAppBar(
+                    primary: false,
                     pinned: true,
                     floating: false,
                     toolbarHeight: 78,
@@ -1905,6 +1982,13 @@ class _PredictionHomeTabState extends State<_PredictionHomeTab> {
                         predictions: predictions,
                         onOpenPremium: widget.onOpenPremium,
                         onOpenPopularMatches: () {
+                          final billing = GooglePlayBillingService.instance;
+                          final isAdmin = widget.isAdmin;
+                          final isFreeUser = billing.activePlan == null && !isAdmin;
+                          if (isFreeUser) {
+                            widget.onOpenPremium();
+                            return;
+                          }
                           Navigator.of(context).push(
                             MaterialPageRoute<void>(
                               builder: (_) => PopularMatchesPage(
@@ -2231,7 +2315,7 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
         final billing = GooglePlayBillingService.instance;
         final isAdmin = widget.isAdmin;
         final activePlan = billing.activePlan;
-        final hasAccess = widget.adFree || isAdmin || activePlan != null;
+        final hasAccess = isAdmin || activePlan != null;
         final selectedPlan = isAdmin
             ? _selectedPlanOverride ?? activePlan ?? SubscriptionPlanId.premium
             : activePlan ?? _selectedPlanOverride ?? SubscriptionPlanId.premium;
@@ -2392,7 +2476,7 @@ class _PremiumPlanPageState extends State<PremiumPlanPage> {
                           children: [
                             Expanded(
                               child: Text(
-                                'Premium Plans',
+                                'Subscription Plans',
                                 style: TextStyle(
                                   color: _primaryText(context),
                                   fontSize: 28,
@@ -4523,126 +4607,6 @@ class _PredictionDateSection {
   final List<PredictionRecord> predictions;
 }
 
-class _FreeLimitUpsellCard extends StatelessWidget {
-  const _FreeLimitUpsellCard({
-    required this.hiddenCount,
-    this.customTitle,
-    this.customSubtitle,
-    this.onOpenPremium,
-  });
-
-  final int hiddenCount;
-  final String? customTitle;
-  final String? customSubtitle;
-  final VoidCallback? onOpenPremium;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = _isDarkContext(context);
-    final accent = const Color(0xFF00D4AA);
-    final gold = const Color(0xFFFFB300);
-
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: isDark
-              ? [const Color(0xFF161F33), const Color(0xFF0F172A)]
-              : [const Color(0xFFF0FDF4), const Color(0xFFFFFFFF)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: accent.withValues(alpha: 0.35),
-          width: 1.5,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: accent.withValues(alpha: 0.08),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: gold.withValues(alpha: 0.15),
-              shape: BoxShape.circle,
-              border: Border.all(color: gold.withValues(alpha: 0.35)),
-            ),
-            child: Icon(
-              Icons.lock_outline_rounded,
-              color: gold,
-              size: 28,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            customTitle ?? 'Free Plan Limit (5 of ${5 + hiddenCount} Shown)',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: _primaryText(context),
-              fontSize: 16,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            customSubtitle ??
-                'You are viewing 5 free predictions. Upgrade to Premium to unlock all $hiddenCount more predictions, high-confidence picks, and accumulator combinations!',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: _secondaryText(context),
-              fontSize: 13,
-              height: 1.45,
-            ),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () {
-                if (onOpenPremium != null) {
-                  onOpenPremium!();
-                } else {
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      fullscreenDialog: true,
-                      builder: (_) => const PremiumPaywallDialog(),
-                    ),
-                  );
-                }
-              },
-              icon: const Icon(Icons.workspace_premium_rounded, size: 20),
-              label: const Text(
-                'Unlock All Predictions',
-                style: TextStyle(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 14,
-                ),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: accent,
-                foregroundColor: const Color(0xFF0A0F1E),
-                elevation: 2,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 List<Widget> _buildGroupedPredictionWidgets(
   BuildContext buildContext,
   List<PredictionRecord> predictions,
@@ -4899,9 +4863,7 @@ List<Widget> _buildOddsAccumulatorWidgets({
     return widgets;
   }
 
-  final isFreeUser = !adFree && !isAdmin && GooglePlayBillingService.instance.activePlan == null;
-  final visibleAccumulators = (isFreeUser && accumulators.length > 1) ? accumulators.take(1).toList() : accumulators;
-  final hiddenTicketsCount = (isFreeUser && accumulators.length > 1) ? accumulators.length - 1 : 0;
+  final visibleAccumulators = accumulators;
 
   for (var i = 0; i < visibleAccumulators.length; i++) {
     final ticket = visibleAccumulators[i];
@@ -4926,22 +4888,6 @@ List<Widget> _buildOddsAccumulatorWidgets({
           onOpenComments: onOpenComments,
           isAdmin: isAdmin,
           onAdminPlanOverride: onAdminPlanOverride,
-        ),
-      ),
-    );
-  }
-
-  if (hiddenTicketsCount > 0) {
-    widgets.add(const SizedBox(height: 8));
-    widgets.add(
-      Padding(
-        padding: EdgeInsets.symmetric(horizontal: horizontalPadding, vertical: 8),
-        child: _FreeLimitUpsellCard(
-          hiddenCount: hiddenTicketsCount,
-          customTitle: 'Free Plan Limit (1 Ticket Shown)',
-          customSubtitle:
-              'You are viewing 1 free accumulator ticket. Upgrade to Premium to unlock all $hiddenTicketsCount other accumulator tickets and high odds combos!',
-          onOpenPremium: onOpenPremium,
         ),
       ),
     );
@@ -5346,9 +5292,7 @@ List<Widget> _buildTodayStatusWidgets(
     return widgets;
   }
 
-  final isFreeUser = !adFree && !isAdmin && GooglePlayBillingService.instance.activePlan == null;
-  final visibleItems = (isFreeUser && selectedItems.length > 3) ? selectedItems.take(3).toList() : selectedItems;
-  final hiddenCount = (isFreeUser && selectedItems.length > 3) ? selectedItems.length - 3 : 0;
+  final visibleItems = selectedItems;
 
   for (var i = 0; i < visibleItems.length; i++) {
     final prediction = visibleItems[i];
@@ -5384,19 +5328,6 @@ List<Widget> _buildTodayStatusWidgets(
       }
       widgets.add(const SizedBox(height: 12));
     }
-  }
-
-  if (hiddenCount > 0) {
-    widgets.add(const SizedBox(height: 14));
-    widgets.add(
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: _FreeLimitUpsellCard(
-          hiddenCount: hiddenCount,
-          onOpenPremium: onOpenPremium,
-        ),
-      ),
-    );
   }
 
   return widgets;
@@ -8388,50 +8319,6 @@ class _PopularMatchesPageState extends State<PopularMatchesPage> {
     }
   }
 
-  Future<void> _saveUnlockedPickKey(String key) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      _unlockedPickKeys.add(key);
-      await prefs.setStringList('unlocked_pick_keys', _unlockedPickKeys.toList());
-      if (mounted) {
-        setState(() {});
-      }
-    } catch (e) {
-      debugPrint('Error saving unlocked pick key: $e');
-    }
-  }
-
-  void _showLimitReachedDialog() {
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Unlock Limit Reached'),
-        content: const Text(
-          'You have unlocked the maximum limit of 20 matches using ads. '
-          'To unlock more matches, please subscribe to our 7-Day Ad-Free plan.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Maybe Later'),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  fullscreenDialog: true,
-                  builder: (_) => const PremiumPaywallDialog(),
-                ),
-              );
-            },
-            child: const Text('Subscribe'),
-          ),
-        ],
-      ),
-    );
-  }
-
   bool _isPickUnlocked(PredictionRecord prediction) {
     if (widget.adFree) return true;
     final activePlan = GooglePlayBillingService.instance.activePlan;
@@ -8444,18 +8331,12 @@ class _PopularMatchesPageState extends State<PopularMatchesPage> {
 
   Future<void> _unlockPick(PredictionRecord prediction) async {
     if (widget.adFree) return;
-    final shown = await AdGateService.instance.showInterstitialAd();
-    if (shown) {
-      final key = _predictionUnlockKey(prediction);
-      await _saveUnlockedPickKey(key);
-      return;
-    }
-
-    final shown2 = await AdGateService.instance.showRewardedInterstitialAd();
-    if (shown2) {
-      final key = _predictionUnlockKey(prediction);
-      await _saveUnlockedPickKey(key);
-    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        fullscreenDialog: true,
+        builder: (_) => const PremiumPaywallDialog(),
+      ),
+    );
   }
 
   Future<void> _openComments(PredictionRecord prediction) {
@@ -8467,8 +8348,104 @@ class _PopularMatchesPageState extends State<PopularMatchesPage> {
     final popularList = widget.predictions.where(_isPopularPrediction).toList();
     final isDark = _isDarkContext(context);
     final isFreeUser = !widget.adFree && !widget.isAdmin && GooglePlayBillingService.instance.activePlan == null;
-    final visiblePopularList = (isFreeUser && popularList.length > 3) ? popularList.take(3).toList() : popularList;
-    final hiddenCount = (isFreeUser && popularList.length > 3) ? popularList.length - 3 : 0;
+
+    if (isFreeUser) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Popular Matches'),
+          backgroundColor: isDark ? const Color(0xFF0A0F1E) : const Color(0xFFF5F7FB),
+        ),
+        body: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: _screenGradient(context),
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
+          ),
+          child: SafeArea(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 28),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(22),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF00D4AA).withAlpha(25),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: const Color(0xFF00D4AA).withAlpha(70),
+                          width: 2,
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.workspace_premium_rounded,
+                        size: 56,
+                        color: Color(0xFF00D4AA),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    Text(
+                      'Subscription Required',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: _primaryText(context),
+                        fontSize: 24,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Popular match predictions are exclusive to active subscribers. Choose a plan to unlock all matches.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: _secondaryText(context),
+                        fontSize: 15,
+                        height: 1.5,
+                      ),
+                    ),
+                    const SizedBox(height: 28),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              fullscreenDialog: true,
+                              builder: (_) => const PremiumPaywallDialog(),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.arrow_forward_rounded, size: 20),
+                        label: const Text(
+                          'View Subscription Plans',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFF00D4AA),
+                          foregroundColor: const Color(0xFF0A0F1E),
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    final visiblePopularList = popularList;
 
     return Scaffold(
       appBar: AppBar(
@@ -8497,27 +8474,8 @@ class _PopularMatchesPageState extends State<PopularMatchesPage> {
                 )
               : ListView.builder(
                   padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-                  itemCount: visiblePopularList.length + (hiddenCount > 0 ? 1 : 0),
+                  itemCount: visiblePopularList.length,
                   itemBuilder: (context, index) {
-                    if (index == visiblePopularList.length) {
-                      return Padding(
-                        padding: const EdgeInsets.only(top: 8, bottom: 14),
-                        child: _FreeLimitUpsellCard(
-                          hiddenCount: hiddenCount,
-                          customTitle: 'Free Plan Limit (5 of ${5 + hiddenCount} Shown)',
-                          customSubtitle:
-                              'You are viewing 5 free popular matches. Upgrade to Premium to unlock all $hiddenCount more popular matches today!',
-                          onOpenPremium: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                fullscreenDialog: true,
-                                builder: (_) => const PremiumPaywallDialog(),
-                              ),
-                            );
-                          },
-                        ),
-                      );
-                    }
                     final prediction = visiblePopularList[index];
                     final unlockKey = _predictionUnlockKey(prediction);
                     final isLocked = !_isPickUnlocked(prediction);
